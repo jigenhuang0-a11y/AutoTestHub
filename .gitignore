@@ -1,0 +1,69 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+allure-results/
+*.sqlite3
+
+# 环境变量（含敏感信息，切勿提交）
+.env
+.env.*
+!.env.example
+
+# 前端
+node_modules/
+dist/
+frontend-dist.zip
+
+# IDE/系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+nul
+
+# Playwright 持久化浏览器数据（含用户 cookies/登录状态）
+browser_data/
+
+# 结构化日志（本地开发产生的日志文件）
+logs/
+
+# 构建产物 & 打包文件
+*.tar.gz
+*.zip
+*.err
+
+# 日志文件（谨慎：勿提交含敏感路径的日志）
+*.log
+backend/django_debug.log
+
+# 调试脚本 & 一次性测试文件
+debug_*.py
+debug_*.json
+run_workflow_final.py
+orch_debug_plan.py
+test_invoke.json
+test_jwt_inside.py
+test_llm.json
+test_login.json
+test_template.json
+generate_knowledge_pdf.py
+install_skills.py
+
+# 调试输出
+orch_check.txt
+orch_debug.txt
+orch_logs.txt
+orch_run3.txt
+workflow_result.txt
+django_logs.txt
+backend/test_result.txt
+
+# Docker 构建日志
+build*.log
+build*.err
+rebuild.*
+up.*

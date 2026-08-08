@@ -1,0 +1,39 @@
+[project]
+name = "harness-core"
+version = "0.1.0"
+description = "Agent Harness 中台内核：统一模型底座 + 自研 Loop Engine + 工具沙箱 + 插件化业务层"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlmodel>=0.0.16",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "redis>=5.0.0",
+    "pymysql>=1.1.0",
+    "aiomysql>=0.2.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "tenacity>=8.4.0",
+    "loguru>=0.7.0",
+    "pymilvus>=2.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+    "ruff>=0.5.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["harness_core*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
