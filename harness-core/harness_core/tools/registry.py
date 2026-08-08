@@ -49,10 +49,23 @@ def list_tools() -> list[str]:
 
 
 async def invoke_tool(name: str, **kwargs: Any) -> Any:
-    """执行工具。P1 本地直接调用；P2 按 sandbox_required 路由到 OpenClaw 沙箱。"""
+    """执行工具。P2 按 sandbox_required 路由到 OpenClaw 沙箱。"""
     spec = get_tool(name)
     if spec is None:
         raise KeyError(f"工具未注册: {name}")
+    if spec.sandbox_required:
+        from harness_core.sandbox import sandbox as _sandbox
+
+        code = kwargs.get("code") or f"import json; print(json.dumps({kwargs!r}))"
+        result = await _sandbox.run_code(code)
+        if result.timed_out:
+            raise RuntimeError(f"工具 {name} 沙箱执行超时")
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.exit_code,
+            "sandbox": True,
+        }
     if inspect.iscoroutinefunction(spec.func):
         return await spec.func(**kwargs)
     return spec.func(**kwargs)
