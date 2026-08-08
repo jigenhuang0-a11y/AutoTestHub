@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import json
+from typing import AsyncIterator
+
 import httpx
 from pydantic import BaseModel
 
@@ -112,6 +115,41 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 data = resp.json()
                 out.append(data["data"][0]["embedding"])
         return out
+
+    async def stream_chat(
+        self, messages: list[ChatMessage], **kwargs: Any
+    ) -> AsyncIterator[str]:
+        """真正的流式输出：解析 OpenAI SSE 流。"""
+        payload = _to_openai_payload(
+            messages,
+            temperature=kwargs.get("temperature", 0.7),
+            max_tokens=kwargs.get("max_tokens", 2048),
+            stream=True,
+        )
+        payload["model"] = self._model
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{self._base_url}/chat/completions"
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST", url, json=payload, headers=headers
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = chunk["choices"][0]["delta"].get("content", "")
+                    if delta:
+                        yield delta
 
 
 class DeepSeekAdapter(OpenAICompatibleAdapter):

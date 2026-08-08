@@ -17,10 +17,11 @@ from fastapi import APIRouter
 
 from harness_core.api.schemas import (
     EvalRequest, EvalResponse, GenerateRequest, GenerateResponse,
-    RagRequest, RagResponse,
+    MultiGenRequest, MultiGenResponse, RagRequest, RagResponse,
 )
 from harness_core.eval.judge import judge
 from harness_core.logging import logger
+from harness_core.metrics.collector import metrics
 from harness_core.plugins import PluginContext, get_plugin
 from harness_core.trace.store import get_tracer
 
@@ -100,3 +101,30 @@ async def list_registered() -> dict:
     from harness_core.plugins import list_plugins
 
     return {"plugins": list_plugins()}
+
+
+@router.post("/generate/testcase/multi", response_model=MultiGenResponse)
+async def generate_multi(req: MultiGenRequest) -> MultiGenResponse:
+    """Multi-Agent 编排者-工作者用例生成。"""
+    ctx = PluginContext(
+        tenant_id=req.tenant_id, agent_id=req.agent_id or 0,
+        model=req.model, trace_id=uuid.uuid4().hex[:16],
+    )
+    logger.info(f"[API] Multi-Agent 用例生成 trace={ctx.trace_id}")
+    result = await _run_plugin("testcase_gen_multi", ctx, {"requirement": req.requirement})
+    if result is None:
+        return MultiGenResponse(success=False, error="插件 testcase_gen_multi 未注册")
+    if not result.success:
+        return MultiGenResponse(success=False, error=result.error)
+    d = result.data or {}
+    return MultiGenResponse(
+        success=True, requirement=d.get("requirement"), final=d.get("final"),
+        subtasks=d.get("subtasks", []), case_count=d.get("case_count", 0),
+        trace_id=d.get("trace_id"),
+    )
+
+
+@router.get("/metrics", summary="监控大屏指标")
+async def get_metrics() -> dict:
+    """聚合埋点指标，供监控大屏消费。"""
+    return metrics.snapshot()

@@ -54,3 +54,30 @@ class EvalResponse(BaseModel):
     executability: int = 0
     score: float = 0.0
     summary: str = ""
+
+
+class MultiGenRequest(BaseModel):
+    tenant_id: int = Field(1)
+    agent_id: int | None = None
+    requirement: str = Field(..., min_length=1)
+    model: str = Field("deepseek-chat")
+
+
+class MultiGenResponse(BaseModel):
+    success: bool
+    requirement: str | None = None
+    final: str | None = None
+    subtasks: list[dict[str, Any]] = []
+    case_count: int = 0
+    trace_id: str | None = None
+    error: str | None = None
+
+
+class MetricsResponse(BaseModel):
+    uptime_seconds: int = 0
+    total_calls: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    error_rate: float = 0.0
+    by_model: dict = {}
+    recent_traces: list[dict] = []

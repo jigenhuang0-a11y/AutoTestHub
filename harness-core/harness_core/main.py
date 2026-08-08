@@ -13,8 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from harness_core.config import settings
 from harness_core.logging import logger
 
-# P2: API 路由 + 动态插件加载
+# P3: API 路由 + 动态插件加载
 from harness_core.api.router import router as api_router  # noqa: E402
+from harness_core.api.sse import router as sse_router  # noqa: E402
 from harness_core.api import schemas  # noqa: E402  (确保 schema 被加载)
 from harness_core.plugins.loader import discover_and_load  # noqa: E402
 
@@ -22,7 +23,7 @@ from harness_core.plugins.loader import discover_and_load  # noqa: E402
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动自检
-    logger.info(f"启动 {settings.app_name} | env={settings.env} | 阶段 P2")
+    logger.info(f"启动 {settings.app_name} | env={settings.env} | 阶段 P3")
     missing = _check_required_config()
     if missing:
         logger.warning(f"以下配置项为空（P1 前必须补全）: {missing}")
@@ -58,12 +59,13 @@ async def health() -> dict:
         "status": "ok",
         "service": settings.app_name,
         "env": settings.env,
-        "phase": "P2-enhanced",
+        "phase": "P3-complete",
     }
 
 
-# P2: 挂载 API 路由
+# P3: 挂载 API 路由
 app.include_router(api_router, prefix=settings.api_prefix)
+app.include_router(sse_router, prefix=settings.api_prefix)
 
 
 @app.get("/plugins")

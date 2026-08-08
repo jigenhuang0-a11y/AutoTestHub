@@ -171,8 +171,55 @@ class ModelGateway:
 
         raise RuntimeError(f"所有模型均不可用: {last_err}")
 
+    async def stream_chat(
+        self, ctx: GatewayContext, messages: list[ChatMessage], **kwargs
+    ):
+        """流式 chat（SSE 前置）。当前复用适配器流式接口；无流式的模型退化为整段返回。"""
+        for m in messages:
+            gr = self.guard.check_prompt(m.content)
+            if not gr.passed:
+                logger.warning(f"[护栏] 拦截 Prompt 注入(流): {gr.reason}")
+                return
+        limiter = self._limiter(ctx.tenant_id)
+        if not await limiter.acquire():
+            raise RuntimeError("QPS 限流触发")
+        tried = _FALLBACK_ORDER.get(ctx.model_preference, [ctx.model_preference])
+        last_err: Exception | None = None
+        for model in tried:
+            breaker = self._breaker(model)
+            if not breaker.allow():
+                continue
+            try:
+                adapter = self._get_adapter(model)
+                total = 0
+                async for chunk in adapter.stream_chat(messages, **kwargs):
+                    og = self.guard.check_output(chunk)
+                    if not og.passed:
+                        yield "【输出已被安全护栏拦截】"
+                        return
+                    total += len(chunk)
+                    yield chunk
+                breaker.on_success()
+                self._emit_log(ctx, ChatResponse(content="", model=model, completion_tokens=total), kind="llm-stream")
+                return
+            except Exception as e:  # noqa: BLE001
+                breaker.on_failure()
+                last_err = e
+                logger.error(f"[网关] {model} 流式失败: {e}")
+        raise RuntimeError(f"所有模型均不可用: {last_err}")
+
     def _emit_log(self, ctx: GatewayContext, resp: ChatResponse, kind: str) -> None:
-        """埋点：P1 先打日志，P2 落 MySQL CallLog 表。"""
+        """埋点：P3 接入指标收集器 + 日志。"""
+        from harness_core.metrics.collector import metrics
+
+        metrics.record_call(
+            model=resp.model,
+            in_tokens=resp.prompt_tokens,
+            out_tokens=resp.completion_tokens,
+            error=bool(resp.raw.get("guard_blocked")),
+        )
+        if ctx.trace_id:
+            metrics.record_trace(ctx.trace_id, kind, ok=not resp.raw.get("guard_blocked"))
         logger.info(
             f"[埋点] kind={kind} tenant={ctx.tenant_id} agent={ctx.agent_id} "
             f"model={resp.model} in={resp.prompt_tokens} out={resp.completion_tokens} "
