@@ -458,6 +458,67 @@ class TaskStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_team_model_prefs_team_id
                     ON team_model_prefs(team_id);
+
+                -- 团队编排任务表
+                CREATE TABLE IF NOT EXISTS team_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'inbox',
+                    team_id TEXT NOT NULL DEFAULT 'default',
+                    user_id TEXT NOT NULL DEFAULT '',
+                    assigned_to TEXT DEFAULT '',
+                    assigned_agent TEXT DEFAULT '',
+                    required_roles_json TEXT NOT NULL DEFAULT '[]',
+                    tags_json TEXT NOT NULL DEFAULT '[]',
+                    priority INTEGER NOT NULL DEFAULT 3,
+                    parent_task_id TEXT DEFAULT NULL,
+                    model TEXT DEFAULT '',
+                    context_json TEXT NOT NULL DEFAULT '{}',
+                    artifacts_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_team_tasks_status ON team_tasks(status);
+                CREATE INDEX IF NOT EXISTS idx_team_tasks_team ON team_tasks(team_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_team_tasks_created ON team_tasks(created_at DESC);
+
+                -- 团队交接记录表
+                CREATE TABLE IF NOT EXISTS team_handoffs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    handoff_id TEXT NOT NULL UNIQUE,
+                    task_id TEXT NOT NULL,
+                    from_role TEXT NOT NULL DEFAULT '',
+                    to_role TEXT NOT NULL DEFAULT '',
+                    from_agent TEXT NOT NULL DEFAULT '',
+                    to_agent TEXT NOT NULL DEFAULT '',
+                    intent TEXT NOT NULL DEFAULT 'delegate',
+                    context TEXT NOT NULL DEFAULT '',
+                    deliverables_json TEXT NOT NULL DEFAULT '[]',
+                    blockers_json TEXT NOT NULL DEFAULT '[]',
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_team_handoffs_task ON team_handoffs(task_id, created_at DESC);
+
+                -- 团队评审记录表
+                CREATE TABLE IF NOT EXISTS team_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    review_id TEXT NOT NULL UNIQUE,
+                    task_id TEXT NOT NULL,
+                    reviewer_role TEXT NOT NULL DEFAULT 'reviewer',
+                    reviewer_agent TEXT NOT NULL DEFAULT '',
+                    builder_agent TEXT NOT NULL DEFAULT '',
+                    artifacts_json TEXT NOT NULL DEFAULT '[]',
+                    criteria_json TEXT NOT NULL DEFAULT '[]',
+                    verdict TEXT DEFAULT '',
+                    score INTEGER DEFAULT NULL,
+                    comments_json TEXT NOT NULL DEFAULT '[]',
+                    required_changes_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_team_reviews_task ON team_reviews(task_id, created_at DESC);
             """)
             conn.commit()
 
@@ -1493,6 +1554,290 @@ class TaskStore:
                 )
                 conn.commit()
                 return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Team Orchestration CRUD
+    # ------------------------------------------------------------------
+
+    def create_team_task(self, task: "TeamTask") -> None:
+        """创建一条团队编排任务记录"""
+        import json
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO team_tasks (
+                        task_id, title, description, status, team_id, user_id,
+                        assigned_to, assigned_agent, required_roles_json, tags_json,
+                        priority, parent_task_id, model, context_json, artifacts_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task.task_id,
+                        task.title,
+                        task.description,
+                        task.status.value if task.status else "inbox",
+                        task.team_id or "default",
+                        task.user_id or "",
+                        task.assigned_to.value if task.assigned_to else None,
+                        task.assigned_agent or "",
+                        json.dumps([r.value for r in task.required_roles], ensure_ascii=False),
+                        json.dumps(task.tags, ensure_ascii=False),
+                        task.priority,
+                        task.parent_task_id,
+                        task.model or "",
+                        json.dumps(task.context, ensure_ascii=False),
+                        json.dumps([a.model_dump() for a in task.artifacts], ensure_ascii=False),
+                        task.created_at,
+                        task.updated_at,
+                    ),
+                )
+                conn.commit()
+
+    def update_team_task(self, task_id: str, **kwargs) -> None:
+        """根据 task_id 更新任意字段"""
+        import json
+        if not kwargs:
+            return
+        allowed = {
+            "title", "description", "status", "team_id", "user_id",
+            "assigned_to", "assigned_agent", "required_roles_json", "tags_json",
+            "priority", "parent_task_id", "model", "context_json", "artifacts_json",
+            "created_at", "updated_at",
+        }
+        normalized: dict[str, Any] = {}
+        for k, v in kwargs.items():
+            if k not in allowed:
+                continue
+            if k in ("required_roles_json", "tags_json", "context_json", "artifacts_json") and not isinstance(v, str):
+                normalized[k] = json.dumps(v, ensure_ascii=False)
+            else:
+                normalized[k] = v
+        if not normalized:
+            return
+        columns = ", ".join(f"{k} = ?" for k in normalized.keys())
+        values = list(normalized.values()) + [task_id]
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(f"UPDATE team_tasks SET {columns} WHERE task_id = ?", values)
+                conn.commit()
+
+    def _row_to_team_task_dict(self, row: sqlite3.Row) -> dict:
+        import json
+        return {
+            "task_id": row["task_id"],
+            "title": row["title"],
+            "description": row["description"] or "",
+            "status": row["status"],
+            "team_id": row["team_id"],
+            "user_id": row["user_id"],
+            "assigned_to": row["assigned_to"],
+            "assigned_agent": row["assigned_agent"],
+            "required_roles": json.loads(row["required_roles_json"] or "[]"),
+            "tags": json.loads(row["tags_json"] or "[]"),
+            "priority": row["priority"],
+            "parent_task_id": row["parent_task_id"],
+            "model": row["model"],
+            "context": json.loads(row["context_json"] or "{}"),
+            "artifacts_json": row["artifacts_json"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def get_team_task(self, task_id: str) -> Optional["TeamTask"]:
+        import json
+        from app.schemas.team import Artifact, HandoffMessage, ReviewResult, TeamRole, TeamTask
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT * FROM team_tasks WHERE task_id = ?", (task_id,)).fetchone()
+                if row is None:
+                    return None
+                data = self._row_to_team_task_dict(row)
+                handoff_rows = conn.execute(
+                    "SELECT * FROM team_handoffs WHERE task_id = ? ORDER BY created_at",
+                    (task_id,),
+                ).fetchall()
+                review_rows = conn.execute(
+                    "SELECT * FROM team_reviews WHERE task_id = ? ORDER BY created_at",
+                    (task_id,),
+                ).fetchall()
+
+        def _safe_artifacts(raw: str) -> list[Artifact]:
+            try:
+                return [Artifact(**item) for item in json.loads(raw or "[]")]
+            except Exception:
+                return []
+
+        def _safe_handoffs(rows) -> list[HandoffMessage]:
+            out = []
+            for r in rows:
+                try:
+                    out.append(HandoffMessage(
+                        handoff_id=r["handoff_id"],
+                        task_id=r["task_id"],
+                        from_role=TeamRole(r["from_role"]) if r["from_role"] else TeamRole.ORCHESTRATOR,
+                        to_role=TeamRole(r["to_role"]) if r["to_role"] else TeamRole.BUILDER,
+                        from_agent=r["from_agent"],
+                        to_agent=r["to_agent"],
+                        intent=r["intent"],
+                        context=r["context"],
+                        deliverables=[Artifact(**a) for a in json.loads(r["deliverables_json"] or "[]")],
+                        blockers=json.loads(r["blockers_json"] or "[]"),
+                        notes=r["notes"],
+                        created_at=r["created_at"],
+                    ))
+                except Exception:
+                    continue
+            return out
+
+        def _safe_reviews(rows) -> list[ReviewResult]:
+            out = []
+            for r in rows:
+                try:
+                    out.append(ReviewResult(
+                        review_id=r["review_id"],
+                        task_id=r["task_id"],
+                        verdict=r["verdict"],
+                        reviewer_agent=r["reviewer_agent"],
+                        score=r["score"],
+                        comments=json.loads(r["comments_json"] or "[]"),
+                        required_changes=json.loads(r["required_changes_json"] or "[]"),
+                        created_at=r["created_at"],
+                    ))
+                except Exception:
+                    continue
+            return out
+
+        return TeamTask(
+            task_id=data["task_id"],
+            title=data["title"],
+            description=data["description"],
+            status=data["status"],
+            team_id=data["team_id"],
+            user_id=data["user_id"],
+            assigned_to=data["assigned_to"],
+            assigned_agent=data["assigned_agent"],
+            required_roles=data["required_roles"],
+            tags=data["tags"],
+            priority=data["priority"],
+            parent_task_id=data["parent_task_id"],
+            model=data["model"],
+            context=data["context"],
+            artifacts=_safe_artifacts(data["artifacts_json"]),
+            handoffs=_safe_handoffs(handoff_rows),
+            reviews=_safe_reviews(review_rows),
+            created_at=data["created_at"],
+            updated_at=data["updated_at"],
+        )
+
+    def list_team_tasks(
+        self,
+        status: Optional[str] = None,
+        team_id: Optional[str] = None,
+        page_size: int = 50,
+        offset: int = 0,
+    ) -> tuple[list["TeamTask"], int]:
+        where_parts = []
+        params: list[Any] = []
+        if status:
+            where_parts.append("status = ?")
+            params.append(status)
+        if team_id:
+            where_parts.append("team_id = ?")
+            params.append(team_id)
+        where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        with self._lock:
+            with self._get_conn() as conn:
+                total_row = conn.execute(
+                    f"SELECT COUNT(*) as cnt FROM team_tasks {where_clause}", params
+                ).fetchone()
+                total = total_row["cnt"] if total_row else 0
+                rows = conn.execute(
+                    f"SELECT task_id FROM team_tasks {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    params + [page_size, offset],
+                ).fetchall()
+        tasks = []
+        for r in rows:
+            t = self.get_team_task(r["task_id"])
+            if t is not None:
+                tasks.append(t)
+        return tasks, total
+
+    def add_team_handoff(self, handoff: "HandoffMessage") -> None:
+        import json
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO team_handoffs (
+                        handoff_id, task_id, from_role, to_role, from_agent, to_agent,
+                        intent, context, deliverables_json, blockers_json, notes, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        handoff.handoff_id,
+                        handoff.task_id,
+                        handoff.from_role.value if handoff.from_role else "",
+                        handoff.to_role.value if handoff.to_role else "",
+                        handoff.from_agent or "",
+                        handoff.to_agent or "",
+                        handoff.intent.value if handoff.intent else "delegate",
+                        handoff.context or "",
+                        json.dumps([a.model_dump() for a in handoff.deliverables], ensure_ascii=False),
+                        json.dumps(handoff.blockers, ensure_ascii=False),
+                        handoff.notes or "",
+                        handoff.created_at,
+                    ),
+                )
+                conn.commit()
+
+    def add_team_review_request(self, req: "ReviewRequest") -> None:
+        import json
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO team_reviews (
+                        review_id, task_id, reviewer_role, reviewer_agent, builder_agent,
+                        artifacts_json, criteria_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        req.review_id,
+                        req.task_id,
+                        req.reviewer_role.value if req.reviewer_role else "reviewer",
+                        req.reviewer_agent or "",
+                        req.builder_agent or "",
+                        json.dumps([a.model_dump() for a in req.artifacts], ensure_ascii=False),
+                        json.dumps(req.criteria, ensure_ascii=False),
+                        req.created_at,
+                    ),
+                )
+                conn.commit()
+
+    def add_team_review_result(self, result: "ReviewResult") -> None:
+        import json
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE team_reviews
+                    SET verdict = ?,
+                        score = ?,
+                        comments_json = ?,
+                        required_changes_json = ?
+                    WHERE review_id = ?
+                    """,
+                    (
+                        result.verdict.value if result.verdict else "",
+                        result.score,
+                        json.dumps(result.comments, ensure_ascii=False),
+                        json.dumps(result.required_changes, ensure_ascii=False),
+                        result.review_id,
+                    ),
+                )
+                conn.commit()
 
 
 # ============================================================
