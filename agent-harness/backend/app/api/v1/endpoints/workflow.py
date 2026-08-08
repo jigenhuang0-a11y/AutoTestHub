@@ -37,7 +37,7 @@ def _ensure_task_id(task_id: str | None) -> str:
 
 def _resolve_auth_token(request: Request, request_auth_token: str | None = None) -> str | None:
     """
-    解析认证令牌，供工作流下游调用 Django MCP 工具。
+    解析认证令牌，供工作流下游调用本地工具层。
 
     优先级：
     1. 中间件已验证的 JWT（从 Authorization: Bearer header 提取原始 token）
