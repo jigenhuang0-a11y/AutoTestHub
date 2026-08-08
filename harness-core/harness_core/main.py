@@ -13,14 +13,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from harness_core.config import settings
 from harness_core.logging import logger
 
+# P1: 导入插件与 API 路由（导入即注册）
+from harness_core.api.router import router as api_router  # noqa: E402
+from harness_core.api import schemas  # noqa: E402  (确保 schema 被加载)
+import harness_plugins.testcase_gen  # noqa: E402  (注册 testcase_gen 插件)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动自检
-    logger.info(f"启动 {settings.app_name} | env={settings.env} | 版本骨架 P0")
+    logger.info(f"启动 {settings.app_name} | env={settings.env} | 阶段 P1")
     missing = _check_required_config()
     if missing:
-        logger.warning(f"以下配置项为空（P0 可忽略，P1 前必须补全）: {missing}")
+        logger.warning(f"以下配置项为空（P1 前必须补全）: {missing}")
     yield
     logger.info("Agent Harness Core 关闭")
 
@@ -51,10 +56,17 @@ async def health() -> dict:
         "status": "ok",
         "service": settings.app_name,
         "env": settings.env,
-        "phase": "P0-scaffold",
+        "phase": "P1-base",
     }
 
 
-# TODO(P1): 挂载 API 路由
-# from harness_core.api import router as api_router
-# app.include_router(api_router, prefix=settings.api_prefix)
+# P1: 挂载 API 路由
+app.include_router(api_router, prefix=settings.api_prefix)
+
+
+@app.get("/plugins")
+async def plugins_root() -> dict:
+    """根路径插件探测（便于前端直连）。"""
+    from harness_core.plugins import list_plugins
+
+    return {"plugins": list_plugins()}
