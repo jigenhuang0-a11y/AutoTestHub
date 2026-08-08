@@ -1,5 +1,5 @@
 """
-工具注册 Schema — 底座接收 Django 推送的工具注册
+工具注册 Schema — 底座接收工具注册（本地注册表）
 """
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -17,7 +17,6 @@ class ToolRegisterItem(BaseModel):
 class ToolBatchRegister(BaseModel):
     """批量工具注册请求"""
     tools: list[ToolRegisterItem] = Field(..., description="工具列表")
-    django_url: Optional[str] = Field(default=None, description="Django 服务地址")
     auth_token: Optional[str] = Field(default=None, description="认证 Token")
 
 
@@ -30,7 +29,7 @@ class ToolRegisterResponse(BaseModel):
 
 
 class ToolRefreshRequest(BaseModel):
-    """工具刷新请求（Django 变更后触发）"""
+    """工具刷新请求（工具变更后触发）"""
     force: bool = Field(default=True, description="是否强制立即刷新")
     team_id: Optional[str] = Field(default=None, description="目标团队")
 
