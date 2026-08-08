@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.core.state import ProgressEvent, WorkflowProgress
 from app.core.router import get_llm_router
 from app.core.config import (
-    DJANGO_BASE_URL, DJANGO_MCP_URL, AgentConfig, sandbox_config,
+    AgentConfig, sandbox_config,
 )
 from app.core.telemetry import get_tracer
 from app.core.checkpoint import (
@@ -51,11 +51,11 @@ tracer = get_tracer(__name__)
 AGENT_CONFIG = AgentConfig()
 
 # ============================================================
-# Agent 注册表 — 版本 2.0：MCP 动态发现优先，硬编码回退
+# Agent 注册表 — 本地工具映射（Django 已移除，工具见 app/tools/）
 # ============================================================
 
-# 回退用：硬编码的 Agent→Django action 映射
-FALLBACK_AGENT_REGISTRY = {
+# Agent 类型 → 本地工具名映射（注册表自注册时也写入了同映射）
+AGENT_TO_TOOL = {
     "search": "testcase_search",
     "generator": "generate_testcases",
     "data_factory": "generate_data",
@@ -63,59 +63,29 @@ FALLBACK_AGENT_REGISTRY = {
     "evaluator": "evaluate",
 }
 
-# 使用全局单例（与 tool_registry 端点共享同一 ToolDiscovery 实例）
 
-
-def _get_tool_discovery():
-    """获取全局 ToolDiscovery 单例"""
-    from app.core.tool_discovery import get_global_discovery
-    return get_global_discovery()
+def _get_registry():
+    """获取本地工具注册表单例（替代原 Django ToolDiscovery 单例）。"""
+    from app.tools.registry import get_registry
+    return get_registry()
 
 
 def resolve_agent_action(agent_name: str, team_id: str = None, auth_token: str = None) -> str:
     """
-    解析 Agent 名为对应的 API action（MCP 优先，硬编码回退）
-    
-    Args:
-        agent_name: Agent 名（如 "generator"）
-        team_id: 团队 ID
-        auth_token: Django 认证 Token（请求级透传）
-        
-    Returns:
-        action 名称（如 "generate_testcases"）或 MCP tool 名
+    解析 Agent 名为对应的本地工具名。
+
+    Django 已彻底移除，所有工具均为进程内注册（见 app/tools/registry.py）。
+    优先使用注册表的动态映射，回退到硬编码常量。
     """
-    discovery = _get_tool_discovery()
-    
-    # 尝试从 MCP 工具列表解析
-    if discovery.is_stale():
-        discovery.refresh(team_id=team_id, auth_token=auth_token)
-    
-    # 当 Agent 是 generator 时，优先使用 Django Agent API generate_testcases，
-    # 因为该接口已内建 LLM 生成 + 数据库保存，能解决 MCP 工具 testcase_create 参数不完整的痛点。
-    if agent_name == "generator":
-        return "generate_testcases"
-
-    # data_factory 同样优先使用 Django Agent API generate_data，
-    # 该接口支持 dataset_name / business_domain 等完整参数，避免 MCP 数据工厂 schema 缺失。
-    if agent_name == "data_factory":
-        return "generate_data"
-
-    # search 直接使用 MCP 工具 testcase_search，无需走 Django Agent API
-    if agent_name == "search":
-        return "testcase_search"
-
-    tool_name = discovery.resolve_agent(agent_name)
-
+    registry = _get_registry()
+    tool_name = registry.resolve_agent(agent_name)
     if tool_name:
-        logger.debug(f"[ToolDiscovery] {agent_name} → {tool_name}")
+        logger.debug(f"[ToolRegistry] {agent_name} → {tool_name}")
         return tool_name
-    
-    # 回退到硬编码
-    action = FALLBACK_AGENT_REGISTRY.get(agent_name)
+    action = AGENT_TO_TOOL.get(agent_name)
     if action:
-        logger.debug(f"[ToolDiscovery.Fallback] {agent_name} → {action}")
+        logger.debug(f"[ToolRegistry.Fallback] {agent_name} → {action}")
         return action
-    
     raise ValueError(f"未知 Agent: {agent_name}")
 
 
@@ -288,36 +258,6 @@ def _parse_plan(response_text: str) -> list:
             except json.JSONDecodeError:
                 pass
     return []
-
-
-# MCP 工具名集合（通过 ToolGateway 调用的工具，而非 Django Agent API）
-MCP_TOOL_PREFIXES = (
-    "testcase_", "execution_", "data_", "knowledge_",
-    "report_", "evaluate_", "system_",
-)
-
-
-def _is_mcp_tool(action: str) -> bool:
-    """判断一个 action 是 MCP 工具还是 Django Agent API"""
-    # 如果以已知 MCP 工具前缀开头，走 MCP 路径
-    if action.startswith(MCP_TOOL_PREFIXES):
-        return True
-    # Django Agent API 的 action 名（generate_testcases, generate_data, execute_tests, evaluate）
-    return False
-
-
-def _mcp_result_to_dict(result: dict) -> dict:
-    """将 MCP 返回结果转为 DjangoClient 兼容的 dict 格式"""
-    try:
-        content = result.get("content", [{"text": "{}"}])
-        text = content[0].get("text", "{}")
-        import json
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-        return {"data": data, "status": "success"}
-    except (json.JSONDecodeError, IndexError, TypeError):
-        return {"data": result, "status": "success"}
 
 
 def _emit(state: dict, event_type: str, data: dict):
@@ -626,8 +566,7 @@ def _audit_step_output(result: dict) -> dict:
 
 
 def _execute_single_step(step: dict, state: dict) -> dict:
-    """执行单步：调用 Django 下游 Agent API（含自愈）"""
-    from app.services.django_client import DjangoClient
+    """执行单步：调用本地工具（Django 已移除，工具见 app/tools/）"""
     from app.core.self_healing import SelfHealingEngine, ErrorClassifier, ErrorCategory
 
     agent_name = step.get("agent", "unknown")
@@ -637,8 +576,6 @@ def _execute_single_step(step: dict, state: dict) -> dict:
 
     task_id = state.get("task_id")
     auth_token = state.get("auth_token") or os.getenv("SERVICE_TOKEN")
-    if not auth_token:
-        logger.warning(f"[Harness] _execute_single_step: auth_token MISSING — Django MCP 调用将 401")
 
     _emit(state, ProgressEvent.STEP_START, {
         "task_id": task_id, "step_index": step_index,
@@ -761,34 +698,21 @@ def _execute_single_step(step: dict, state: dict) -> dict:
         if agent_name == "evaluator" and "execution_id" in context:
             p["execution_id"] = context["execution_id"]
         
-        # 判断调用路径：MCP tool 还是 Django Agent API
-        if _is_mcp_tool(action):
-            # 路径 1：通过 MCP ToolGateway 调用
-            from app.services.tool_gateway_client import ToolGatewayClient
-            client = ToolGatewayClient(
-                mcp_url=DJANGO_MCP_URL,
-                auth_token=auth_token,
-                timeout=AGENT_CONFIG.timeout_seconds,
-            )
-            # backend /api/mcp/tools/call/ 返回外层结构：
-            #   {"tool": "...", "result": {"content": [...], "isError": false, ...}, "is_error": false}
-            # ToolGatewayClient.call_tool 目前返回整个外层结构，因此需要取 result["result"]
-            result = client.call_tool(
-                name=action,
-                arguments=p,
-                team_id=team,
-                user_id=state.get("user_id"),
-            )
-            raw_result = result.get("result", result)
-            if raw_result.get("isError"):
-                error_text = raw_result.get("content", [{}])[0].get("text", "MCP 调用失败")
-                raise ValueError(error_text)
-            return _mcp_result_to_dict(raw_result)
-        else:
-            # 路径 2：通过 Django Agent API 调用（向后兼容）
-            client = DjangoClient(base_url=DJANGO_BASE_URL, auth_token=auth_token,
-                                  timeout=AGENT_CONFIG.timeout_seconds)
-            return _audit_step_output(client.call_agent(action, p))
+        # 调用本地工具（Django 已移除，不再有 MCP / Django Agent API 双路径）
+        registry = _get_registry()
+        try:
+            raw = registry.call_tool(action, **p)
+        except Exception as e:
+            logger.error(f"[Harness] 本地工具调用失败 {action}: {e}")
+            raise
+        # 工具返回 {"status":..., "data":..., ...}，统一包装为 step 结果
+        if isinstance(raw, dict) and raw.get("status") == "failed":
+            raise ValueError(raw.get("error", "工具执行失败"))
+        return _audit_step_output({
+            "status": "success",
+            "response": raw.get("data") if isinstance(raw, dict) else raw,
+            "stats": raw.get("stats") if isinstance(raw, dict) else {},
+        })
 
     with tracer.start_as_current_span("harness.execute_step") as span:
         span.set_attribute("agent", agent_name)

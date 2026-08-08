@@ -1,9 +1,0 @@
-[DEBUG] 替换变量前 - api_endpoint: http://localhost:10012/api/config
-[DEBUG] 替换变量前 - variables: {'Url': 'http://localhost:10012', 'api': 'api'}
-[DEBUG] 替换变量后 - request_url: http://localhost:10012/api/config
-[DEBUG] 替换变量前 - api_endpoint: ${Url}/${api}/login
-[DEBUG] 替换变量前 - variables: {'Url': 'http://localhost:10012', 'api': 'api'}
-[DEBUG] 替换变量后 - request_url: http://localhost:10012/api/login
-[DEBUG] 替换变量前 - api_endpoint: ${Url}/${api}/user/info
-[DEBUG] 替换变量前 - variables: {'Url': 'http://localhost:10012', 'api': 'api', 'token': 'tk_8d10b7e05bec415e'}
-[DEBUG] 替换变量后 - request_url: http://localhost:10012/api/user/info

@@ -30,7 +30,7 @@ data:
               service: ai-orchestration-service
               component: agent-harness
 
-      # Django backend metrics (需要 Django 暴露 /metrics)
+      # FastAPI 编排服务 metrics (服务自身暴露 /metrics)
       - job_name: backend
         metrics_path: /metrics/
         static_configs:

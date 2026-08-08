@@ -41,7 +41,7 @@ class ReActAgent:
     def __init__(
         self,
         router,          # LLMRouter 实例
-        tool_gateway,    # ToolGatewayClient 实例
+        tool_gateway,    # LocalToolGateway 实例
         max_iterations: int = 10,
         team_id: str = "default",
     ):

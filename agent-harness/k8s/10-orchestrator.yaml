@@ -69,12 +69,7 @@ spec:
                 secretKeyRef:
                   name: ai-test-platform-secrets
                   key: GLM_API_KEY
-            # 业务服务
-            - name: DJANGO_BASE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: ai-test-platform-config
-                  key: DJANGO_BASE_URL
+            # 状态持久化
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:

@@ -12,8 +12,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 # 确保能导入 app 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-os.environ.setdefault("DJANGO_MCP_URL", "http://localhost:8000/api")
-os.environ.setdefault("DJANGO_BASE_URL", "http://localhost:8000/api")
 os.environ.setdefault("SERVICE_TOKEN", "test-token")
 
 
@@ -28,13 +26,14 @@ def test_react_capable_agents():
 
 
 def test_gateway_factory_import():
-    """验证 Gateway 工厂能正常创建 ToolGatewayClient"""
+    """验证 Gateway 工厂能正常创建本地 LocalToolGateway（Django MCP 已移除）"""
     from app.core.gateway_factory import get_tool_gateway_client
 
     client = get_tool_gateway_client(auth_token="test-token")
     assert client is not None
-    assert client.mcp_url == "http://localhost:8000/api"
     assert client.auth_token == "test-token"
+    assert hasattr(client, "list_tools")
+    assert hasattr(client, "call_tool")
     print("✅ test_gateway_factory_import passed")
 
 

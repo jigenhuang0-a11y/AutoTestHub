@@ -187,8 +187,8 @@ def get_react_integration(**kwargs) -> ReActIntegration:
     """
     获取全局 ReActIntegration 实例。
 
-    首次调用时自动注入真实的 ToolGatewayClient + LLMRouter，
-    确保 ReActAgent 能访问真实的 MCP 工具（而非 mock 数据）。
+    首次调用时自动注入真实的 LocalToolGateway + LLMRouter，
+    确保 ReActAgent 能访问真实的本地工具（而非 mock 数据）。
 
     Usage:
         # 方式 1：自动创建（推荐）

@@ -38,7 +38,6 @@ logs/
 
 # 日志文件（谨慎：勿提交含敏感路径的日志）
 *.log
-backend/django_debug.log
 
 # 调试脚本 & 一次性测试文件
 debug_*.py
@@ -59,8 +58,6 @@ orch_debug.txt
 orch_logs.txt
 orch_run3.txt
 workflow_result.txt
-django_logs.txt
-backend/test_result.txt
 
 # Docker 构建日志
 build*.log
@@ -86,7 +83,6 @@ push_out.txt
 verify_sv.py
 verify_parse.py
 verify_llm.py
-backend/verify_output.txt
 
 # 杂项
 $null

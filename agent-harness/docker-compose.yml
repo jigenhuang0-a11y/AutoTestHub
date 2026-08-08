@@ -42,8 +42,6 @@ services:
       - SERVICE_TOKEN=${SERVICE_TOKEN:?请在 .env 中设置 SERVICE_TOKEN}
       # Redis 状态持久化
       - REDIS_URL=redis://harness-redis:6379/0
-      # 业务服务地址（Docker 内部网络）
-      - DJANGO_BASE_URL=${DJANGO_BASE_URL:-http://host.docker.internal:8000}
       # 日志级别
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # OpenTelemetry 配置

@@ -1,21 +1,18 @@
 # AI 编排服务（AI Orchestration Service）
 
-基于 FastAPI 的独立 Agent Harness 编排服务，负责从 Django 单体中抽离 LangGraph 工作流编排能力。
+基于 FastAPI 的单一 Agent Harness 编排服务（自包含，已彻底移除 Django 依赖）。
+负责工作流编排（Plan/Orchestrate/Verify）、Agent 工具执行、状态流转与进度推送。
 
-## 职责边界
-
-| 服务 | 职责 |
-|------|------|
-| **ai-orchestration-service** | Agent 编排、状态流转、进度推送、Plan/Verify |
-| **Django backend** | 业务数据、测试用例、执行引擎、报告、用户认证 |
+> 架构演进（2026-08-09）：原 Django 业务层已删除，其工具能力重写为进程内本地工具
+> （见 `app/tools/`），由 `app/tools/registry.py` 统一管理。平台现为单一 FastAPI 服务。
 
 ## 核心工作流
 
 ```
 [Plan] → [Orchestrate] → [Verify]
    ↓          ↓              ↓
- LLM      HTTP 调用      LLM 验证
-          Django API
+ LLM      本地工具调用    LLM 验证
+        (app/tools/*)
 ```
 
 ## 本地运行
@@ -67,5 +64,4 @@ curl -N -X POST http://localhost:8001/api/v1/workflow/stream \
 | `DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `DASHSCOPE_API_KEY` | 通义千问 API Key |
 | `GLM_API_KEY` | 智谱 API Key |
-| `DJANGO_BASE_URL` | Django 业务服务地址，默认 `http://localhost:8000` |
 | `REDIS_URL` | Redis 地址，用于状态持久化 |

@@ -114,27 +114,17 @@ def get_default_llm_config() -> tuple[LLMRouterConfig, AgentConfig]:
     return LLMRouterConfig(), AgentConfig()
 
 
-# Django 下游服务地址
-DJANGO_BASE_URL = os.getenv("DJANGO_BASE_URL", "http://localhost:8000")
-
-# Django MCP API 地址（工具网关）
-DJANGO_MCP_URL = os.getenv("DJANGO_MCP_URL", DJANGO_BASE_URL)
-
-# 工具发现刷新间隔（秒）
-TOOL_DISCOVERY_REFRESH_INTERVAL = int(os.getenv("TOOL_DISCOVERY_REFRESH_INTERVAL", "300"))
-
 # Redis 地址（用于状态持久化）
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # ============================================================
-# JWT 鉴权配置（与 Django SIMPLE_JWT 互通）
+# JWT 鉴权配置（FastAPI 自签，不再与 Django 互通）
 # ============================================================
 
-# 共享 JWT 签名密钥：必须与 Django settings.SECRET_KEY 一致
-# 生成方式: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+# 平台自签 JWT 签名密钥（请通过环境变量在生产环境覆盖）
 JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
 
-# JWT 算法（与 djangorestframework-simplejwt 一致）
+# JWT 算法
 JWT_ALGORITHM = "HS256"
 
 # 服务间通行令牌（X-Service-Token 通道，供非用户绑定的内部调用）
@@ -194,8 +184,8 @@ class SandboxConfigHolder:
     """
     沙箱全局开关与默认策略。
     - enabled=True 时，底座 workflow 的 execution 步骤一律先过沙箱；
-      仅在策略文件缺失或沙箱执行系统错误时才回退 Django（带审计告警）。
-    - enabled=False 时，直接调 Django（向后兼容，仅用于本地无沙箱调试）。
+      仅在策略文件缺失或沙箱执行系统错误时才回退流程（带审计告警）。
+    - enabled=False 时，直接执行（仅用于本地无沙箱调试）。
     """
     enabled: bool = True
     default_timeout_seconds: int = int(os.getenv("SANDBOX_TIMEOUT", "300"))

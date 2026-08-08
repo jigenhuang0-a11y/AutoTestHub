@@ -1,11 +1,11 @@
 """
 底座工具注册/发现端点
 
-提供双向 MCP 注册的关键能力：
-1. POST /register — 接收 Django 启动时推送的工具注册
-2. POST /refresh — Django 工具变更后触发底座即时刷新
-3. GET  /status  — 查询工具缓存状态
-4. GET  /orchestrator/tools — 暴露底座编排能力为 MCP 元工具
+Django 已移除。工具在进程内由 app/tools/* 模块自注册（见 app/tools/registry.py）。
+本端点暴露：
+1. GET  /status             — 查询本地工具注册表状态
+2. POST /register           — 可选：人工注册额外工具到本地注册表
+3. GET  /orchestrator/tools — 暴露底座编排能力为 MCP 元工具
 """
 import logging
 from typing import Optional
@@ -18,6 +18,7 @@ from app.schemas.tool_registry import (
     ToolRefreshRequest,
     ToolStatusResponse,
 )
+from app.tools.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -25,103 +26,74 @@ from app.api.v1.endpoints.auth import require_admin
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
-# ============================================================
-# 工具注册：接收 Django 推送
-# ============================================================
-
 
 @router.post("/register", response_model=ToolRegisterResponse)
 async def register_tools(payload: ToolBatchRegister):
     """
-    接收 Django 推送的工具批量注册
+    人工注册工具到本地注册表。
 
-    Django 启动时调用此端点，主动注册所有可用工具。
-    底座将工具信息写入全局 ToolDiscovery 单例缓存，
-    所有 workflow 实例共享同一份工具列表。
-
-    后续：Django 工具变更时也会调用此端点触发更新。
+    工具主路径由 app/tools/* 模块在 import 时自动注册；
+    此端点用于运行时动态追加（如插件式工具）。
     """
-    from app.core.tool_discovery import get_global_discovery
+    registry = get_registry()
+    registered = 0
+    updated = 0
+    errors = []
 
-    discovery = get_global_discovery()
-
-    # 将 Pydantic 模型转为 dict
-    tool_dicts = []
     for tool_item in payload.tools:
-        tool_dicts.append({
-            "name": tool_item.name,
-            "description": tool_item.description,
-            "inputSchema": tool_item.input_schema,
-            "category": tool_item.category,
-            "owner_team_id": tool_item.owner_team_id,
-        })
-
-    # 使用 bulk_register 批量写入全局缓存
-    result = discovery.bulk_register(tool_dicts)
-
-    logger.info(
-        f"[ToolRegistry] 收到 Django 工具注册 (全局单例): "
-        f"新增={result['registered']}, 更新={result['updated']}"
-    )
+        try:
+            existing = registry.get(tool_item.name)
+            if existing:
+                updated += 1
+            else:
+                registered += 1
+            registry.register(
+                name=tool_item.name,
+                description=tool_item.description,
+                input_schema=tool_item.input_schema,
+                handler=lambda **kw: {"status": "success", "data": {}, "note": "manual"},
+                category=tool_item.category,
+                owner_team_id=tool_item.owner_team_id,
+            )
+        except Exception as e:
+            errors.append({"name": tool_item.name, "error": str(e)})
 
     return ToolRegisterResponse(
-        registered=result["registered"],
-        updated=result["updated"],
-        failed=len(result.get("errors", [])),
-        errors=result.get("errors", []),
+        registered=registered,
+        updated=updated,
+        failed=len(errors),
+        errors=errors,
     )
 
 
 @router.post("/refresh", response_model=dict)
 async def refresh_tools(payload: Optional[ToolRefreshRequest] = None):
     """
-    触发工具即时刷新
-
-    Django 工具变更（新增/删除/更新）后调用此端点，
-    触发底座立即从 Django MCP API 拉取最新工具列表。
+    触发工具即时刷新（本地注册表无需远程拉取，返回当前快照）。
     """
-    from app.core.tool_discovery import get_global_discovery
-
-    force = payload.force if payload else True
-    team_id = payload.team_id if payload else None
-
-    discovery = get_global_discovery()
-
-    if force:
-        result = discovery.force_refresh(team_id=team_id)
-    else:
-        if discovery.is_stale():
-            result = discovery.force_refresh(team_id=team_id)
-        else:
-            result = {
-                "refreshed": False,
-                "tool_count": len(discovery._tools),
-                "agent_mappings": len(discovery._agent_map),
-            }
-
-    result["force"] = force
-    return result
+    registry = get_registry()
+    health = registry.health()
+    return {
+        "refreshed": True,
+        "tool_count": health["tools_count"],
+        "agent_mappings": health["agent_mappings"],
+        "force": True,
+    }
 
 
 @router.get("/status", response_model=ToolStatusResponse)
 async def tool_status():
     """
-    查询工具缓存状态
-
-    返回全局 ToolDiscovery 单例的健康状态和缓存信息。
+    查询本地工具注册表状态。
     """
-    from app.core.tool_discovery import get_global_discovery
-
-    discovery = get_global_discovery()
-    health = discovery.health()
-    discovery_healthy = len(discovery._tools) > 0
-
+    registry = get_registry()
+    health = registry.health()
     return ToolStatusResponse(
         total_tools=health.get("tools_count", 0),
         agent_mappings=health.get("agent_mappings", 0),
         last_refresh=health.get("last_refresh", 0),
-        is_stale=health.get("stale", True),
-        discovery_healthy=discovery_healthy,
+        is_stale=False,
+        discovery_healthy=health["tools_count"] > 0,
     )
 
 
@@ -227,10 +199,7 @@ ORCHESTRATOR_MCP_TOOLS = [
 @router.get("/orchestrator/tools", response_model=dict)
 async def orchestrator_mcp_tools():
     """
-    暴露底座编排能力为 MCP 工具列表
-
-    Django 侧 Agent 可以调用此端点发现底座的编排能力，
-    实现"双向注册"——底座也能作为工具提供方被 Django 发现。
+    暴露底座编排能力为 MCP 工具列表。
     """
     return {
         "server": "AutoTestHub Orchestrator MCP",

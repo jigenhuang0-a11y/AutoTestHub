@@ -6,8 +6,8 @@ W2 目标：/metrics 可采集
 - http_request_duration_seconds：HTTP 请求延迟直方图
 - workflow_total：工作流调用总数（按状态分）
 - workflow_step_duration_seconds：工作流单步执行耗时
-- django_client_requests_total：Django 下游调用总数（按 action、状态分）
-- django_client_errors_total：Django 下游调用错误数（按 action、异常类型分）
+- local_tool_requests_total：本地工具调用总数（按工具名、状态分）
+- local_tool_errors_total：本地工具调用错误数（按工具名、异常类型分）
 - active_workflows：当前正在执行的工作流数量（Gauge）
 """
 from prometheus_client import (
@@ -56,16 +56,16 @@ workflow_active = Gauge(
     registry=REGISTRY,
 )
 
-django_client_requests_total = Counter(
-    "django_client_requests_total",
-    "Total requests to Django downstream",
+local_tool_requests_total = Counter(
+    "local_tool_requests_total",
+    "Total requests to local tools",
     ["action", "status_code"],
     registry=REGISTRY,
 )
 
-django_client_errors_total = Counter(
-    "django_client_errors_total",
-    "Total errors when calling Django downstream",
+local_tool_errors_total = Counter(
+    "local_tool_errors_total",
+    "Total errors when calling local tools",
     ["action", "error_type"],
     registry=REGISTRY,
 )

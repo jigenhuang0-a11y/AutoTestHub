@@ -17,7 +17,7 @@ scrape_configs:
           service: ai-orchestration-service
           component: agent-harness
 
-  # Django Backend（需暴露 /metrics 端点）
+  # FastAPI 编排服务（暴露 /metrics 端点）
   - job_name: backend
     metrics_path: /metrics/
     static_configs:

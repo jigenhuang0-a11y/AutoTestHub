@@ -9,14 +9,12 @@ import logging
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # 抑制日志噪音
 for name in ("opentelemetry", "httpx", "app.core.telemetry", "httpcore"):
     logging.getLogger(name).setLevel(logging.ERROR)
 
 os.environ["SERVICE_TOKEN"] = "test-token"
-os.environ.setdefault("DJANGO_MCP_URL", "http://localhost:8000/api")
 os.environ.setdefault("PORT", "8005")
 
 from fastapi.testclient import TestClient

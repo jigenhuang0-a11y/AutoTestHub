@@ -105,19 +105,22 @@ SSE 流式执行工作流，实时推送每个步骤进度。
 
 ---
 
-## 5. 与 Django 的集成关系
+## 5. 服务架构（Django 已彻底移除）
+
+自 2026-08-09 起，编排服务（FastAPI）成为唯一自包含服务。原 Django 业务层已删除，
+其 5 个工具（search / generator / data_factory / execution / evaluator）重写为进程内本地工具，
+由 `app/tools/` + `ToolRegistry` 管理。
 
 ```
-前端 -> POST /api/agent/tasks/workflow_stream/  (Django)
-          -> 转发到 POST /api/v1/workflow/stream  (编排服务)
-            -> 编排服务生成 Plan
-            -> 编排服务 HTTP 调用 Django /api/agent/tasks/{action}/
-            -> 编排服务 Verify
-            -> SSE 流原路返回给前端
+前端 -> POST /api/v1/workflow/stream  (编排服务 FastAPI)
+          -> 编排服务生成 Plan
+          -> 编排服务调用本地工具（app/tools/*，进程内调用，无 HTTP 跨服务）
+          -> 编排服务 Verify（本地 evaluator 工具）
+          -> SSE 流原路返回给前端
 ```
 
-Django 负责：认证、任务记录、ChatMessage 历史、业务 Agent 执行。
-编排服务负责：Plan、Orchestrate、Verify、SSE 进度推送。
+编排服务负责：认证、Plan、Orchestrate、Verify、SSE 进度推送、工具执行。
+所有工具均为进程内调用，不再依赖任何外部 Django 服务。
 
 ---
 
@@ -128,5 +131,4 @@ Django 负责：认证、任务记录、ChatMessage 历史、业务 Agent 执行
 | `DEEPSEEK_API_KEY` | DeepSeek API Key | - |
 | `DASHSCOPE_API_KEY` | 通义千问 API Key | - |
 | `GLM_API_KEY` | 智谱 API Key | - |
-| `DJANGO_BASE_URL` | Django 服务地址 | http://localhost:8000 |
 | `REDIS_URL` | Redis 地址 | redis://localhost:6379/0 |
