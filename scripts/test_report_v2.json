@@ -1,0 +1,13 @@
+{
+  "passed": 17,
+  "failed": 1,
+  "errors": [],
+  "data": {
+    "api_tc_id": 1,
+    "web_tc_id": 1,
+    "llm_ds_id": null,
+    "suite_id": 2,
+    "eval_id": 1,
+    "kb_id": 6
+  }
+}

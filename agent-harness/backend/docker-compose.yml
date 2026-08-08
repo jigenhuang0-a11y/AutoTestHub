@@ -1,0 +1,20 @@
+services:
+  ai-orchestration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-orchestration-service
+    ports:
+      - "8001:8001"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - GLM_API_KEY=${GLM_API_KEY}
+      - DJANGO_BASE_URL=${DJANGO_BASE_URL:-http://host.docker.internal:8000}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    networks:
+      - ai-test-platform
+
+networks:
+  ai-test-platform:
+    external: true

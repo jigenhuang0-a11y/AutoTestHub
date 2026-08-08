@@ -1,0 +1,88 @@
+C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_used" in LLMChatResponse has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+{"timestamp": "2026-07-20T10:48:28.218Z", "level": "INFO", "logger": "app.main", "trace_id": "-", "message": "[Telemetry] OpenTelemetry tracer initialized", "module": "main", "funcName": "<module>", "lineno": 97}
+{"timestamp": "2026-07-20T10:48:28.274Z", "level": "INFO", "logger": "app.main", "trace_id": "-", "message": "[Telemetry] FastAPI instrumentation enabled", "module": "main", "funcName": "<module>", "lineno": 198}
+{"timestamp": "2026-07-20T10:48:28.300Z", "level": "WARNING", "logger": "app.core.auth.jwt_handler", "trace_id": "c96cf113-c7dc-4c83-983d-2a4c15dcf967", "message": "[Auth] δ�ṩƾ֤ path=/api/v1/mcp/tools/ client=testclient", "module": "jwt_handler", "funcName": "dispatch", "lineno": 258}
+============================================================
+   Phase 2.8 端到端验证 — E2E Smoke Test
+============================================================
+
+──────────────────────────────────────────────────
+  【1. 健康检查】
+──────────────────────────────────────────────────
+  ✅ Health 返回 200
+  ✅ status 健康 (ok)
+  ✅ services 非空 (共 5 项)
+  ✅ 包含 orchestration 服务
+  ✅ 包含 mcp_gateway 服务
+  服务列表: {'PostgreSQL 数据库', 'deepseek', '编排服务 (ai-orchestration)', 'Milvus 向量数据库', 'MCP 工具网关'}
+
+──────────────────────────────────────────────────
+  【2. 认证验证】
+──────────────────────────────────────────────────
+  ✅ Health 无需认证 (200)
+  ✅ 无凭据 MCP 被拒 (401/403)
+  ✅ Service-Token 有效 (200)
+  ✅ 公开路径 /api/v1/health/ 不拦截
+  ✅ 公开路径 /api/v1/health 不拦截
+
+──────────────────────────────────────────────────
+  【3. MCP 工具管理】
+──────────────────────────────────────────────────
+  ✅ 注册工具 e2e_tool_b29c6bb7 (201)
+  ✅ 注册返回包含 name
+  ✅ 工具列表 200
+  ✅ 自定义工具存在于列表中
+  ✅ 分类列表 200
+  ✅ 分类数量 >= 1 (实际 6)
+  分类: ['search', 'file', 'database', 'code', 'browser', 'notify']
+  ✅ 切换为 disabled (200)
+  ✅ 状态确认为 disabled
+
+──────────────────────────────────────────────────
+  【4. 租户生命周期】
+──────────────────────────────────────────────────
+  ✅ 创建租户 (201)
+  ✅ 返回 tenant_id (10)
+  ✅ GET 租户列表 (200)
+  ✅ 租户列表含新建租户
+  ✅ 名称匹配
+  ✅ 删除租户 (200/204)
+  ✅ 删除后列表中不再出现
+
+──────────────────────────────────────────────────
+  【5. 工作流调用】
+──────────────────────────────────────────────────
+  workflow invoke → status=422
+  ✅ 工作流调用不崩溃 (非 5xx)
+  ✅ 响应为有效 JSON (即使走不到 LLM)
+
+──────────────────────────────────────────────────
+  【6. 任务跟踪】
+──────────────────────────────────────────────────
+  ✅ 任务列表 200
+  现有任务数: 7 (count=7)
+  ✅ 任务含 id
+  ✅ 任务含 status
+  ✅ 任务含 created_at
+  ✅ 任务统计 200
+  ✅ stats 非空 (keys=['summary', 'today_calls', 'avg_duration_ms', 'success_rate', 'trend', 'sandbox_usage'])
+  统计: {'summary': {'running': 1, 'pending': 1, 'failed': 1, 'completed': 4}, 'today_calls': 0, 'avg_duration_ms': 3833, 'success_rate': 67, 'trend': [{'date': '07-14', 'total': 1, 'success': 1, 'failed': 0}, {'date': '07-15', 'total': 1, 'success': 1, 'failed': 0}, {'date': '07-16', 'total': 2, 'success': 1, 'failed': 0}, {'date': '07-17', 'total': 1, 'success': 0, 'failed': 1}, {'date': '07-18', 'total': 1, 'success': 0, 'failed': 0}, {'date': '07-19', 'total': 1, 'success': 1, 'failed': 0}, {'date': '07-20', 'total': 0, 'success': 0, 'failed': 0}], 'sandbox_usage': [{'name': '运行中（沙箱占用）', 'total': 10, 'used': 1}, {'name': '待回收（已完成）', 'total': 20, 'used': 4}, {'name': '异常（待清理）', 'total': 5, 'used': 1}]}
+  ✅ Trace 查询 (task=task-0007...)
+  ✅ Trace 含 steps
+  ✅ Trace steps 是 list (4 步)
+
+──────────────────────────────────────────────────
+  【7. 数据一致性】
+──────────────────────────────────────────────────
+  ✅ 租户列表可查 (200)
+  ✅ 工具列表可查 (200)
+  ✅ 两次 health 返回一致
+  MCP 工具总数: 9, health 报告: 9 个工具已注册（9 启用），Gateway 已启用
+
+============================================================
+  Phase 2.8 结果: 39/39 通过, 0/39 失败
+  🎉 端到端验证全部通过！
+============================================================

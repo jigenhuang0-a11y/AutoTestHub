@@ -1,0 +1,30 @@
+{
+  "uid" : "ab17fc5a4eb3bca4b216b548c7f9fcbc",
+  "name" : "timeline",
+  "children" : [ {
+    "name" : "DESKTOP-LHQRI13",
+    "children" : [ {
+      "name" : "21364-MainThread",
+      "children" : [ {
+        "name" : "test_suite_execution",
+        "uid" : "93a33803f284acf0",
+        "parentUid" : "d6553a0ed709afed51e44f129d573392",
+        "status" : "passed",
+        "time" : {
+          "start" : 1782321331385,
+          "stop" : 1782321337677,
+          "duration" : 6292
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      } ],
+      "uid" : "d6553a0ed709afed51e44f129d573392"
+    } ],
+    "uid" : "c0cdb20542c61bc9dfe3f372215838db"
+  } ]
+}

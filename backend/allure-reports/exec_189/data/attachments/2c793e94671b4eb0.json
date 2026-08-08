@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": {
+    "name": "张三",
+    "role": "admin",
+    "token": "tk_dcdd138c171c4b8f",
+    "user_id": "10001",
+    "username": "admin"
+  },
+  "msg": "登录成功"
+}

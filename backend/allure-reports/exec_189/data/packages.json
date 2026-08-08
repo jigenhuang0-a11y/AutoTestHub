@@ -1,0 +1,26 @@
+{
+  "uid" : "83edc06c07f9ae9e47eb6dd1b683e4e2",
+  "name" : "packages",
+  "children" : [ {
+    "name" : "allure-results.exec_189.test_generated",
+    "children" : [ {
+      "name" : "test_suite_execution",
+      "uid" : "a5e5dd0df2c98cff",
+      "parentUid" : "91308f48ab8a50f0d9b9a7abf0eafd62",
+      "status" : "passed",
+      "time" : {
+        "start" : 1782319542473,
+        "stop" : 1782319548788,
+        "duration" : 6315
+      },
+      "flaky" : false,
+      "newFailed" : false,
+      "newPassed" : false,
+      "newBroken" : false,
+      "retriesCount" : 0,
+      "retriesStatusChange" : false,
+      "parameters" : [ ]
+    } ],
+    "uid" : "allure-results.exec_189.test_generated"
+  } ]
+}

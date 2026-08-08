@@ -1,0 +1,217 @@
+# ============================================
+# K8s: Django Backend Deployment
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: ai-test-platform
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  selector:
+    app: backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ai-test-platform
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+        # 等待 PostgreSQL 就绪
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -U ai_test_user -d ai_test_platform; do
+                echo "Waiting for PostgreSQL..."
+                sleep 3
+              done
+              echo "PostgreSQL is ready!"
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DB_PASSWORD
+        # 等待 Redis 就绪
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
+      containers:
+        - name: backend
+          image: ai-test-platform-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            # Django
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: SECRET_KEY
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DEBUG
+            # 数据库
+            - name: DB_ENGINE
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DB_ENGINE
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DB_PASSWORD
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_DB_PORT
+            # AI 编排服务
+            - name: AI_ORCHESTRATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: AI_ORCHESTRATION_SERVICE_URL
+            # LLM Keys
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DASHSCOPE_API_KEY
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: GLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: GLM_API_KEY
+            # Midscene
+            - name: MIDSCENE_AI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: MIDSCENE_AI_API_KEY
+            - name: MIDSCENE_AI_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: MIDSCENE_AI_PROVIDER
+            - name: MIDSCENE_AI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: MIDSCENE_AI_MODEL
+            - name: MIDSCENE_AI_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: MIDSCENE_AI_BASE_URL
+            # Celery / Redis
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: CELERY_BROKER_URL
+            # Milvus
+            - name: MILVUS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: MILVUS_HOST
+            - name: MILVUS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: MILVUS_PORT
+          volumeMounts:
+            - name: backend-media
+              mountPath: /app/media
+            - name: backend-allure
+              mountPath: /app/allure-results
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /api/health/
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health/
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: backend-media
+          persistentVolumeClaim:
+            claimName: backend-media
+        - name: backend-allure
+          persistentVolumeClaim:
+            claimName: backend-allure

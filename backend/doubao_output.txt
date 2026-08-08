@@ -1,0 +1,55 @@
+=== STDOUT ===
+用例: 豆包询问
+URL: https://www.doubao.com/chat/19388764382917378
+Prompt:
+打开豆包页面
+在输入框中输入 你好！豆包
+点击发送按钮
+Script: C:\Users\hjg\AppData\Local\Temp\midscene_doubao_c_t81axs\run_test.py
+============================================================
+Running Midscene AI Web Test...
+============================================================
+[Midscene] 启动浏览器...
+[Midscene] AI 模型: openai/qwen-vl-max
+[Midscene] 导航至: https://www.doubao.com/chat/19388764382917378
+[Midscene] 执行失败: Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://www.doubao.com/chat/19388764382917378", waiting until "networkidle"
+
+
+============================================================
+TEST COMPLETED
+Exit code: 1
+============================================================
+
+Status: error
+Total time: Nones
+
+Overall Error: Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://www.doubao.com/chat/19388764382917378", waiting until "networkidle"
+
+
+=== STDERR ===
+[32m2026-07-06 22:29:59.311[0m | [1mINFO    [0m | [36mmidscene.core.agent[0m:[36m__init__[0m:[36m293[0m - [1mAgent initialized for InterfaceType.WEB[0m
+Traceback (most recent call last):
+  File "C:\Users\hjg\AppData\Local\Temp\midscene_doubao_c_t81axs\run_test.py", line 65, in main
+    await page.goto(TARGET_URL, wait_until="networkidle")
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\async_api\_generated.py", line 9611, in goto
+    await self._impl_obj.goto(
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_page.py", line 557, in goto
+    return await self._main_frame.goto(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_frame.py", line 156, in goto
+    await self._channel.send(
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\playwright\_impl\_connection.py", line 559, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://www.doubao.com/chat/19388764382917378", waiting until "networkidle"
+
+
+=== Exit: 0 ===

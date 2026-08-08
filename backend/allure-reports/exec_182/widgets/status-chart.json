@@ -1,0 +1,11 @@
+[ {
+  "uid" : "77f85789fc857287",
+  "name" : "test_suite_execution",
+  "time" : {
+    "start" : 1782318370533,
+    "stop" : 1782318370583,
+    "duration" : 50
+  },
+  "status" : "passed",
+  "severity" : "normal"
+} ]

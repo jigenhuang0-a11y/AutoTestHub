@@ -1,0 +1,18 @@
+# Docker 构建时忽略这些文件/目录，减小构建上下文
+node_modules/
+.git/
+.gitignore
+*.md
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.log
+db.sqlite3
+allure-reports/
+allure-results/
+media/
+static/
+.vscode/
+.idea/
+dist/

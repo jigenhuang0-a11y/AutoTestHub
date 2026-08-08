@@ -1,0 +1,274 @@
+{"timestamp": "2026-07-20T11:18:49.396Z", "level": "INFO", "logger": "execution.scheduler", "trace_id": "-", "message": "[Scheduler] 定时任务调度器已启动", "module": "scheduler", "funcName": "_scheduler_loop", "lineno": 81}
+=== 调用 DeepSeek... ===
+C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\__init__.py:109: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.4.3)/charset_normalizer (3.4.7) doesn't match a supported version!
+  warnings.warn(
+
+=== 原始输出 (9358 字符) ===
+```json
+[
+  {
+    "title": "正常注册 - 合法用户名和密码",
+    "description": "使用合法的用户名和密码进行注册，验证成功注册",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser123", "password": "password123"},
+    "expected_response": {"code": 200, "msg": "注册成功"},
+    "assertions": "状态码200，返回code为200，msg包含注册成功",
+    "priority": "P0",
+    "tags": ["smoke", "positive"]
+  },
+  {
+    "title": "正常注册 - 边界值用户名3字符",
+    "description": "使用最小长度3字符的用户名注册",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "abc", "password": "password123"},
+    "expected_response": {"code": 200, "msg": "注册成功"},
+    "assertions": "状态码200，返回code为200",
+    "priority": "P1",
+    "tags": ["boundary", "positive"]
+  },
+  {
+    "title": "正常注册 - 边界值用户名20字符",
+    "description": "使用最大长度20字符的用户名注册",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "aaaaaaaaaaaaaaaaaaaa", "password": "password123"},
+    "expected_response": {"code": 200, "msg": "注册成功"},
+    "assertions": "状态码200，返回code为200",
+    "priority": "P1",
+    "tags": ["boundary", "positive"]
+  },
+  {
+    "title": "正常注册 - 边界值密码6字符",
+    "description": "使用最小长度6字符的密码注册",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": "123456"},
+    "expected_response": {"code": 200, "msg": "注册成功"},
+    "assertions": "状态码200，返回code为200",
+    "priority": "P1",
+    "tags": ["boundary", "positive"]
+  },
+  {
+    "title": "正常注册 - 边界值密码20字符",
+    "description": "使用最大长度20字符的密码注册",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": "12345678901234567890"},
+    "expected_response": {"code": 200, "msg": "注册成功"},
+    "assertions": "状态码200，返回code为200",
+    "priority": "P1",
+    "tags": ["boundary", "positive"]
+  },
+  {
+    "title": "异常注册 - 用户名为空",
+    "description": "用户名字段为空，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "", "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名不能为空"},
+    "assertions": "状态码400，返回错误信息提示用户名不能为空",
+    "priority": "P0",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 用户名为null",
+    "description": "用户名字段为null，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": null, "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名不能为空"},
+    "assertions": "状态码400，返回错误信息提示用户名不能为空",
+    "priority": "P1",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 用户名长度不足3字符",
+    "description": "用户名长度为2字符，验证最小长度限制",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "ab", "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名长度必须在3-20字符之间"},
+    "assertions": "状态码400，返回错误信息提示长度限制",
+    "priority": "P1",
+    "tags": ["negative", "boundary"]
+  },
+  {
+    "title": "异常注册 - 用户名长度超过20字符",
+    "description": "用户名长度为21字符，验证最大长度限制",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "aaaaaaaaaaaaaaaaaaaaa", "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名长度必须在3-20字符之间"},
+    "assertions": "状态码400，返回错误信息提示长度限制",
+    "priority": "P1",
+    "tags": ["negative", "boundary"]
+  },
+  {
+    "title": "异常注册 - 密码为空",
+    "description": "密码字段为空，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": ""},
+    "expected_response": {"code": 400, "msg": "密码不能为空"},
+    "assertions": "状态码400，返回错误信息提示密码不能为空",
+    "priority": "P0",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 密码为null",
+    "description": "密码字段为null，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": null},
+    "expected_response": {"code": 400, "msg": "密码不能为空"},
+    "assertions": "状态码400，返回错误信息提示密码不能为空",
+    "priority": "P1",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 密码长度不足6字符",
+    "description": "密码长度为5字符，验证最小长度限制",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": "12345"},
+    "expected_response": {"code": 400, "msg": "密码长度必须在6-20字符之间"},
+    "assertions": "状态码400，返回错误信息提示长度限制",
+    "priority": "P1",
+    "tags": ["negative", "boundary"]
+  },
+  {
+    "title": "异常注册 - 密码长度超过20字符",
+    "description": "密码长度为21字符，验证最大长度限制",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser", "password": "123456789012345678901"},
+    "expected_response": {"code": 400, "msg": "密码长度必须在6-20字符之间"},
+    "assertions": "状态码400，返回错误信息提示长度限制",
+    "priority": "P1",
+    "tags": ["negative", "boundary"]
+  },
+  {
+    "title": "异常注册 - 用户名包含特殊字符",
+    "description": "用户名为特殊字符，验证字符校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "@#$%", "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名只能包含字母和数字"},
+    "assertions": "状态码400，返回错误信息提示字符限制",
+    "priority": "P2",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 用户名包含空格",
+    "description": "用户名包含空格，验证字符校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "test user", "password": "password123"},
+    "expected_response": {"code": 400, "msg": "用户名不能包含空格"},
+    "assertions": "状态码400，返回错误信息提示不能包含空格",
+    "priority": "P2",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 用户名已存在",
+    "description": "使用已注册的用户名，验证唯一性校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "existinguser", "password": "password123"},
+    "expected_response": {"code": 409, "msg": "用户名已存在"},
+    "assertions": "状态码409，返回错误信息提示用户名已存在",
+    "priority": "P0",
+    "tags": ["negative", "conflict"]
+  },
+  {
+    "title": "异常注册 - 请求体为空",
+    "description": "发送空请求体，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {},
+    "expected_response": {"code": 400, "msg": "缺少必填参数"},
+    "assertions": "状态码400，返回错误信息提示缺少必填参数",
+    "priority": "P1",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 缺少username字段",
+    "description": "请求体中缺少username字段，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"password": "password123"},
+    "expected_response": {"code": 400, "msg": "缺少必填参数: username"},
+    "assertions": "状态码400，返回错误信息提示缺少username",
+    "priority": "P1",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 缺少password字段",
+    "description": "请求体中缺少password字段，验证参数校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {"username": "testuser"},
+    "expected_response": {"code": 400, "msg": "缺少必填参数: password"},
+    "assertions": "状态码400，返回错误信息提示缺少password",
+    "priority": "P1",
+    "tags": ["negative", "validation"]
+  },
+  {
+    "title": "异常注册 - 请求体为JSON数组",
+    "description": "请求体为JSON数组格式，验证格式校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": ["testuser", "password123"],
+    "expected_response": {"code": 400, "msg": "请求体格式错误"},
+    "assertions": "状态码400，返回错误信息提示格式错误",
+    "priority": "P2",
+    "tags": ["negative", "format"]
+  },
+  {
+    "title": "异常注册 - Content-Type错误",
+    "description": "使用错误的Content-Type，验证请求头校验",
+    "api_endpoint": "/api/user/register",
+    "method": "POST",
+    "headers": {"Content-Type": "text/plain"},
+    "request_body": "username=testuser&password=password123",
+    "expected_response": {"code": 415, "msg": "不支持的媒体类型"},
+    "assertions": "状态码415，返回错误信息提示不支持媒体类型",
+    "priority": "P2",
+    "tags": ["negative", "header"]
+  },
+  {
+    "title": "异常注册 - 请求方法错误",
+    "description": "使用GET方法请求注册接口，验证方法校验",
+    "api_endpoint": "/api/user/register",
+    "method": "GET",
+    "headers": {"Content-Type": "application/json"},
+    "request_body": {},
+    "expected_response": {"code": 405, "msg": "不支持的请求方法"},
+    "assertions": "状态码405，返回错误信息提示不支持方法",
+    "priority": "P2",
+    "tags": ["negative", "method"]
+  }
+]
+```

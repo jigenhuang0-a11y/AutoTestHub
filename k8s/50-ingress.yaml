@@ -1,0 +1,77 @@
+# ============================================
+# K8s: Ingress —— 统一入口路由
+# ============================================
+# 前置条件：集群已安装 Ingress Controller（nginx-ingress / traefik）
+# TLS 证书需单独配置 cert-manager 或手动创建 Secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-test-platform
+  namespace: ai-test-platform
+  labels:
+    app.kubernetes.io/name: ai-test-platform
+  annotations:
+    # Nginx Ingress 配置
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    # WebSocket/SSE 支持
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+    # TLS 重定向（生产环境启用）
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  # TLS 配置（生产环境取消注释）
+  # tls:
+  #   - hosts:
+  #       - ai-test.example.com
+  #     secretName: ai-test-platform-tls
+  rules:
+    - host: ai-test.example.com  # 替换为实际域名
+      http:
+        paths:
+          # 前端 SPA
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+          # Django API
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # 编排服务 API
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: ai-orchestrator
+                port:
+                  number: 8001
+          # Prometheus（内部管理，可加 basic-auth）
+          - path: /prometheus
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus
+                port:
+                  number: 9090
+          # Grafana（内部管理）
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000

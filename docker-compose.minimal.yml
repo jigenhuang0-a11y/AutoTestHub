@@ -1,0 +1,162 @@
+# ============================================
+# Docker Compose - 本地最小化部署（16GB 笔记本）
+# ============================================
+# 内存预算 ~6-7GB（不含 Windows 和 Docker 开销）
+#
+# 砍掉的服务：Milvus + etcd + MinIO（向量数据库，省 ~4GB）
+#            + Prometheus + Grafana + OTEL（监控栈，省 ~1.5GB）
+# 保留的核心链路：PostgreSQL + Redis + Django + Celery + 编排服务 + 前端
+#
+# 启动：docker compose -f docker-compose.minimal.yml up -d
+# 停止：docker compose -f docker-compose.minimal.yml down
+# ============================================
+
+services:
+  # ==================== 数据库 ====================
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_test_platform
+      POSTGRES_USER: ai_test_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_test_user -d ai_test_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== Redis ====================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ==================== 后端 Django ====================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - SECRET_KEY=${SECRET_KEY:?请在 .env 中设置 SECRET_KEY}
+      - DEBUG=${DEBUG:-True}
+      # 数据库
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=ai_test_platform
+      - DB_USER=ai_test_user
+      - DB_PASSWORD=${DB_PASSWORD:-ai_test_pass_2024}
+      - DB_HOST=db
+      - DB_PORT=5432
+      # AI 编排服务地址
+      - AI_ORCHESTRATION_SERVICE_URL=http://ai-orchestrator:8001
+      # AI Keys
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      # Midscene
+      - MIDSCENE_AI_API_KEY=${MIDSCENE_AI_API_KEY:-}
+      - MIDSCENE_AI_PROVIDER=openai
+      - MIDSCENE_AI_MODEL=qwen-vl-plus
+      - MIDSCENE_AI_BASE_URL=${MIDSCENE_AI_BASE_URL:-}
+      # Celery / Redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      # Milvus 不启用（本地最小化版本不依赖向量库）
+      - MILVUS_HOST=
+      - MILVUS_PORT=19530
+    volumes:
+      - media_data:/app/media
+      - allure_data:/app/allure-results
+    ports:
+      - "8000:8000"
+
+  # ==================== Celery Worker ====================
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=ai_test_platform
+      - DB_USER=ai_test_user
+      - DB_PASSWORD=${DB_PASSWORD:-ai_test_pass_2024}
+      - DB_HOST=db
+      - DB_PORT=5432
+    command: celery -A ai_test_platform worker -l info -c 2
+
+  # ==================== AI 编排服务 ====================
+  ai-orchestrator:
+    build:
+      context: ./ai-orchestration-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - DJANGO_BASE_URL=http://backend:8000
+      - REDIS_URL=redis://redis:6379/1
+      - LOG_LEVEL=INFO
+      - OTEL_SERVICE_NAME=ai-orchestration-service
+      - OTEL_SERVICE_VERSION=0.2.0
+      - OTEL_ENVIRONMENT=development
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/v1/health/live')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ==================== 前端 Nginx + Vue ====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+# ==================== 数据卷 ====================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  media_data:
+    driver: local
+  allure_data:
+    driver: local

@@ -1,0 +1,210 @@
+﻿python : C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\__init__.py:113: RequestsDepen
+dencyWarning: urllib3 (2.7.0) or chardet (7.4.3)/charset_normalizer (3.4.7) doesn't match a supported version!
+所在位置 行:1 字符: 248
++ ... SL_UTF8 = '1'; cd d:/AI_Project/ai-test-platform/backend; python -c "
++                                                               ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\hjg\Ap...ported version!:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  warnings.warn(
+=== web_testcases ===
+Status: 200
+OK, count: 0
+ERROR Internal Server Error: /api/execution/stats/dashboard/
+Traceback (most recent call last):
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 89, i
+n _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\sqlite3\base.py", lin
+e 328, in execute
+    return super().execute(query, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: no such table: agent_tasks
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\core\handlers\exception.py", line
+ 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\core\handlers\base.py", line 197,
+ in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\views\decorators\csrf.py", line 5
+6, in wrapper_view
+    return view_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\viewsets.py", line 125, i
+n view
+    return self.dispatch(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 509, in d
+ispatch
+    response = self.handle_exception(exc)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 469, in h
+andle_exception
+    self.raise_uncaught_exception(exc)
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 480, in r
+aise_uncaught_exception
+    raise exc
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 506, in d
+ispatch
+    response = handler(request, *args, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI_Project\ai-test-platform\backend\execution\views.py", line 291, in dashboard
+    week_token = _sum_tokens(week_at) or executions.count() * 3000
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI_Project\ai-test-platform\backend\execution\views.py", line 282, in _sum_tokens
+    for at in qs[:200]:
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 398, in
+ __iter__
+    self._fetch_all()
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 1881, i
+n _fetch_all
+    self._result_cache = list(self._iterable_class(self))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 91, in 
+__iter__
+    results = compiler.execute_sql(
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\sql\compiler.py", line 
+1562, in execute_sql
+    cursor.execute(sql, params)
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 102, 
+in execute
+    return super().execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 67, i
+n execute
+    return self._execute_with_wrappers(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 80, i
+n _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 84, i
+n _execute
+    with self.db.wrap_database_errors:
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\utils.py", line 91, in __exit_
+_
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 89, i
+n _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\sqlite3\base.py", lin
+e 328, in execute
+    return super().execute(query, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+django.db.utils.OperationalError: no such table: agent_tasks
+Traceback (most recent call last):
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 89, i
+n _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\sqlite3\base.py", lin
+e 328, in execute
+    return super().execute(query, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: no such table: agent_tasks
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<string>", line 22, in <module>
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\test\client.py", line 927, in get
+    response = super().get(path, data=data, secure=secure, headers=headers, **extra)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\test\client.py", line 457, in get
+    return self.generic(
+           ^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\test\client.py", line 609, in gen
+eric
+    return self.request(**r)
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\test\client.py", line 891, in req
+uest
+    self.check_exception(response)
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\test\client.py", line 738, in che
+ck_exception
+    raise exc_value
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\core\handlers\exception.py", line
+ 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\core\handlers\base.py", line 197,
+ in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\views\decorators\csrf.py", line 5
+6, in wrapper_view
+    return view_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\viewsets.py", line 125, i
+n view
+    return self.dispatch(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 509, in d
+ispatch
+    response = self.handle_exception(exc)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 469, in h
+andle_exception
+    self.raise_uncaught_exception(exc)
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 480, in r
+aise_uncaught_exception
+    raise exc
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\rest_framework\views.py", line 506, in d
+ispatch
+    response = handler(request, *args, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI_Project\ai-test-platform\backend\execution\views.py", line 291, in dashboard
+    week_token = _sum_tokens(week_at) or executions.count() * 3000
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "D:\AI_Project\ai-test-platform\backend\execution\views.py", line 282, in _sum_tokens
+    for at in qs[:200]:
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 398, in
+ __iter__
+    self._fetch_all()
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 1881, i
+n _fetch_all
+    self._result_cache = list(self._iterable_class(self))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\query.py", line 91, in 
+__iter__
+    results = compiler.execute_sql(
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\models\sql\compiler.py", line 
+1562, in execute_sql
+    cursor.execute(sql, params)
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 102, 
+in execute
+    return super().execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 67, i
+n execute
+    return self._execute_with_wrappers(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 80, i
+n _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 84, i
+n _execute
+    with self.db.wrap_database_errors:
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\utils.py", line 91, in __exit_
+_
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\utils.py", line 89, i
+n _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\django\db\backends\sqlite3\base.py", lin
+e 328, in execute
+    return super().execute(query, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+django.db.utils.OperationalError: no such table: agent_tasks

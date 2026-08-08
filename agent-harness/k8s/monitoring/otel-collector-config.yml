@@ -1,0 +1,41 @@
+# OpenTelemetry Collector 配置 —— 接收 + 处理 + 导出
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # 本地环境输出到控制台日志
+  logging:
+    loglevel: debug
+  # 生产环境可接入 Jaeger / Zipkin / 阿里云 ARMS
+  # jaeger:
+  #   endpoint: jaeger:14250
+  #   tls:
+  #     insecure: true
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: ai_test_platform
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, logging]

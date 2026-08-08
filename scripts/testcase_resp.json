@@ -1,0 +1,1 @@
+{"detail":"授权头必须包含两个用空格分隔的值","code":"bad_authorization_header"}

@@ -1,0 +1,64 @@
+{
+  "uid" : "ab17fc5a4eb3bca4b216b548c7f9fcbc",
+  "name" : "timeline",
+  "children" : [ {
+    "name" : "DESKTOP-LHQRI13",
+    "children" : [ {
+      "name" : "25280-MainThread",
+      "children" : [ {
+        "name" : "test_2_本地接口调试",
+        "uid" : "baca7697d3b012cc",
+        "parentUid" : "f60a77a148db2eba8ee8bcd48d859318",
+        "status" : "passed",
+        "time" : {
+          "start" : 1779025717501,
+          "stop" : 1779025717510,
+          "duration" : 9
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      }, {
+        "name" : "test_3_本地接口调试副本",
+        "uid" : "b29b1a6feb979106",
+        "parentUid" : "f60a77a148db2eba8ee8bcd48d859318",
+        "status" : "passed",
+        "time" : {
+          "start" : 1779025717498,
+          "stop" : 1779025717501,
+          "duration" : 3
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      }, {
+        "name" : "test_4_本地接口调试副本用于测试",
+        "uid" : "7d8ca1fddd182edf",
+        "parentUid" : "f60a77a148db2eba8ee8bcd48d859318",
+        "status" : "passed",
+        "time" : {
+          "start" : 1779025717489,
+          "stop" : 1779025717490,
+          "duration" : 1
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      } ],
+      "uid" : "f60a77a148db2eba8ee8bcd48d859318"
+    } ],
+    "uid" : "c0cdb20542c61bc9dfe3f372215838db"
+  } ]
+}

@@ -1,0 +1,114 @@
+# ============================================================
+# GitHub Actions CI/CD Pipeline
+# ============================================================
+# 面试话术：
+# "每次 push 到 main 分支或提交 PR 时自动运行测试和构建检查"
+# "核心流程：代码检查 → 单元测试 → Docker 构建 → （可扩展：自动部署）"
+# "你在银行项目维护流水线时，触发条件、环境变量、并行任务这些概念都一样"
+# ============================================================
+
+name: CI/CD Pipeline
+
+# ---------- 触发条件 ----------
+on:
+  push:
+    branches: [main, develop]     # push 到 main/develop 时触发
+  pull_request:
+    branches: [main]               # 提 PR 到 main 时触发
+  workflow_dispatch:               # 允许手动触发（GitHub UI 上点按钮）
+
+# ---------- 环境变量 ----------
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # ==================== Job 1: 后端测试 ====================
+  backend-tests:
+    name: 后端单元测试
+    runs-on: ubuntu-latest
+    # 面试话术："后端测试 job 在 ubuntu 上跑，用 SQLite 内存数据库，不需要额外服务"
+
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      # 步骤1：拉取代码
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      # 步骤2：安装 Python
+      - name: 安装 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      # 步骤3：安装依赖
+      - name: 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 步骤4：运行迁移（验证模型正确性）
+      - name: 数据库迁移检查
+        run: python manage.py migrate --noinput
+
+      # 步骤5：运行单元测试
+      # 面试话术："CI 里跑全量单元测试，失败会阻止合并"
+      - name: 运行单元测试
+        run: |
+          python manage.py test testcases execution ai_evaluator quality_checker --verbosity=2
+        env:
+          SECRET_KEY: ci-test-secret-key
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+  # ==================== Job 2: 前端构建检查 ====================
+  frontend-build:
+    name: 前端构建检查
+    runs-on: ubuntu-latest
+    # 面试话术："前端 job 和后端 job 并行执行，节省 CI 时间"
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: 安装 npm 依赖
+        run: npm ci
+
+      # 面试话术："CI 里 npm run build 验证前端能正常打包，防止构建失败才上线发现"
+      - name: 前端构建验证
+        run: npm run build
+
+  # ==================== Job 3: Docker 镜像构建验证 ====================
+  docker-build:
+    name: Docker 构建验证
+    runs-on: ubuntu-latest
+    # 面试话术："额外验证 Dockerfile 能正常构建，不需要 push 镜像"
+    needs: [backend-tests, frontend-build]  # 等测试通过后再构建
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 构建后端镜像
+        run: docker build -t ai-test-backend ./backend
+
+      - name: 构建前端镜像
+        run: docker build -t ai-test-frontend ./frontend
+
+      # 面试话术："验证 docker-compose 配置能正常解析，防止语法错误"
+      - name: 验证 docker-compose 配置
+        run: docker compose config

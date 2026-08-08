@@ -1,0 +1,28 @@
+# ============================================
+# Docker Compose - 本地开发环境
+# ============================================
+# 仅启动 PostgreSQL，跟服务器保持完全一致
+# 用法：docker compose -f docker-compose.dev.yml up -d
+# ============================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ai-test-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_test_platform
+      POSTGRES_USER: ai_test_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_test_user -d ai_test_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  dev_postgres_data:

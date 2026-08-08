@@ -1,0 +1,48 @@
+C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\__init__.py:109: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.4.3)/charset_normalizer (3.4.7) doesn't match a supported version!
+  warnings.warn(
+[1/4] 启动 Django 子进程...
+[2/4] Django 就绪，开始登录...
+[3/4] 调用 AI 生成测试用例...
+状态码: 200
+响应: {"test_cases": [{"title": "正常注册-所有参数合法", "description": "使用合法的用户名、密码和邮箱进行注册，验证注册成功", "api_endpoint": "/api/user/register", "method": "POST", "headers": {"Content-Type": "application/json"}, "request_body": {"username": "testuser", "password": "pass123456", "email": "test@example.com"}, "expected_response": {"code": 200, "msg": "注册成功", "data": {"user_id": 1001}}, "assertions": "状态码200，code为200，msg为'注册成功'，data.user_id为正整数", "priority": "P0", "tags": ["smoke", "register", "positive"]}, {"title": "正
+
+生成用例数: 19
+
+--- 用例 1 ---
+  title: 正常注册-所有参数合法
+  description: 使用合法的用户名、密码和邮箱进行注册，验证注册成功
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'testuser', 'password': 'pass123456', 'email': 'test@example.com'}
+  expected_response: {'code': 200, 'msg': '注册成功', 'data': {'user_id': 1001}}
+  assertions: 状态码200，code为200，msg为'注册成功'，data.user_id为正整数
+  priority: P0
+  tags: ['smoke', 'register', 'positive']
+
+--- 用例 2 ---
+  title: 正常注册-用户名边界值3字符
+  description: 用户名为3个字符，验证边界值正常注册
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'abc', 'password': 'pass123456', 'email': 'abc@test.com'}
+  expected_response: {'code': 200, 'msg': '注册成功', 'data': {'user_id': 1002}}
+  assertions: 状态码200，code为200，注册成功
+  priority: P1
+  tags: ['boundary', 'register', 'positive']
+
+--- 用例 3 ---
+  title: 正常注册-用户名边界值20字符
+  description: 用户名为20个字符，验证边界值正常注册
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'abcdefghij1234567890', 'password': 'pass123456', 'email': 'long@test.com'}
+  expected_response: {'code': 200, 'msg': '注册成功', 'data': {'user_id': 1003}}
+  assertions: 状态码200，code为200，注册成功
+  priority: P1
+  tags: ['boundary', 'register', 'positive']
+
+[4/4] 关闭 Django 子进程...
+完成

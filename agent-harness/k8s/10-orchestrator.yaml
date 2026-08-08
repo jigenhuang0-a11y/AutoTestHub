@@ -1,0 +1,129 @@
+# ============================================
+# K8s: AI Orchestration Service (FastAPI)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-orchestrator
+  namespace: ai-test-platform
+  labels:
+    app: ai-orchestrator
+    app.kubernetes.io/name: ai-orchestrator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8001
+      targetPort: 8001
+      name: http
+  selector:
+    app: ai-orchestrator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-orchestrator
+  namespace: ai-test-platform
+  labels:
+    app: ai-orchestrator
+    app.kubernetes.io/name: ai-orchestrator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-orchestrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: ai-orchestrator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: ai-orchestrator
+          image: ai-test-platform-orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+              name: http
+          env:
+            # LLM API Keys
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DASHSCOPE_API_KEY
+            - name: GLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: GLM_API_KEY
+            # 业务服务
+            - name: DJANGO_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: DJANGO_BASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: REDIS_URL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: LOG_LEVEL
+            # OpenTelemetry
+            - name: OTEL_SERVICE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: OTEL_SERVICE_NAME
+            - name: OTEL_SERVICE_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: OTEL_SERVICE_VERSION
+            - name: OTEL_ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: OTEL_ENVIRONMENT
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5

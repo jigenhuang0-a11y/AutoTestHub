@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DataLens AI Analytics</title>
+
+<!-- Satoshi + JetBrains Mono from CDN -->
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,500,400&f[]=jetbrains-mono@400&display=swap" rel="stylesheet" />
+
+<!-- Phosphor Icons -->
+<script type="module" src="https://unpkg.com/@phosphor-icons/web@2.1.1/src/index.js"></script>
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d0f11;
+  --surface: #141719;
+  --border: #23262a;
+  --text-primary: #ececee;
+  --text-secondary: #8b8f97;
+  --text-tertiary: #5a5e66;
+  --accent: #5b7fff;
+  --accent-dim: #3d58cc;
+  --success: #34d399;
+  --warn: #f59e0b;
+  --font-sans: 'Satoshi', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html { background: var(--bg); color: var(--text-primary); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+
+/* ---- Nav ---- */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 40px;
+  background: transparent;
+}
+.nav-logo {
+  font-size: 20px; font-weight: 700; letter-spacing: -0.03em;
+  display: flex; align-items: center; gap: 8px;
+}
+.nav-logo i { font-size: 22px; color: var(--accent); }
+.nav-links {
+  display: flex; gap: 32px; list-style: none;
+}
+.nav-links a {
+  color: var(--text-secondary); text-decoration: none;
+  font-size: 14px; font-weight: 500; transition: color 0.15s;
+}
+.nav-links a:hover { color: var(--text-primary); }
+.nav-cta {
+  background: var(--accent); color: #fff; border: none;
+  padding: 10px 22px; border-radius: 8px;
+  font-family: var(--font-sans); font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s;
+}
+.nav-cta:hover { background: var(--accent-dim); }
+
+/* ---- Hero Grid Container ---- */
+.hero {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  align-items: center;
+  padding: 120px 80px 80px;
+  gap: 80px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ---- Left: Copy Block ---- */
+.hero-copy { max-width: 520px; }
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 100px; padding: 6px 16px;
+  font-size: 12px; font-weight: 500; color: var(--text-secondary);
+  margin-bottom: 32px;
+}
+.hero-badge .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(52,211,153,0.4);
+}
+
+.hero-headline {
+  font-size: clamp(42px, 5.5vw, 64px);
+  font-weight: 700; line-height: 1.08; letter-spacing: -0.035em;
+  margin-bottom: 24px;
+}
+.hero-headline em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.hero-body {
+  font-size: 17px; line-height: 1.65; color: var(--text-secondary);
+  margin-bottom: 40px; max-width: 440px;
+}
+
+.hero-actions {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+}
+.btn-primary {
+  background: var(--accent); color: #fff; border: none;
+  padding: 14px 28px; border-radius: 10px;
+  font-family: var(--font-sans); font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s; letter-spacing: -0.01em;
+}
+.btn-primary:hover { background: var(--accent-dim); }
+.btn-ghost {
+  background: transparent; color: var(--text-primary);
+  border: 1px solid var(--border); padding: 14px 28px;
+  border-radius: 10px; font-family: var(--font-sans); font-size: 15px;
+  font-weight: 500; cursor: pointer; transition: border-color 0.15s;
+  letter-spacing: -0.01em;
+}
+.btn-ghost:hover { border-color: var(--text-secondary); }
+
+.hero-social-proof {
+  display: flex; align-items: center; gap: 16px;
+  margin-top: 48px; padding-top: 32px;
+  border-top: 1px solid var(--border);
+}
+.hero-social-proof .avatars {
+  display: flex;
+}
+.hero-social-proof .avatars span {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--bg);
+  margin-left: -10px; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.hero-social-proof .avatars span:first-child { margin-left: 0; }
+.hero-social-proof .stat {
+  font-size: 13px; color: var(--text-tertiary);
+}
+.hero-social-proof .stat strong {
+  color: var(--text-primary); font-weight: 700;
+}
+
+/* ---- Right: Dashboard Mock ---- */
+.hero-visual {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.dashboard-card {
+  width: 100%; max-width: 600px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 20px 60px -20px rgba(0,0,0,0.5);
+}
+
+/* Card Header */
+.dash-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.dash-tabs { display: flex; gap: 20px; }
+.dash-tabs span {
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+  cursor: pointer; padding-bottom: 12px; margin-bottom: -13px;
+  border-bottom: 2px solid transparent; transition: 0.15s;
+}
+.dash-tabs span.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+.dash-actions { display: flex; gap: 8px; }
+.dash-actions i {
+  font-size: 16px; color: var(--text-tertiary); cursor: pointer;
+  transition: color 0.15s;
+}
+.dash-actions i:hover { color: var(--text-secondary); }
+
+/* Card Body */
+.dash-body { padding: 24px 20px; }
+
+/* Stat Row */
+.stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+.stat-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px;
+}
+.stat-card .label {
+  font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+}
+.stat-card .value {
+  font-family: var(--font-mono); font-size: 22px; font-weight: 400;
+  color: var(--text-primary); letter-spacing: -0.02em;
+}
+.stat-card .delta {
+  font-size: 11px; font-weight: 500; margin-top: 4px;
+}
+.stat-card .delta.up { color: var(--success); }
+.stat-card .delta.down { color: var(--warn); }
+
+/* Mini Chart */
+.mini-chart {
+  display: flex; align-items: flex-end; gap: 4px;
+  height: 120px; padding: 0 4px;
+}
+.mini-chart .bar {
+  flex: 1; border-radius: 3px 3px 0 0;
+  background: var(--accent-dim);
+  transition: height 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  min-height: 8px;
+}
+.mini-chart .bar:nth-child(odd) { opacity: 0.55; }
+.mini-chart .bar:nth-child(3n) { background: var(--accent); opacity: 0.8; }
+
+/* Floating Badge */
+.floating-badge {
+  position: absolute;
+  bottom: -16px; left: -20px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 20px;
+  display: flex; align-items: center; gap: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 10;
+}
+.floating-badge .icon-circle {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(91,127,255,0.12);
+  display: flex; align-items: center; justify-content: center;
+}
+.floating-badge .icon-circle i { font-size: 20px; color: var(--accent); }
+.floating-badge .info .title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.floating-badge .info .subtitle {
+  font-size: 11px; color: var(--text-tertiary); margin-top: 2px;
+}
+
+/* Responsive */
+@media (max-width: 960px) {
+  .hero {
+    grid-template-columns: 1fr;
+    padding: 100px 32px 60px;
+    gap: 48px;
+  }
+  .hero-copy { max-width: 100%; text-align: center; }
+  .hero-body { max-width: 100%; }
+  .hero-actions { justify-content: center; }
+  .hero-social-proof { justify-content: center; }
+  .floating-badge { left: 12px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">
+    <i class="ph ph-chart-bar"></i>
+    DataLens
+  </div>
+  <ul class="nav-links">
+    <li><a href="#">Product</a></li>
+    <li><a href="#">Docs</a></li>
+    <li><a href="#">Pricing</a></li>
+    <li><a href="#">Blog</a></li>
+  </ul>
+  <button class="nav-cta">Start free</button>
+</nav>
+
+<section class="hero">
+  <div class="hero-copy">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      Now with AI Copilot
+    </div>
+
+    <h1 class="hero-headline">
+      Analytics that<br />
+      <em>thinks</em> before you ask
+    </h1>
+
+    <p class="hero-body">
+      DataLens connects to your warehouse, learns your schema, and surfaces insights
+      automatically — no SQL, no dashboards to build, no guesswork.
+    </p>
+
+    <div class="hero-actions">
+      <button class="btn-primary">Get started free</button>
+      <button class="btn-ghost">
+        <i class="ph ph-play-circle" style="margin-right:6px;font-size:16px;vertical-align:-2px;"></i>
+        See how it works
+      </button>
+    </div>
+
+    <div class="hero-social-proof">
+      <div class="avatars">
+        <span>A</span><span>K</span><span>M</span><span style="font-size:10px">+</span>
+      </div>
+      <span class="stat">
+        <strong>2,400+</strong> teams shipping faster
+      </span>
+    </div>
+  </div>
+
+  <div class="hero-visual">
+    <div class="dashboard-card">
+      <div class="dash-header">
+        <div class="dash-tabs">
+          <span class="active">Overview</span>
+          <span>Queries</span>
+          <span>Alerts</span>
+        </div>
+        <div class="dash-actions">
+          <i class="ph ph-funnel"></i>
+          <i class="ph ph-dots-three-outline"></i>
+        </div>
+      </div>
+
+      <div class="dash-body">
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="label">Total rows</div>
+            <div class="value">8.2M</div>
+            <div class="delta up">+12.4%</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Query avg</div>
+            <div class="value">142ms</div>
+            <div class="delta down">-8.1%</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Active tables</div>
+            <div class="value">47</div>
+            <div class="delta up">+3</div>
+          </div>
+        </div>
+
+        <div class="mini-chart">
+          <div class="bar" style="height:45%"></div>
+          <div class="bar" style="height:62%"></div>
+          <div class="bar" style="height:38%"></div>
+          <div class="bar" style="height:78%"></div>
+          <div class="bar" style="height:52%"></div>
+          <div class="bar" style="height:85%"></div>
+          <div class="bar" style="height:44%"></div>
+          <div class="bar" style="height:70%"></div>
+          <div class="bar" style="height:58%"></div>
+          <div class="bar" style="height:90%"></div>
+          <div class="bar" style="height:48%"></div>
+          <div class="bar" style="height:65%"></div>
+          <div class="bar" style="height:40%"></div>
+          <div class="bar" style="height:75%"></div>
+          <div class="bar" style="height:55%"></div>
+          <div class="bar" style="height:82%"></div>
+          <div class="bar" style="height:42%"></div>
+          <div class="bar" style="height:68%"></div>
+          <div class="bar" style="height:50%"></div>
+          <div class="bar" style="height:88%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="floating-badge">
+      <div class="icon-circle">
+        <i class="ph ph-sparkle"></i>
+      </div>
+      <div class="info">
+        <div class="title">AI Insight ready</div>
+        <div class="subtitle">Revenue anomaly detected</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

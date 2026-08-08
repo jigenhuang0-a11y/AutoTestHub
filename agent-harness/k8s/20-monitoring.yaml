@@ -1,0 +1,349 @@
+# ============================================
+# K8s: 监控栈 —— Prometheus + Grafana + OTEL Collector
+# ============================================
+
+# ---- Prometheus Config ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: ai-test-platform
+  labels:
+    app: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: ai-test-platform
+        environment: production
+
+    scrape_configs:
+      # 编排服务 (FastAPI) metrics
+      - job_name: ai-orchestrator
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - ai-orchestrator:8001
+            labels:
+              service: ai-orchestration-service
+              component: agent-harness
+
+      # Django backend metrics (需要 Django 暴露 /metrics)
+      - job_name: backend
+        metrics_path: /metrics/
+        static_configs:
+          - targets:
+              - backend:8000
+            labels:
+              service: backend
+              component: tool-gateway
+
+      # Prometheus 自身
+      - job_name: prometheus
+        static_configs:
+          - targets:
+              - localhost:9090
+---
+# ---- Prometheus Server ----
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: ai-test-platform
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9090
+      targetPort: 9090
+      name: http
+  selector:
+    app: prometheus
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: ai-test-platform
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.52.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=30d
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus
+            - name: prometheus-data
+              mountPath: /prometheus
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+---
+# ---- Grafana ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: ai-test-platform
+  labels:
+    app: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: ai-test-platform
+  labels:
+    app: grafana
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app: grafana
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: ai-test-platform
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.3
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: GRAFANA_ADMIN_USER
+                  optional: true
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: GRAFANA_ADMIN_PASSWORD
+                  optional: true
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: grafana-data
+---
+# ---- OpenTelemetry Collector ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: ai-test-platform
+  labels:
+    app: otel-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 512
+      memory_limiter:
+        check_interval: 5s
+        limit_mib: 512
+        spike_limit_mib: 128
+
+    exporters:
+      # 输出到 Jaeger（如有）
+      # jaeger:
+      #   endpoint: jaeger:14250
+      #   tls:
+      #     insecure: true
+      # 输出到 Prometheus（如需要，也可直接让 Prometheus 抓取 OTEL 的 /metrics）
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: ai_test_platform
+      # 日志输出（调试用）
+      logging:
+        loglevel: info
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [logging]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus, logging]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: ai-test-platform
+  labels:
+    app: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 4317
+      targetPort: 4317
+    - name: http
+      port: 4318
+      targetPort: 4318
+    - name: metrics
+      port: 8889
+      targetPort: 8889
+  selector:
+    app: otel-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: ai-test-platform
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.102.0
+          args:
+            - --config=/etc/otel/config.yaml
+          ports:
+            - containerPort: 4317
+              name: grpc
+            - containerPort: 4318
+              name: http
+            - containerPort: 8889
+              name: metrics
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config

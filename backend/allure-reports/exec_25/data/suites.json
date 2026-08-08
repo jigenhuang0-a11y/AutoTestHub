@@ -1,0 +1,30 @@
+{
+  "uid" : "98d3104e051c652961429bf95fa0b5d6",
+  "name" : "suites",
+  "children" : [ {
+    "name" : "allure-results.exec_25",
+    "children" : [ {
+      "name" : "test_generated",
+      "children" : [ {
+        "name" : "test_2_本地接口调试",
+        "uid" : "f7accdd3f5396ce0",
+        "parentUid" : "9e9a425d28f4ca87c7c7b65c244a04a8",
+        "status" : "passed",
+        "time" : {
+          "start" : 1779025880501,
+          "stop" : 1779025882583,
+          "duration" : 2082
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      } ],
+      "uid" : "9e9a425d28f4ca87c7c7b65c244a04a8"
+    } ],
+    "uid" : "3c2b4227ef0cc22fcc114909a87feeed"
+  } ]
+}

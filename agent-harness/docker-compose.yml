@@ -1,0 +1,139 @@
+# ============================================
+# Docker Compose - Agent Harness 底座
+# ============================================
+# 服务列表：orchestrator(FastAPI) + harness-frontend(Nginx+Vue) + redis + 监控栈
+# ============================================
+
+version: '3.8'
+
+services:
+  # ==================== Redis（底座状态持久化）====================
+  harness-redis:
+    image: redis:7-alpine
+    container_name: agent-harness-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - harness_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ==================== AI 编排服务（FastAPI）====================
+  orchestrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent-harness-orchestrator
+    restart: unless-stopped
+    depends_on:
+      harness-redis:
+        condition: service_healthy
+    environment:
+      # LLM API Keys
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-your-deepseek-key}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-your-dashscope-key}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - DASHSCOPE_BASE_URL=${DASHSCOPE_BASE_URL:-}
+      # 服务间认证
+      - SERVICE_TOKEN=${SERVICE_TOKEN:?请在 .env 中设置 SERVICE_TOKEN}
+      # Redis 状态持久化
+      - REDIS_URL=redis://harness-redis:6379/0
+      # 业务服务地址（Docker 内部网络）
+      - DJANGO_BASE_URL=${DJANGO_BASE_URL:-http://host.docker.internal:8000}
+      # 日志级别
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # OpenTelemetry 配置
+      - OTEL_SERVICE_NAME=agent-harness
+      - OTEL_SERVICE_VERSION=1.0.0
+      - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-production}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ==================== Harness 前端 Nginx + Vue ====================
+  harness-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agent-harness-frontend
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    ports:
+      - "81:80"
+
+  # ==================== 监控栈 ====================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: agent-harness-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: agent-harness-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-ChangeMe123!}
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana-dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml:ro
+      - ./monitoring/grafana-dashboard-workflow.json:/etc/grafana/provisioning/dashboards/workflow.json:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.102.0
+    container_name: agent-harness-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./monitoring/otel-collector-config.yml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      - orchestrator
+
+# ==================== 数据卷 ====================
+volumes:
+  harness_redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

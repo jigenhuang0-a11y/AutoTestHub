@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # ===== 基础设施 =====
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ai_test_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ai_test_2026}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+
+  # ===== AI 编排大脑（agent-harness FastAPI） =====
+  ai-orchestrator:
+    build:
+      context: ./agent-harness/backend
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - SERVICE_TOKEN=${SERVICE_TOKEN:-service-token-dev}
+      - JWT_SIGNING_KEY=${JWT_SIGNING_KEY:-dev-secret-key-2026}
+      - DJANGO_BASE_URL=http://backend:8000
+    volumes:
+      - orchestrator_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/v1/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== Django 业务后端 =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD:-ai_test_2026}@postgres:5432/ai_test_platform
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-2026}
+      - SERVICE_TOKEN=${SERVICE_TOKEN:-service-token-dev}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ORCHESTRATOR_URL=http://ai-orchestrator:8001
+      - DJANGO_SETTINGS_MODULE=core.settings
+      - DEBUG=False
+      - ALLOWED_HOSTS=*
+    volumes:
+      - django_media:/app/media
+      - django_static:/app/static
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A core worker -l info -c 4
+    environment:
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD:-ai_test_2026}@postgres:5432/ai_test_platform
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-2026}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ORCHESTRATOR_URL=http://ai-orchestrator:8001
+    depends_on:
+      - postgres
+      - redis
+      - backend
+
+  # ===== 测试平台前端（Vue + Nginx） =====
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - ai-orchestrator
+
+  # ===== Agent 运维中台前端（Vue + Nginx） =====
+  harness-frontend:
+    build:
+      context: ./agent-harness/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - ai-orchestrator
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+  milvus_data:
+  orchestrator_data:
+  django_media:
+  django_static:

@@ -1,0 +1,30 @@
+{
+  "uid" : "98d3104e051c652961429bf95fa0b5d6",
+  "name" : "suites",
+  "children" : [ {
+    "name" : "allure-results.exec_202",
+    "children" : [ {
+      "name" : "test_generated",
+      "children" : [ {
+        "name" : "test_suite_execution",
+        "uid" : "d7e5e671be584202",
+        "parentUid" : "791d4f8c9602869b4c53349322abeed2",
+        "status" : "passed",
+        "time" : {
+          "start" : 1782331187991,
+          "stop" : 1782331194297,
+          "duration" : 6306
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      } ],
+      "uid" : "791d4f8c9602869b4c53349322abeed2"
+    } ],
+    "uid" : "a66f853628f5dbba2d714797dd4f3c39"
+  } ]
+}

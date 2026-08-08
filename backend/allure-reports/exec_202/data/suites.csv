@@ -1,0 +1,2 @@
+"Status","Start Time","Stop Time","Duration in ms","Parent Suite","Suite","Sub Suite","Test Class","Test Method","Name","Description"
+"passed","Thu Jun 25 03:59:47 CST 2026","Thu Jun 25 03:59:54 CST 2026","6306","allure-results.exec_202","test_generated","","","","test_suite_execution","按顺序执行套件中的所有测试用例"

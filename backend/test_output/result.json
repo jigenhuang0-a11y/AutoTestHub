@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "duration": 2.93,
+  "total_steps": 5,
+  "step_results": [
+    {
+      "step": 1,
+      "action": "navigate",
+      "status": "passed",
+      "title": "测试页面"
+    },
+    {
+      "step": 2,
+      "action": "fill",
+      "status": "passed",
+      "value": "admin"
+    },
+    {
+      "step": 3,
+      "action": "click",
+      "status": "passed"
+    },
+    {
+      "step": 4,
+      "action": "assert_text",
+      "status": "passed",
+      "found": "欢迎, admin!"
+    },
+    {
+      "step": 5,
+      "action": "screenshot",
+      "status": "passed"
+    }
+  ]
+}

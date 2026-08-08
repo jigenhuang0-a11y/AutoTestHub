@@ -1,0 +1,34 @@
+# Prometheus 配置 —— 抓取编排服务 + 后端 metrics
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: ai-test-platform
+    environment: ${OTEL_ENVIRONMENT:-production}
+
+scrape_configs:
+  # AI 编排服务 (FastAPI) —— 核心指标
+  - job_name: ai-orchestrator
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - ai-orchestrator:8001
+        labels:
+          service: ai-orchestration-service
+          component: agent-harness
+
+  # Django Backend（需暴露 /metrics 端点）
+  - job_name: backend
+    metrics_path: /metrics/
+    static_configs:
+      - targets:
+          - backend:8000
+        labels:
+          service: backend
+          component: tool-gateway
+
+  # Prometheus 自身
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

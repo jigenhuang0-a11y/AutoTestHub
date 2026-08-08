@@ -1,0 +1,62 @@
+# ============================================
+# K8s: Celery Worker Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery
+  namespace: ai-test-platform
+  labels:
+    app: celery
+    app.kubernetes.io/name: celery
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery
+  template:
+    metadata:
+      labels:
+        app: celery
+    spec:
+      containers:
+        - name: celery
+          image: ai-test-platform-backend:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - ai_test_platform
+            - worker
+            - -l
+            - info
+            - -c
+            - "4"
+          env:
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-test-platform-config
+                  key: CELERY_BROKER_URL
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DASHSCOPE_API_KEY
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: GLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-test-platform-secrets
+                  key: GLM_API_KEY
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"

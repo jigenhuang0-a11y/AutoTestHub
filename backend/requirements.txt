@@ -1,0 +1,67 @@
+Django==4.2.7
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.3.0
+django-filter==23.5
+dashscope==1.13.6
+pytest==7.4.3
+pytest-django==4.7.0
+allure-pytest==2.13.2
+python-dotenv==1.0.0
+jsonpath-ng==1.6.0
+requests==2.31.0
+gunicorn==21.2.0
+psycopg2-binary==2.9.9
+
+openpyxl==3.1.2
+reportlab==4.0.8
+
+# ============================================================
+# Midscene — AI 视觉驱动 UI 自动化
+# ============================================================
+midscene-python>=0.1.0              # 字节跳动 AI 驱动 Playwright 自动化
+
+# ============================================================
+# Agent 编排底座依赖 (Phase 1)
+# ============================================================
+langchain>=0.3.0               # LLM/Tool 抽象层
+langchain-openai>=0.2.0        # DeepSeek 等 OpenAI 兼容 Provider
+langchain-text-splitters>=0.3.0  # 文本分块（langchain 0.3 拆分独立包）
+langchain-community>=0.3.0       # 文档加载器（PDF/TXT Loader）
+pypdf>=3.0.0                       # PDF 解析（PyPDFLoader 依赖）
+langgraph>=0.2.0               # Agent 状态机编排
+langgraph-checkpoint>=2.0.0    # 工作流状态持久化
+
+# ============================================================
+# 异步任务 & 缓存
+# ============================================================
+celery>=5.4.0                  # 异步任务队列
+redis>=5.0.0                   # 缓存 / 消息 Broker
+django-celery-results>=2.5.0   # Celery 结果持久化到 DB
+
+# ============================================================
+# 向量数据库升级
+# ============================================================
+pymilvus>=3.0.0                # Milvus 向量数据库 SDK
+milvus-lite>=3.0.0              # Milvus 本地嵌入式模式 (无需 Docker)
+
+# ============================================================
+# 本地 Embedding 模型 (无 API 依赖)
+# ============================================================
+sentence-transformers>=2.2.0    # 本地中文向量化模型 (BAAI/bge-small-zh-v1.5)
+
+# ============================================================
+# 工具增强
+# ============================================================
+httpx>=0.27.0                  # 异步 HTTP 客户端 (替代 requests)
+tenacity>=8.5.0                # 重试策略库
+docx2txt>=0.8                   # .docx 文档解析（知识库文档上传）
+daphne>=4.1.0                   # ASGI 服务器（SSE 异步透传）
+marshmallow<3.20                # langchain 兼容（marshmallow 3.20+ 不兼容）
+
+# ============================================================
+# OpenTelemetry — 全链路追踪（W3C TraceContext 传播）
+# ============================================================
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+opentelemetry-exporter-otlp-proto-http>=1.28.0

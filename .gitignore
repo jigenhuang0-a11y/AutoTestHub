@@ -67,3 +67,29 @@ build*.log
 build*.err
 rebuild.*
 up.*
+
+# 本地数据库 & 运行时数据
+*.db
+*.sqlite
+agent-harness/backend/data/
+
+# 临时验证脚本 & 输出产物
+smoke_invoke.out
+supervisor_result.json
+trigger_reload.txt
+verify_*.py
+test_mcp.py
+test_request_format.py
+smoke_unit.py
+push_err.txt
+push_out.txt
+verify_sv.py
+verify_parse.py
+verify_llm.py
+backend/verify_output.txt
+
+# 杂项
+$null
+tmp/
+.playwright-cli/
+harness-core/venv_p1/

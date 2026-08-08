@@ -1,0 +1,57 @@
+# ============================================================
+# 沙箱安全策略（base 默认策略）
+# 由 app.core.config.load_sandbox_policy() 在启动时加载。
+# 任何 workflow 的 execution / code 步骤都会套用此策略。
+# 安全原则：默认拒绝一切，按需最小放行。
+# ============================================================
+
+# 沙箱全局开关（可被环境变量 SANDBOX_ENABLED 覆盖）
+enabled: true
+
+# ── 资源限制 ──
+timeout_seconds: 300        # 执行超时（秒），无限循环/挂起会被 watchdog 杀
+max_memory_mb: 512          # 子进程树内存上限，超限即 kill
+max_processes: 10           # 子进程数上限（含递归子进程）
+max_cpu_percent: 0          # 0 = 本地版不限制（依赖服务器 cgroups）
+
+# ── 网络出口：默认全部拒绝 ──
+# 测试用例通常需要访问被测服务。我们不放行公网，仅允许命中
+# allowed_hosts 的私有/本地地址。云版可升级为 egress 白名单 + 阻断公网。
+allow_network: false
+# 允许访问的目标主机（IP 或域名）。空 = 任何出网都拒绝。
+allowed_hosts:
+  - "127.0.0.1"
+  - "localhost"
+  - "host.docker.internal"
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+# ── 文件系统 ──
+# 工作目录为自动生成的临时目录（FileJail），代码只能在里面读写。
+# 允许写出的额外路径（如必须把结果落盘到某个挂载卷）。空 = 仅临时目录。
+allowed_write_paths: []
+# 需要拷贝进沙箱的只读文件/目录（如测试依赖、数据样本）
+read_only_paths: []
+
+# ── 环境变量 ──
+# 子进程只继承以下白名单变量，避免泄露宿主机密钥/路径。
+env_whitelist:
+  - "PATH"
+  - "SYSTEMROOT"
+  - "SYSTEMDRIVE"
+  - "TEMP"
+  - "TMP"
+  - "USERPROFILE"
+  - "HOMEDRIVE"
+  - "HOMEPATH"
+  - "PYTHONPATH"
+  - "PYTHONHOME"
+  - "PYTHONIOENCODING"
+  - "LANG"
+  - "LC_ALL"
+
+# 额外注入到沙箱子进程的环境变量（如被测服务地址）
+injected_env:
+  SANDBOX_POLICY: "default"
+  PYTHONWARNINGS: "ignore"

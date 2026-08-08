@@ -1,0 +1,1 @@
+{"name":"订单创建接口冒烟测试","method":"POST","url":"https://api.example.com/orders","headers":{"Content-Type":"application/json"},"body":"{\"product_id\":123,\"quantity\":2}","assertions":[{"type":"status_code","expected":201}],"tags":["订单","冒烟测试"],"priority":"high","category":"接口测试"}

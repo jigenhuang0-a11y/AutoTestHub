@@ -1,0 +1,38 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.sqlite3
+
+# 环境变量（含敏感信息，切勿提交）
+.env
+.env.*
+!.env.example
+
+# 前端
+node_modules/
+dist/
+
+# IDE/系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志文件
+logs/
+*.log
+*.err
+
+# 构建产物 & 打包文件
+*.tar.gz
+*.zip
+
+# Docker 构建日志
+build*.log
+build*.err
+rebuild.*
+up.*

@@ -1,0 +1,72 @@
+C:\Users\hjg\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\__init__.py:109: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (7.4.3)/charset_normalizer (3.4.7) doesn't match a supported version!
+  warnings.warn(
+调用 AI 生成测试用例...
+接口文档: POST /api/user/register
+功能：用户注册
+请求参数：
+  - username (string, ...
+
+状态码: 200
+生成用例数: 16
+
+--- 用例 1 ---
+  title: 正常用户注册 — 所有字段合法
+  description: 使用合法的用户名、密码和邮箱进行注册，验证返回状态码200及用户ID非空
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'testuser', 'password': '123456', 'email': 'test@example.com'}
+  expected_response: {'code': 200, 'msg': '注册成功', 'data': {'user_id': 1}}
+  assertions: 1. 响应状态码为200；2. code字段等于200；3. msg字段为'注册成功'；4. data.user_id为正整数
+  priority: P0
+  tags: ['注册', '正常流程', 'P0']
+
+--- 用例 2 ---
+  title: 用户名长度过短（2字符）
+  description: 用户名长度为2，小于最小长度3，期望返回参数校验失败
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'ab', 'password': '123456', 'email': 'test@example.com'}
+  expected_response: {'code': 400, 'msg': '用户名长度应在3-20字符之间', 'data': None}
+  assertions: 1. 响应状态码为400；2. code字段等于400；3. msg包含'用户名'或'长度'相关提示
+  priority: P1
+  tags: ['注册', '边界', '参数校验']
+
+--- 用例 3 ---
+  title: 用户名长度过长（21字符）
+  description: 用户名为21个字符，超过最大长度20，期望返回参数校验失败
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'abcdefghijklmnopqrstu', 'password': '123456', 'email': 'test@example.com'}
+  expected_response: {'code': 400, 'msg': '用户名长度应在3-20字符之间', 'data': None}
+  assertions: 1. 响应状态码为400；2. code字段等于400；3. msg包含'用户名'或'长度'相关提示
+  priority: P1
+  tags: ['注册', '边界', '参数校验']
+
+--- 用例 4 ---
+  title: 密码长度过短（5字符）
+  description: 密码长度为5，小于最小长度6，期望返回参数校验失败
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'testuser', 'password': '12345', 'email': 'test@example.com'}
+  expected_response: {'code': 400, 'msg': '密码长度应在6-20字符之间', 'data': None}
+  assertions: 1. 响应状态码为400；2. code字段等于400；3. msg包含'密码'或'长度'相关提示
+  priority: P1
+  tags: ['注册', '边界', '参数校验']
+
+--- 用例 5 ---
+  title: 密码长度过长（21字符）
+  description: 密码长度为21，超过最大长度20，期望返回参数校验失败
+  api_endpoint: /api/user/register
+  method: POST
+  headers: {'Content-Type': 'application/json'}
+  request_body: {'username': 'testuser', 'password': 'abcdefghijklmnopqrstu', 'email': 'test@example.com'}
+  expected_response: {'code': 400, 'msg': '密码长度应在6-20字符之间', 'data': None}
+  assertions: 1. 响应状态码为400；2. code字段等于400；3. msg包含'密码'或'长度'相关提示
+  priority: P1
+  tags: ['注册', '边界', '参数校验']
+
+[PASS] AI 用例生成成功

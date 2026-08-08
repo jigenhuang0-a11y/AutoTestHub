@@ -1,0 +1,30 @@
+{
+  "uid" : "ab17fc5a4eb3bca4b216b548c7f9fcbc",
+  "name" : "timeline",
+  "children" : [ {
+    "name" : "DESKTOP-LHQRI13",
+    "children" : [ {
+      "name" : "22324-MainThread",
+      "children" : [ {
+        "name" : "test_2_本地接口调试",
+        "uid" : "f7accdd3f5396ce0",
+        "parentUid" : "4dccf9941c1a152a904972344692db4a",
+        "status" : "passed",
+        "time" : {
+          "start" : 1779025880501,
+          "stop" : 1779025882583,
+          "duration" : 2082
+        },
+        "flaky" : false,
+        "newFailed" : false,
+        "newPassed" : false,
+        "newBroken" : false,
+        "retriesCount" : 0,
+        "retriesStatusChange" : false,
+        "parameters" : [ ]
+      } ],
+      "uid" : "4dccf9941c1a152a904972344692db4a"
+    } ],
+    "uid" : "c0cdb20542c61bc9dfe3f372215838db"
+  } ]
+}

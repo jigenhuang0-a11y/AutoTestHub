@@ -1,0 +1,10 @@
+# ============================================
+# K8s Namespace: ai-test-platform
+# ============================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-test-platform
+  labels:
+    app.kubernetes.io/name: ai-test-platform
+    app.kubernetes.io/part-of: autotesthub
