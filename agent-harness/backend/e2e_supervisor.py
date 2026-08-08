@@ -53,7 +53,9 @@ def main():
         print("executed:", [w["worker"] for w in r.get("worker_results", [])])
         for w in r.get("worker_results", []):
             print(f"  - {w['worker']}: {w['status']}")
-        print("final_output(前400):", str(r.get("final_output"))[:400])
+        # GBK 终端下非 ASCII（emoji 等）会崩溃，统一做安全打印
+        final = str(r.get("final_output") or "")
+        print("final_output(前400):", final.encode("ascii", "ignore").decode()[:400])
     else:
         print("ERR:", b[:400])
 

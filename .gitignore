@@ -93,3 +93,4 @@ $null
 tmp/
 .playwright-cli/
 harness-core/venv_p1/
+.codebuddy/

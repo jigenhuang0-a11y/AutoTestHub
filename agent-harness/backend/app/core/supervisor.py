@@ -369,19 +369,42 @@ def run_supervisor(
         dispatched_types = set()
 
         # ---- 阶段 2：迭代调度 ----
-        while len(done) < max_workers:
-            decision = supervisor.decide_next(user_request, analysis, done, pending)
-            if decision["action"] != "dispatch" or not decision["worker"]:
-                break
+        # 失败自愈：每个 worker 最多重试 MAX_RETRIES 次，超过则标记为失败并停止重排，
+        # 避免下游不可用时陷入无限重试（曾出现 search/generator 反复失败直至 max_workers 耗尽）。
+        # 关键修复：重试的 worker 进入 retry_queue，下一轮优先派发（不依赖 LLM 重新选中它），
+        # 否则 LLM 可能持续选择其他 worker，导致失败 worker 永远得不到重试。
+        MAX_RETRIES = 1
+        retry_count: dict[str, int] = {}
+        failed_workers: dict[str, str] = {}
+        retry_queue: list[str] = []
 
-            worker = decision["worker"]
+        while len(done) < max_workers:
+            # 优先处理重试队列，确保失败 worker 一定被重试
+            if retry_queue:
+                worker = retry_queue.pop(0)
+                description = f"{worker} 重试（上次失败）"
+            else:
+                decision = supervisor.decide_next(user_request, analysis, done, pending)
+                if decision["action"] != "dispatch" or not decision["worker"]:
+                    break
+                worker = decision["worker"]
+                description = decision["description"]
+                # 防御：LLM 可能返回已完成/非法的 worker，此时忽略 LLM 决策，
+                # 强制推进 pending 中第一个未完成的 worker，避免死循环重复派发。
+                if worker not in pending:
+                    if pending:
+                        worker = pending[0]
+                        description = f"{worker}（LLM 决策无效，按依赖顺序推进）"
+                    else:
+                        break
+
             # 从 pending 移除（若还在）
             if worker in pending:
                 pending.remove(worker)
             dispatched_types.add(worker)
 
             result = _dispatch_worker(
-                supervisor, worker, decision["description"], idx, state
+                supervisor, worker, description, idx, state
             )
             done.append(result)
             idx += 1
@@ -390,28 +413,40 @@ def run_supervisor(
                 "task_id": task_id,
                 "worker": worker,
                 "status": result.status,
-                "description": decision["description"],
+                "description": description,
             })
 
-            # 失败自愈：若 generator 失败，追加一次重试（保持简单，不全自动无限循环）
+            # 失败自愈：worker 失败且未超过重试上限时，进入重试队列（优先重试）
             if result.status == "failed":
-                logger.warning(f"[Supervisor] worker={worker} 失败，追加重试决策")
-                # 把该 worker 重新放回 pending 末尾，下一次循环再派（最多一次）
-                if worker not in pending:
-                    pending.append(worker)
+                seen = retry_count.get(worker, 0)
+                if seen < MAX_RETRIES and worker not in failed_workers:
+                    retry_count[worker] = seen + 1
+                    logger.warning(
+                        f"[Supervisor] worker={worker} 第 {seen + 1} 次失败，进入重试队列"
+                    )
+                    retry_queue.append(worker)
+                else:
+                    failed_workers[worker] = result.error or "执行失败"
+                    logger.error(f"[Supervisor] worker={worker} 已达重试上限，标记为失败")
 
         # ---- 阶段 3：汇总 ----
         final_output = _summarize(supervisor, user_request, done)
+        # 整体状态：有失败 worker 时如实反映，而非一律 completed
+        if failed_workers:
+            overall_status = "partial" if len(failed_workers) < len(done) else "failed"
+        else:
+            overall_status = "completed"
         _emit("supervisor_complete", {
             "task_id": task_id,
             "workers_executed": [r.worker for r in done],
-            "status": "completed",
+            "status": overall_status,
         })
         workflow_total_inc("completed")
 
         return {
             "task_id": task_id,
-            "status": "completed",
+            "status": overall_status,
+            "failed_workers": sorted(failed_workers.keys()),
             "analysis": {
                 "intent": analysis.intent,
                 "complexity": analysis.complexity,
