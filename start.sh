@@ -1,184 +1,143 @@
 #!/bin/bash
 # ============================================================
-# AI 测试平台 — 一键启动 & 健康检查脚本
-# 用法: ./start.sh
+# AI测试平台 一键快速启动（Linux/macOS）
+# 使用: ./start.sh
+# 架构: agent-harness 单服务（FastAPI 8001 + Vue 5174）
 # ============================================================
 set -e
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+LOG_DIR="$ROOT/tmp/logs"
+BACKEND_DIR="$ROOT/agent-harness/backend"
+FRONTEND_DIR="$ROOT/agent-harness/frontend"
+TIMEOUT_SECONDS=180
+
+mkdir -p "$LOG_DIR"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-CHECK="✓"
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-echo "========================================="
-echo "  AI 测试平台 - 启动脚本"
-echo "========================================="
+echo ""
+echo "============================================"
+echo "  AI 测试平台 — 快速启动"
+echo "  架构: agent-harness 单服务"
+echo "============================================"
+echo ""
 
-# --------------------------------------------------
-# 1. 启动所有容器
-# --------------------------------------------------
-echo -e "\n${YELLOW}[1/5] 启动容器服务...${NC}"
-docker compose up -d --wait 2>/dev/null || docker compose up -d
-echo -e "${GREEN}${CHECK} 容器已启动${NC}"
+echo -e "${YELLOW}[1/5] 环境检查...${NC}"
+command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[ERROR] 未找到 python3${NC}"; exit 1; }
+command -v node >/dev/null 2>&1 || { echo -e "${RED}[ERROR] 未找到 Node.js${NC}"; exit 1; }
 
-# 等 Milvus 健康检查（etcd + minio + milvus 需要时间）
-echo "等待 Milvus 就绪..."
-for i in $(seq 1 30); do
-    if docker exec ai-test-milvus curl -sf http://localhost:9091/healthz > /dev/null 2>&1; then
+echo -e "  Python: $(python3 --version)"
+echo -e "  Node.js: $(node --version)"
+
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo -e "  正在安装前端依赖..."
+    (cd "$FRONTEND_DIR" && npm install)
+else
+    echo -e "  前端依赖: 已安装"
+fi
+
+if ! python3 -c "import uvicorn, fastapi, pydantic_settings, httpx" >/dev/null 2>&1; then
+    echo -e "  正在安装后端依赖..."
+    (cd "$BACKEND_DIR" && pip3 install fastapi uvicorn pydantic-settings python-dotenv httpx redis tenacity requests)
+else
+    echo -e "  后端依赖: 已安装"
+fi
+
+echo -e "  ${GREEN}检查通过.${NC}"
+
+echo ""
+echo -e "${YELLOW}[2/5] 清理残留进程...${NC}"
+for port in 8001 5174; do
+    pid=$(lsof -ti :$port 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        kill -9 $pid >/dev/null 2>&1 || true
+        echo -e "  已释放端口 $port (PID $pid)"
+    fi
+done
+sleep 1
+
+echo ""
+echo -e "${YELLOW}[3/5] 启动服务...${NC}"
+echo -e "  启动 Agent-Harness 后端 (端口 8001)..."
+nohup bash -c "cd '$BACKEND_DIR' && export PORT=8001 && export JWT_SIGNING_KEY='dev-local-signing-key-change-me' && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload" > "$LOG_DIR/agent-harness-backend.log" 2>&1 &
+BACK_PID=$!
+
+sleep 2
+
+echo -e "  启动 Agent-Harness 前端 (端口 5174)..."
+nohup bash -c "cd '$FRONTEND_DIR' && npm run dev" > "$LOG_DIR/agent-harness-frontend.log" 2>&1 &
+FRONT_PID=$!
+
+# 停止函数
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}正在停止服务...${NC}"
+    kill $BACK_PID $FRONT_PID >/dev/null 2>&1 || true
+    wait $BACK_PID $FRONT_PID >/dev/null 2>&1 || true
+    echo -e "${GREEN}已停止。${NC}"
+    exit 0
+}
+trap cleanup INT TERM EXIT
+
+sleep 3
+
+echo ""
+echo -e "${YELLOW}[4/5] 等待服务就绪...${NC}"
+READY_BACK=0
+READY_FRONT=0
+ELAPSED=0
+
+while [ $READY_BACK -eq 0 ] || [ $READY_FRONT -eq 0 ]; do
+    if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
+        echo -e "  ${YELLOW}[WARNING] 等待超时，部分服务可能未就绪。${NC}"
         break
     fi
-    sleep 2
-done
 
-# --------------------------------------------------
-# 2. 服务健康检查
-# --------------------------------------------------
-echo -e "\n${YELLOW}[2/5] 服务健康检查...${NC}"
-
-for srv in ai-test-db ai-test-redis ai-test-etcd ai-test-minio ai-test-milvus ai-test-backend ai-test-celery ai-test-frontend; do
-    status=$(docker inspect --format='{{.State.Status}}' $srv 2>/dev/null || echo "not_found")
-    health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no_healthcheck{{end}}' $srv 2>/dev/null || echo "unknown")
-    if [ "$status" = "running" ]; then
-        if [ "$health" = "healthy" ] || [ "$health" = "no_healthcheck" ]; then
-            echo -e "  ${GREEN}${CHECK}${NC} $srv"
-        else
-            echo -e "  ${YELLOW}⚠${NC} $srv — $health"
+    if [ $READY_BACK -eq 0 ]; then
+        code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/api/v1/health 2>/dev/null || echo "000")
+        if [ "$code" = "200" ]; then
+            READY_BACK=1
+            echo -e "  ${GREEN}后端已就绪 (${ELAPSED}s)${NC}"
         fi
-    else
-        echo -e "  ${RED}✗${NC} $srv — $status"
+    fi
+
+    if [ $READY_FRONT -eq 0 ]; then
+        code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5174 2>/dev/null || echo "000")
+        if [ "$code" = "200" ] || [ "$code" = "301" ]; then
+            READY_FRONT=1
+            echo -e "  ${GREEN}前端已就绪 (${ELAPSED}s)${NC}"
+        fi
+    fi
+
+    sleep 2
+    ELAPSED=$((ELAPSED + 2))
+    if [ $((ELAPSED % 15)) -lt 2 ]; then
+        echo -e "  等待中... (${ELAPSED}/${TIMEOUT_SECONDS}s)"
     fi
 done
 
-# --------------------------------------------------
-# 3. Milvus 连接测试（失败也不退出脚本）
-# --------------------------------------------------
-echo -e "\n${YELLOW}[3/5] Milvus 连接测试...${NC}"
-MILVUS_OK="fail"
-
-# 使用 manage.py shell 确保 Django 环境正确初始化
-MILVUS_OUTPUT=$(docker exec ai-test-backend python manage.py shell -c "
-from core.tools.milvus_store import get_milvus_store
-s = get_milvus_store()
-h = s.health_check()
-print('ok' if h.get('status') == 'ok' else 'fail')
-" 2>&1) || true
-
-if echo "$MILVUS_OUTPUT" | grep -q "^ok"; then
-    echo -e "${GREEN}${CHECK} Milvus 连接正常${NC}"
-else
-    echo -e "${YELLOW}⚠ Milvus 连接失败，知识库问答将降级为纯 LLM 对话${NC}"
-fi
-
-# --------------------------------------------------
-# 4. 数据库初始化
-# --------------------------------------------------
-echo -e "\n${YELLOW}[4/5] 检查数据库...${NC}"
-MIGRATE_OUT=$(docker exec ai-test-backend python manage.py migrate --noinput 2>&1) || true
-if echo "$MIGRATE_OUT" | grep -qi "error\|exception"; then
-    echo -e "${YELLOW}⚠ 数据库迁移有警告，但继续...${NC}"
-    echo "$MIGRATE_OUT" | tail -5
-else
-    echo -e "${GREEN}${CHECK} 数据库迁移完成${NC}"
-fi
-
-# --------------------------------------------------
-# 5. 创建默认管理员 & 默认知识库
-# --------------------------------------------------
-echo -e "\n${YELLOW}[5/5] 初始化管理员 & 知识库...${NC}"
-
-# 从 .env 读取管理员密码，默认自动生成
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(openssl rand -base64 12 2>/dev/null || python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
-
-# 创建/更新管理员
-ADMIN_SCRIPT=$(cat <<'EOF'
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ai_test_platform.settings')
-django.setup()
-from django.contrib.auth import get_user_model
-User = get_user_model()
-try:
-    user, created = User.objects.get_or_create(username='admin', defaults={'email':'admin@ai-test.com','role':'admin','is_admin':True})
-    if user.role != 'admin':
-        user.role = 'admin'
-        user.is_admin = True
-        user.save()
-        print('updated')
-    elif created:
-        print('created')
-    else:
-        print('exists')
-except Exception as e:
-    print('error:', e)
-EOF
-)
-ADMIN_RESULT=$(docker exec ai-test-backend python -c "$ADMIN_SCRIPT" 2>&1) || true
-
-if echo "$ADMIN_RESULT" | grep -q "created"; then
-    # 设置密码（使用环境变量 ADMIN_PASSWORD）
-    docker exec ai-test-backend python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ai_test_platform.settings')
-django.setup()
-from django.contrib.auth import get_user_model
-u = get_user_model().objects.get(username='admin')
-u.set_password(os.getenv('ADMIN_PASSWORD', 'ChangeMe123!'))
-u.save()
-" 2>/dev/null || true
-    echo -e "${GREEN}${CHECK} 管理员已创建 (admin)${NC}"
-elif echo "$ADMIN_RESULT" | grep -q "updated"; then
-    docker exec ai-test-backend python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ai_test_platform.settings')
-django.setup()
-from django.contrib.auth import get_user_model
-u = get_user_model().objects.get(username='admin')
-u.set_password(os.getenv('ADMIN_PASSWORD', 'ChangeMe123!'))
-u.save()
-" 2>/dev/null || true
-    echo -e "${GREEN}${CHECK} 管理员角色已修复 (admin)${NC}"
-else
-    echo -e "${GREEN}${CHECK} 管理员已就绪 (admin)${NC}"
-fi
-
-# 创建默认知识库
-KB_SCRIPT=$(cat <<'EOF'
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ai_test_platform.settings')
-django.setup()
-from knowledge_base.models import KnowledgeBase
-from django.contrib.auth import get_user_model
-User = get_user_model()
-try:
-    admin = User.objects.get(username='admin')
-    kb, created = KnowledgeBase.objects.get_or_create(
-        name='默认知识库',
-        defaults={'description': 'AI测试平台默认知识库', 'created_by': admin}
-    )
-    if created:
-        print(f'created:{kb.id}')
-    else:
-        print(f'exists:{kb.id}')
-except Exception as e:
-    print('error:', e)
-EOF
-)
-KB_RESULT=$(docker exec ai-test-backend python -c "$KB_SCRIPT" 2>&1) || true
-
-if echo "$KB_RESULT" | grep -q "created"; then
-    echo -e "${GREEN}${CHECK} 默认知识库已创建${NC}"
-else
-    echo -e "${GREEN}${CHECK} 默认知识库已就绪${NC}"
-fi
-
-# --------------------------------------------------
-# 完成
-# --------------------------------------------------
 echo ""
-echo "========================================="
-echo -e "  ${GREEN}🚀 AI 测试平台已就绪！${NC}"
-echo "========================================="
-echo "  访问地址: http://localhost"
-echo "  管理员:   admin / (密码: \$ADMIN_PASSWORD 或 ChangeMe123!)"
-echo "  知识库:   默认已创建"
-echo "========================================="
+echo -e "${YELLOW}[5/5] 服务状态${NC}"
+echo ""
+echo -e "${CYAN}============================================${NC}"
+echo -e "  ${CYAN}服务地址${NC}"
+echo -e "${CYAN}============================================${NC}"
+echo -e "  Agent-Harness 中台:  http://localhost:5174"
+echo -e "  Harness 底座 API:    http://localhost:8001"
+echo -e "  健康检查:            http://localhost:8001/api/v1/health"
+echo ""
+echo -e "  默认账号: admin / admin123456"
+echo -e "  日志目录: $LOG_DIR"
+echo -e "${CYAN}============================================${NC}"
+echo ""
+echo "提示:"
+echo "  - 按 Ctrl+C 停止所有服务"
+echo "  - 日志保存在 $LOG_DIR"
+echo ""
+
+wait
