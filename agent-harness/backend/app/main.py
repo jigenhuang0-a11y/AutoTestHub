@@ -169,10 +169,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 注意顺序（后添加的先执行 dispatch 外层，即栈式）：
-# GracefulShutdown(最外) → Prometheus → Auth → CORS → RequestID(最内)
-app.add_middleware(GracefulShutdownMiddleware)
-app.add_middleware(PrometheusMetricsMiddleware)
+# 注意 Starlette 中间件是洋葱模型：先 add 的在最内层，后 add 的在外层。
+# 请求进入顺序（外层 → 内层）：GracefulShutdown → Prometheus → CORS → Auth → RequestID → app
+# 因此 add 顺序要与进入顺序相反：RequestID → Auth → CORS → Prometheus → GracefulShutdown
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -180,8 +181,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(AuthMiddleware)
-app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PrometheusMetricsMiddleware)
+app.add_middleware(GracefulShutdownMiddleware)
 
 app.include_router(api_router, prefix="/api/v1")
 
