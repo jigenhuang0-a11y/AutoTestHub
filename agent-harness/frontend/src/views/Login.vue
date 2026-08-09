@@ -589,26 +589,31 @@ const fillAccount = (acc) => {
 const handleLogin = async () => {
   if (!formRef.value) return
 
-  await formRef.value.validate(async (valid) => {
-    if (valid) {
-      loading.value = true
-      try {
-        // 记住密码：保存用户名到 localStorage
-        if (loginForm.remember) {
-          storage.set('login_remembered', loginForm.username)
-        } else {
-          storage.remove('login_remembered')
-        }
+  try {
+    await formRef.value.validate()
+  } catch (e) {
+    return
+  }
 
-        await authStore.login(loginForm.username, loginForm.password)
-      } catch (error) {
-        console.error('Login error:', error)
-        ElMessage.error(error.message || '登录失败')
-      } finally {
-        loading.value = false
-      }
+  loading.value = true
+  try {
+    // 记住密码：保存用户名到 localStorage
+    if (loginForm.remember) {
+      storage.set('login_remembered', loginForm.username)
+    } else {
+      storage.remove('login_remembered')
     }
-  })
+
+    await authStore.login(loginForm.username, loginForm.password)
+  } catch (error) {
+    console.error('Login error:', error)
+    // authStore.login 内部已弹出 ElMessage，避免重复提示
+    if (!error?.handled) {
+      ElMessage.error(error?.message || '登录失败')
+    }
+  } finally {
+    loading.value = false
+  }
 }
 
 const forgotPassword = () => {

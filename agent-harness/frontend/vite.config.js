@@ -14,9 +14,9 @@ export default defineConfig({
     strictPort: false,
     proxy: {
       '/api/knowledge': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path.replace(/^\/api\/(?!v1\b)/, '/api/v1/').replace(/\/$/, ''),
       },
       '/api': {
         target: 'http://localhost:8001',

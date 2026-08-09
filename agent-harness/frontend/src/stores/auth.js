@@ -14,21 +14,30 @@ export const useAuthStore = defineStore('auth', () => {
   const login = async (username, password) => {
     try {
       const response = await authAPI.login({ username, password })
-      accessToken.value = response.access
-      refreshToken.value = response.refresh
-      localStorage.setItem('access_token', response.access)
-      localStorage.setItem('refresh_token', response.refresh)
-      user.value = response.user || {
-        id: response.id,
+      const token = response.access || response.access_token
+      const refresh = response.refresh || response.refresh_token || ''
+      const userPayload = response.user || {
+        id: response.id || response.user_id,
+        user_id: response.user_id,
         username: response.username,
         role: response.role,
         email: response.email,
       }
-      localStorage.setItem('user', JSON.stringify(user.value))
+      if (!token) {
+        throw new Error('服务端未返回有效的访问令牌')
+      }
+
+      accessToken.value = token
+      refreshToken.value = refresh
+      user.value = userPayload
+      localStorage.setItem('access_token', token)
+      localStorage.setItem('refresh_token', refresh)
+      localStorage.setItem('user', JSON.stringify(userPayload))
       ElMessage.success('登录成功')
       await router.push('/workbench')
     } catch (error) {
-      ElMessage.error('登录失败，请检查用户名和密码')
+      const msg = error?.response?.data?.detail || error?.message || '登录失败，请检查用户名和密码'
+      ElMessage.error(msg)
       throw error
     }
   }
