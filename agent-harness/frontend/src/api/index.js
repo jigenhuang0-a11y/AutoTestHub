@@ -57,12 +57,13 @@ api.interceptors.response.use(
 )
 
 // 认证API
+// 注意：baseURL 已含 /api，此处用相对路径即可
 export const authAPI = {
-  login: (data) => api.post('/api/auth/login/', data),
-  register: (data) => api.post('/api/auth/register/', data),
-  refreshToken: (data) => api.post('/api/auth/refresh/', data),
-  getProfile: () => api.get('/api/auth/profile/'),
-  changePassword: (data) => api.put('/api/auth/change-password/', data),
+  login: (data) => api.post('/auth/login/', data),
+  register: (data) => api.post('/auth/register/', data),
+  refreshToken: (data) => api.post('/auth/refresh/', data),
+  getProfile: () => api.get('/auth/profile/'),
+  changePassword: (data) => api.put('/auth/change-password/', data),
 }
 
 // 测试用例API
