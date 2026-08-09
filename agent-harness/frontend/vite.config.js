@@ -21,7 +21,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/(?!v1\b)/, '/api/v1/').replace(/\/$/, ''),
+        // 保留原路径末尾斜杠，避免后端 307 重定向导致 axios 跨重定向丢失 Authorization
+        rewrite: (path) => path.replace(/^\/api\/(?!v1\b)/, '/api/v1/'),
       },
       '/agent': {
         target: 'http://localhost:8001',

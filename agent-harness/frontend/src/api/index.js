@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 const api = axios.create({
   baseURL: '/api',
@@ -38,13 +39,22 @@ api.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
+          // 打印关键调试信息，帮助定位是哪个请求触发 401
+          console.error('[api] 401 触发跳转登录页:', {
+            url: error.config?.url,
+            method: error.config?.method,
+            headers: error.config?.headers,
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            data: error.response?.data,
+          })
           // 避免在登录页本身触发无限跳转
-          if (window.location.pathname !== '/login') {
+          if (window.location.pathname !== '/login' && router.currentRoute.value.path !== '/login') {
             ElMessage.error('登录已过期，请重新登录')
             localStorage.removeItem('access_token')
             localStorage.removeItem('refresh_token')
             localStorage.removeItem('user')
-            window.location.replace('/login')
+            router.replace('/login')
           }
           break
         case 403:
