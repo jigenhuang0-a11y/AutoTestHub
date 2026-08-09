@@ -29,13 +29,23 @@ api.interceptors.response.use(
     if (error.config?.skipErrorHandler) {
       return Promise.reject(error)
     }
+
+    // 打印错误，方便 F12 调试
+    const url = error.config?.url || 'unknown'
+    const status = error.response?.status || 'network'
+    console.error(`[api] error ${status} on ${url}:`, error.response?.data || error.message)
+
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          ElMessage.error('未授权，请重新登录')
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
+          // 避免在登录页本身触发无限跳转
+          if (window.location.pathname !== '/login') {
+            ElMessage.error('登录已过期，请重新登录')
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('refresh_token')
+            localStorage.removeItem('user')
+            window.location.replace('/login')
+          }
           break
         case 403:
           ElMessage.error('禁止访问')
@@ -47,10 +57,12 @@ api.interceptors.response.use(
           ElMessage.error('服务器错误')
           break
         default:
-          ElMessage.error(error.response.data?.error || '请求失败')
+          ElMessage.error(error.response.data?.detail || error.response.data?.error || '请求失败')
       }
+    } else if (error.code === 'ECONNABORTED') {
+      ElMessage.error('请求超时，请检查后端服务是否启动')
     } else {
-      ElMessage.error('网络错误，请检查网络连接')
+      ElMessage.error('网络错误，请检查后端服务是否启动')
     }
     return Promise.reject(error)
   }
