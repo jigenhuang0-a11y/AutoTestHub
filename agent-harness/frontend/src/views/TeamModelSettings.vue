@@ -202,7 +202,7 @@ const activeOverrides = computed(() => {
 async function fetchTeams() {
   try {
     const res = await api.get('/agent/tenants/', { skipErrorHandler: true })
-    const tenants = res.data.results || res.data.tenants || res.data || []
+    const tenants = res.results || res.tenants || res || []
     const teams = [...new Set(tenants.map(t => t.team).filter(Boolean))]
     tenantTeams.value = teams.sort()
   } catch (e) {
@@ -218,7 +218,7 @@ function updateTeamList() {
 async function fetchModels() {
   try {
     const res = await api.get('/llm/models', { skipErrorHandler: true })
-    const models = res.data.models || []
+    const models = res.models || []
     if (models.length > 0) {
       availableModels.value = models.sort((a, b) => (b.priority || 0) - (a.priority || 0))
     } else {
@@ -321,7 +321,7 @@ async function savePrefs() {
       { config: payload },
       { skipErrorHandler: true }
     )
-    teamPrefs.value[selectedTeam.value] = res.data?.prefs || payload
+    teamPrefs.value[selectedTeam.value] = res?.prefs || payload
     ElMessage.success(`团队「${selectedTeam.value}」配置已保存！偏好即时生效`)
   } catch (e) {
     const detail = e.response?.data?.detail || e.response?.data?.error || e.message

@@ -120,7 +120,7 @@ async function searchTasks() {
     if (searchQuery.value) params.q = searchQuery.value
     if (statusFilter.value) params.status = statusFilter.value
     const res = await api.get('/agent/tasks/trace/', { params })
-    taskList.value = res.data.data?.items || res.data || []
+    taskList.value = res.data?.items || res.items || res || []
   } catch (e) {
     console.error('搜索任务失败', e)
   }
@@ -132,7 +132,7 @@ async function selectTask(task) {
   traceData.value = { steps: [] }
   try {
     const res = await api.get(`/agent/tasks/trace/${task.id}/`)
-    traceData.value = res.data.data || res.data || { steps: [] }
+    traceData.value = res.data || res || { steps: [] }
   } catch (e) {
     traceData.value = { steps: [] }
     if (e.response?.status === 404) {
@@ -149,7 +149,7 @@ onMounted(() => {
   const taskId = route.query.taskId
   if (taskId) {
     api.get(`/agent/tasks/trace/${taskId}/`).then(res => {
-      const t = res.data.data || res.data
+      const t = res.data || res
       taskList.value = [t]
       selectTask(t)
     }).catch(() => {})

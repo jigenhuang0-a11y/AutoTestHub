@@ -237,7 +237,8 @@ function formatUptime(s) {
 async function fetchSandboxes() {
   try {
     const res = await api.get('/agent/sandbox/')
-    const data = res.data.data || res.data
+    // 响应拦截器已返回 response.data，这里 res 即后端 JSON
+    const data = res.items || res
     sandboxes.value = data.items || data || []
     sandboxSummary.total = sandboxes.value.length
     sandboxSummary.running = sandboxes.value.filter(s => s.status === 'running').length
@@ -326,17 +327,17 @@ async function doExecute() {
     }
     const res = await api.post(`/agent/sandbox/${currentSandbox.value.id}/execute`, payload)
     Object.assign(executeResult, {
-      ok: res.data.status === 'success',
-      status: res.data.status,
-      stdout: res.data.stdout || '',
-      stderr: res.data.stderr || '',
-      error_message: res.data.error_message || '',
-      duration_ms: res.data.duration_ms || 0,
+      ok: res.status === 'success',
+      status: res.status,
+      stdout: res.stdout || '',
+      stderr: res.stderr || '',
+      error_message: res.error_message || '',
+      duration_ms: res.duration_ms || 0,
     })
-    if (res.data.status === 'success') {
-      ElMessage.success(`执行完成 (${res.data.duration_ms}ms)`)
+    if (res.status === 'success') {
+      ElMessage.success(`执行完成 (${res.duration_ms}ms)`)
     } else {
-      ElMessage.warning('执行异常: ' + (res.data.error_message || res.data.stderr || '未知错误'))
+      ElMessage.warning('执行异常: ' + (res.error_message || res.stderr || '未知错误'))
     }
     fetchSandboxes()
   } catch (e) {

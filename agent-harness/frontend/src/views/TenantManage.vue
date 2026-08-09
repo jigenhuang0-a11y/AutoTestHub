@@ -114,7 +114,7 @@ const form = reactive({ name: '', team: '', qps: 50, dailyCap: 5000, whitelist: 
 async function fetchTenants() {
   try {
     const res = await api.get('/agent/tenants/')
-    tenants.value = res.data.results || res.data.tenants || res.data || []
+    tenants.value = res.results || res.tenants || res || []
   } catch (e) {
     ElMessage.error('获取接入方列表失败: ' + (e.response?.data?.detail || e.message))
   }
@@ -123,7 +123,7 @@ async function fetchTenants() {
 async function fetchAvailableTools() {
   try {
     const res = await api.get('/mcp/tools/')
-    const tools = res.data.results || []
+    const tools = res.results || res.tools || []
     availableTools.value = tools.map(t => ({
       label: t.name,
       value: t.name,

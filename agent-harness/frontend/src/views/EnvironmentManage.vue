@@ -136,7 +136,7 @@ function typeStyle(t) { return { test: '', staging: 'warning', prod: 'danger' }[
 async function fetchEnvs() {
   try {
     const res = await environmentAPI.list()
-    const data = res.data.data || res.data
+    const data = res.items || res
     envs.value = data.items || data || []
     envSummary.total = envs.value.length
     envSummary.active = envs.value.filter(e => e.status === 'active').length

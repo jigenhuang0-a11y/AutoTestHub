@@ -215,7 +215,8 @@ const addToolForm = reactive({
 async function fetchTools() {
   try {
     const res = await api.get('/mcp/tools/')
-    const data = res.data
+    // 响应拦截器已返回 response.data，res 即后端 JSON
+    const data = res
     tools.value = (data.tools || data.results || []).map(t => ({
       ...t,
       enabled: t.enabled !== false,
@@ -229,8 +230,8 @@ async function fetchTools() {
 async function fetchAudit() {
   try {
     const res = await api.get('/mcp/audit/', { params: { limit: 20 } })
-    auditRecords.value = res.data.records || []
-    auditTotal.value = res.data.stats?.today_calls || 0
+    auditRecords.value = res.records || []
+    auditTotal.value = res.stats?.today_calls || 0
   } catch (e) {
     auditRecords.value = []
     auditTotal.value = 0
@@ -240,7 +241,7 @@ async function fetchAudit() {
 async function loadCategories() {
   try {
     const res = await api.get('/mcp/tools/categories/')
-    categories.value = res.data.results || []
+    categories.value = res.results || res || []
   } catch (e) {
     // 分类接口不可用时回退到从工具列表提取
     const cats = new Set()
@@ -285,8 +286,8 @@ async function doTestCall() {
       tool_name: toolName,
       arguments: args,
     })
-    testResult.value = JSON.stringify(res.data, null, 2)
-    testError.value = !res.data.ok
+    testResult.value = JSON.stringify(res, null, 2)
+    testError.value = !res.ok
     fetchAudit()
   } catch (e) {
     testResult.value = e.response?.data || e.message

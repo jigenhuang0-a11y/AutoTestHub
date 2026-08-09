@@ -693,7 +693,7 @@ function platformType(p) { return { feishu: 'success', dingtalk: 'info', wecom: 
 async function fetchWebhooks() {
   try {
     const res = await api.get('/api/v1/webhooks/', { skipErrorHandler: true })
-    const data = res.data.results || []
+    const data = res.results || []
     if (data.length > 0) {
       webhooks.value = data.map(wh => ({ ...wh, active: !!wh.active }))
     } else { throw new Error('empty') }
@@ -752,7 +752,7 @@ async function testWebhook(wh) {
     const res = await api.post(`/api/v1/webhooks/${wh.id}/test`, {
       message: '这是一条来自 AI 测试平台的测试通知 🚀'
     })
-    ElMessage.success(res.data.message || '测试通知发送成功')
+    ElMessage.success(res.message || '测试通知发送成功')
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '发送失败，请检查 URL 是否正确')
   } finally { wh._testing = false }
@@ -820,7 +820,7 @@ async function fetchHealth() {
   healthError.value = ''
   try {
     const res = await api.get('/health/', { skipErrorHandler: true })
-    healthServices.value = res.data.services || []
+    healthServices.value = res.services || []
     if (healthServices.value.length === 0) throw new Error('empty')
   } catch (e) { healthError.value = '健康检查暂不可用' } finally {
     loadingHealth.value = false
@@ -830,7 +830,7 @@ async function fetchHealth() {
 async function fetchModels() {
   try {
     const res = await api.get('/agent/tasks/models/', { skipErrorHandler: true })
-    const data = res.data.models || res.data || []
+    const data = res.models || res || []
     if (data.length > 0) {
       models.value = data.map(m => ({ ...m, active: true, usage_pct: Math.floor(Math.random() * 55 + 20) }))
     } else { throw new Error('empty') }
@@ -840,7 +840,7 @@ async function fetchModels() {
 async function fetchPrompts() {
   try {
     const res = await api.get('/agent/tasks/prompts/', { skipErrorHandler: true })
-    const data = res.data.results || res.data.data || res.data || []
+    const data = res.results || res || []
     if (data.length > 0) {
       prompts.value = data.map(p => ({ ...p, is_active: !!p.is_active }))
     } else { throw new Error('empty') }
@@ -880,7 +880,7 @@ async function fetchUsers() {
   loadingUsers.value = true
   try {
     const res = await api.get('/auth/users', { skipErrorHandler: true })
-    rbacUsers.value = res.data.users || []
+    rbacUsers.value = res.users || []
     if (rbacUsers.value.length === 0) throw new Error('empty')
   } catch (e) { rbacUsers.value = [] } finally {
     loadingUsers.value = false
@@ -891,7 +891,7 @@ async function fetchRoles() {
   loadingRoles.value = true
   try {
     const res = await api.get('/auth/roles', { skipErrorHandler: true })
-    rbacRoles.value = res.data.roles || []
+    rbacRoles.value = res.roles || []
     if (rbacRoles.value.length === 0) throw new Error('empty')
   } catch (e) { rbacRoles.value = [] } finally {
     loadingRoles.value = false
@@ -901,7 +901,7 @@ async function fetchRoles() {
 async function fetchPermissions() {
   try {
     const res = await api.get('/auth/permissions', { skipErrorHandler: true })
-    allPermissions.value = res.data.permissions || []
+    allPermissions.value = res.permissions || []
     if (allPermissions.value.length === 0) throw new Error('empty')
   } catch (e) { allPermissions.value = [] }
 }
