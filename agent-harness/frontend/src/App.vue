@@ -120,20 +120,25 @@ const iconMap = {
 
 const menuGroups = [
   {
-    key: 'ai-core',
-    title: 'AI 核心能力',
+    key: 'base',
+    title: 'AI 效能中台',
     items: [
-      { to: '/settings', icon: 'Setting', label: '配置中心', adminOnly: true },
-      { to: '/knowledge/chat', icon: 'Collection', label: '知识中枢' },
-      { to: '/eval-center', icon: 'DataAnalysis', label: '全链路评测中心' },
-      { to: '/quality-checker', icon: 'User', label: '质量数字人' },
-      { to: '/data-factory', icon: 'Coin', label: '数据工厂' }
+      { to: '/team-model-settings', icon: 'SetUp', label: '模型配置' },
+      { to: '/settings', icon: 'Setting', label: 'AI底座配置', adminOnly: true },
+      { to: '/monitor', icon: 'Odometer', label: '任务监控' },
+      { to: '/audit', icon: 'PieChart', label: '审计大屏' },
+      { to: '/trace', icon: 'Link', label: '链路追踪' },
+      { to: '/agent-orchestrator', icon: 'Connection', label: 'Agent 编排中心' }
     ]
   },
   {
-    key: 'testing',
-    title: '测试工具',
+    key: 'test',
+    title: 'AI 测试平台',
     items: [
+      { to: '/knowledge/chat', icon: 'Collection', label: '知识中枢' },
+      { to: '/eval-center', icon: 'DataAnalysis', label: '全链路评测中心' },
+      { to: '/quality-checker', icon: 'User', label: '质量数字人' },
+      { to: '/data-factory', icon: 'Coin', label: '数据工厂' },
       { to: '/testcases/ai-generate', icon: 'MagicStick', label: 'AI 用例生成' },
       { to: '/testcases', icon: 'Connection', label: '接口测试' },
       { to: '/web-testcases', icon: 'Monitor', label: 'UI 自动化' },
@@ -144,23 +149,13 @@ const menuGroups = [
     ]
   },
   {
-    key: 'ops',
-    title: '运维底座',
-    items: [
-      { to: '/monitor', icon: 'Odometer', label: '任务监控' },
-      { to: '/audit', icon: 'PieChart', label: '审计大屏' },
-      { to: '/trace', icon: 'Link', label: '链路追踪' }
-    ]
-  },
-  {
     key: 'admin',
     title: '系统管理',
     adminOnly: true,
     items: [
       { to: '/mcp-gateway', icon: 'Platform', label: 'MCP 网关' },
       { to: '/sandbox', icon: 'Box', label: '沙箱管控' },
-      { to: '/tenants', icon: 'UserFilled', label: '业务接入' },
-      { to: '/team-model-settings', icon: 'SetUp', label: '模型配置' }
+      { to: '/tenants', icon: 'UserFilled', label: '业务接入' }
     ]
   }
 ]

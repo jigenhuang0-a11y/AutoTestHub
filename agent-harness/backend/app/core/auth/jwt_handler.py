@@ -91,7 +91,9 @@ class JWTValidator:
     LEEWAY_SECONDS = 30
 
     def __init__(self, signing_key: Optional[str] = None):
-        self._signing_key = signing_key or os.getenv("JWT_SIGNING_KEY", "")
+        # 优先用显式传入的 key；否则读环境变量；环境未配置（含空串）时回退到开发默认 key，
+        # 与 auth.py 的 _issue_token 保持一致，避免签发/验签 key 不匹配导致 500。
+        self._signing_key = signing_key or os.getenv("JWT_SIGNING_KEY") or "harness-dev-fallback-key"
 
     @property
     def is_configured(self) -> bool:

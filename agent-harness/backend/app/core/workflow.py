@@ -34,6 +34,8 @@ from app.core.metrics import (
     llm_request_duration_seconds,
 )
 from app.core.template_store import get_template_sync
+from app.core.webhook_sender import dispatch_webhook_event
+from app.core.tenant_usage import check_quota
 from app.core.robustness import (
     retry_with_backoff,
     RetryExhausted,
@@ -87,6 +89,22 @@ def resolve_agent_action(agent_name: str, team_id: str = None, auth_token: str =
         logger.debug(f"[ToolRegistry.Fallback] {agent_name} → {action}")
         return action
     raise ValueError(f"未知 Agent: {agent_name}")
+
+
+def _resolve_system_prompt(agent_name: str, fallback: str) -> str:
+    """
+    Prompt 热加载：优先从 task_store 取该 agent 的激活版本，回退到代码内硬编码。
+    让「Prompt 管理」页面保存后无需重启即可对新任务生效。
+    """
+    try:
+        from app.core.task_store import get_task_store
+        rec = get_task_store().get_active_prompt(agent_name)
+        if rec and rec.system_prompt and rec.system_prompt.strip():
+            logger.info(f"[Prompt] 热加载 {agent_name} 激活版本(v{rec.version})")
+            return rec.system_prompt
+    except Exception as e:
+        logger.warning(f"[Prompt] 热加载 {agent_name} 失败，使用硬编码: {e}")
+    return fallback
 
 
 def _infer_data_factory_params(prompt: str, params: dict) -> dict:
@@ -364,6 +382,17 @@ def plan_node(state: dict) -> dict:
     except Exception:
         pass  # 审计记录失败不影响工作流
 
+    # ── Webhook 通知：工作流启动 ──
+    try:
+        dispatch_webhook_event("workflow_start", {
+            "task_id": task_id or "",
+            "team_id": team_id,
+            "user": str(state.get("user_id", "system")),
+            "request": user_request[:120],
+        })
+    except Exception:
+        pass
+
     # ---- 模板感知逻辑 ----
     template = get_template_sync(team_id, template_id_arg)
     steps_via_template = False
@@ -385,7 +414,7 @@ def plan_node(state: dict) -> dict:
             logger.info(f"[Harness.Plan] team={team_id} 无已发布模板，使用 LLM 自由生成")
             router = get_llm_router()
             messages = [
-                {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+                {"role": "system", "content": _resolve_system_prompt("planner", PLAN_SYSTEM_PROMPT)},
                 {"role": "user", "content": f"用户需求：{user_request}\n\n请生成执行计划，只输出 JSON 数组。"},
             ]
             with tracer.start_as_current_span("harness.plan.free") as span:
@@ -1009,7 +1038,7 @@ def verify_node(state: dict) -> dict:
         router = get_llm_router()
         results_text = json.dumps([{"agent": r["agent"], "status": r["status"], "result": r.get("result")} for r in results], ensure_ascii=False)
         messages = [
-            {"role": "system", "content": VERIFY_SYSTEM_PROMPT},
+            {"role": "system", "content": _resolve_system_prompt("evaluator", VERIFY_SYSTEM_PROMPT)},
             {"role": "user", "content": f"用户需求：{user_request}\n\n执行结果：{results_text}\n\n请验证是否满足需求。"},
         ]
         with tracer.start_as_current_span("harness.verify") as span:
@@ -1075,6 +1104,21 @@ def verify_node(state: dict) -> dict:
             stage="verify",
             status="end",
             message=f"工作流完成: {final_output.get('summary', '')[:150]}",
+        )
+    except Exception:
+        pass
+
+    # ── Webhook 通知：工作流完成/失败 ──
+    try:
+        passed = bool(verification.get("passed")) if isinstance(verification, dict) else False
+        dispatch_webhook_event(
+            "workflow_success" if passed else "workflow_failed",
+            {
+                "task_id": task_id or "",
+                "team_id": state.get("team_id", "default"),
+                "user": str(state.get("user_id", "system")),
+                "summary": str(final_output.get("summary", ""))[:120],
+            },
         )
     except Exception:
         pass
@@ -1262,6 +1306,19 @@ def run_workflow_stream(user_request: str, task_id: str = None, user_id: int = N
     initial_state = _build_initial_state(user_request, task_id, user_id, auth_token, progress_callback,
                                          team_id=team_id, template_id=template_id)
 
+    # ── 租户限流（QPS + 日调用上限） ──
+    allowed, reason = check_quota(team_id)
+    if not allowed:
+        logger.warning(f"[Quota] team={team_id} 被限流: {reason}")
+        progress_callback(ProgressEvent.WORKFLOW_ERROR, {
+            "task_id": task_id, "error": f"触发租户限流: {reason}", "quota_exceeded": True,
+        })
+        yield {
+            "event": "error",
+            "data": {"task_id": task_id, "error": f"触发租户限流: {reason}", "quota_exceeded": True},
+        }
+        return
+
     # 如果从 checkpoint 恢复，先通知前端
     if initial_state.get("__checkpoint_phase"):
         completed = initial_state.get("_completed_steps", [])
@@ -1294,15 +1351,14 @@ def run_workflow_stream(user_request: str, task_id: str = None, user_id: int = N
                 logger.exception("[Harness.Stream] 工作流异常")
                 error_holder["error"] = str(e)
                 progress_callback(ProgressEvent.WORKFLOW_ERROR, {"task_id": task_id, "error": str(e)})
-                # ── Webhook 通知：工作流失败 ──
+                # ── Webhook 通知：工作流失败（流式异常） ──
                 try:
-                    from app.core.webhook_notifier import notify_workflow_error
-                    notify_workflow_error(
-                        user_request=user_request,
-                        error=str(e),
-                        task_id=task_id or "",
-                        retry_count=initial_state.get("_retry_count", 0),
-                    )
+                    dispatch_webhook_event("workflow_failed", {
+                        "task_id": task_id or "",
+                        "team_id": team_id,
+                        "user": str(user_id or "system"),
+                        "error": str(e)[:200],
+                    })
                 except Exception:
                     pass
 
@@ -1334,19 +1390,22 @@ def run_workflow_stream(user_request: str, task_id: str = None, user_id: int = N
                 }
                 # ── Webhook 通知：工作流完成（stream 模式）──
                 try:
-                    from app.core.webhook_notifier import notify_workflow_complete
+                    from app.core.webhook_sender import dispatch_webhook_event
                     final_result = final_state_holder.get("result", {})
                     final_output = final_result.get("final_output", {})
                     results = final_result.get("results", [])
                     total_duration = sum(r.get("duration_ms", 0) for r in results)
-                    notify_workflow_complete(
-                        user_request=user_request,
-                        passed=final_output.get("passed", False),
-                        score=final_output.get("score", 0),
-                        summary=final_output.get("summary", "工作流执行完成"),
-                        steps_count=len(results),
-                        duration_ms=total_duration,
-                        task_id=task_id or "",
+                    dispatch_webhook_event(
+                        "workflow_success",
+                        {
+                            "task_id": task_id or "",
+                            "user_request": user_request or "",
+                            "passed": final_output.get("passed", False),
+                            "score": final_output.get("score", 0),
+                            "summary": final_output.get("summary", "工作流执行完成"),
+                            "steps_count": len(results),
+                            "duration_ms": total_duration,
+                        },
                     )
                 except Exception:
                     pass

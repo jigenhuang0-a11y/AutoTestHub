@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import router from '@/router'
 
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref(null)
+  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
   const accessToken = ref(localStorage.getItem('access_token') || '')
   const refreshToken = ref(localStorage.getItem('refresh_token') || '')
 
@@ -24,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
         role: response.role,
         email: response.email,
       }
+      localStorage.setItem('user', JSON.stringify(user.value))
       ElMessage.success('登录成功')
       await router.push('/workbench')
     } catch (error) {
@@ -38,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user')
     router.push('/login')
     ElMessage.success('已退出登录')
   }
@@ -47,6 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
       const profile = await authAPI.getProfile()
       // 后端 /auth/profile 返回 { user: {...} }，需解包
       user.value = profile?.user || profile || null
+      if (user.value) localStorage.setItem('user', JSON.stringify(user.value))
     } catch (error) {
       console.error('Failed to fetch profile:', error)
     }

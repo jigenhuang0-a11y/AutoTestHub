@@ -32,6 +32,9 @@ class ProviderPool:
         if name not in available:
             raise ValueError(f"Provider '{name}' 未配置 API Key")
 
+        # 模型配置生效：把 DB 中该 provider 的 base_url 注入（页面改了无需重启）
+        kwargs = self._apply_db_base_url(name, kwargs)
+
         cache_key = self._make_key(name, kwargs)
         with self._lock:
             if cache_key not in self._instances:
@@ -39,6 +42,20 @@ class ProviderPool:
                 self._instances[cache_key] = provider_cls(**kwargs)
                 logger.info(f"[ProviderPool] 创建新实例: {cache_key}")
             return self._instances[cache_key]
+
+    @staticmethod
+    def _apply_db_base_url(provider_name: str, kwargs: dict) -> dict:
+        """从 model_configs 表读取该 provider 的 base_url，覆盖默认端点。"""
+        try:
+            from app.core.task_store import get_task_store
+            rec = get_task_store().get_model_config_by_provider(provider_name)
+            if rec and rec.base_url and rec.base_url.strip():
+                kwargs = dict(kwargs)
+                kwargs["base_url"] = rec.base_url.strip()
+                logger.info(f"[ProviderPool] {provider_name} base_url 来自 DB: {rec.base_url}")
+        except Exception as e:
+            logger.warning(f"[ProviderPool] 读取 DB base_url 失败({provider_name}): {e}")
+        return kwargs
 
     def get_default(self) -> BaseLLMProvider:
         available = get_available_providers()

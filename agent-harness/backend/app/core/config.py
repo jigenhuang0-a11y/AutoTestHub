@@ -121,8 +121,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # JWT 鉴权配置（FastAPI 自签，不再与 Django 互通）
 # ============================================================
 
-# 平台自签 JWT 签名密钥（请通过环境变量在生产环境覆盖）
-JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
+# 平台自签 JWT 签名密钥（生产环境务必通过环境变量 JWT_SIGNING_KEY 覆盖）
+JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "dev-local-signing-key-change-in-prod")
 
 # JWT 算法
 JWT_ALGORITHM = "HS256"

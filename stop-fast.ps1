@@ -11,7 +11,7 @@ Write-Host "============================================`n" -ForegroundColor Cya
 
 $stopped = 0
 
-$titles = @("Agent-Harness-Backend", "Agent-Harness-Frontend", "Django-Backend", "AI-Platform-Frontend")
+$titles = @("Agent-Harness-Backend", "Agent-Harness-Frontend")
 foreach ($title in $titles) {
     $procs = Get-Process | Where-Object { $_.MainWindowTitle -like "*$title*" }
     foreach ($p in $procs) {
@@ -25,7 +25,7 @@ foreach ($title in $titles) {
     }
 }
 
-$ports = @(8000, 8001, 5173, 5174)
+$ports = @(8001, 5174)
 foreach ($port in $ports) {
     $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
     foreach ($conn in $conns) {

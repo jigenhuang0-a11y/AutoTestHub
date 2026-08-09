@@ -45,16 +45,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  Python: $pyInfo" -ForegroundColor Gray
 
-Push-Location "$ROOT\backend"
-$djangoCheck = & $PYTHON_CMD -c "import django; print(django.VERSION[0],django.VERSION[1])" 2>&1
-Pop-Location
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  Django: $djangoCheck" -ForegroundColor Gray
-} else {
-    Write-Host "  [ERROR] Django 未安装！运行: cd backend && pip install -r requirements.txt" -ForegroundColor Red
-    exit 1
-}
-
 $harnessDepCheck = & $PYTHON_CMD -c "import uvicorn, fastapi, pydantic_settings, httpx; print('OK')" 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  Agent-Harness dep: OK" -ForegroundColor Gray
@@ -83,7 +73,7 @@ foreach ($port in $ports) {
 }
 Start-Sleep -Seconds 1
 
-Write-Host "`n[3/5] 并行启动 4 个服务..." -ForegroundColor Yellow
+Write-Host "`n[3/5] 并行启动 2 个服务（Agent-Harness 单服务架构）..." -ForegroundColor Yellow
 
 function Start-ServiceWindow($title, $dir, $cmd, $logFile) {
     $scriptPath = "$TMP_DIR\start-$title.ps1"
@@ -98,20 +88,16 @@ $cmd 2>&1 | Tee-Object -FilePath '$logFile'
     Write-Host "  已启动: $title" -ForegroundColor Gray
 }
 
-Start-ServiceWindow "Agent-Harness-Backend" "$ROOT\agent-harness\backend" "`$env:PORT='8001'; uvicorn app.main:app --host 0.0.0.0 --port 8001" "$LOG_DIR\agent-harness-backend.log"
+Start-ServiceWindow "Agent-Harness-Backend" "$ROOT\agent-harness\backend" "`$env:PORT='8001'; `$env:JWT_SIGNING_KEY='dev-local-signing-key-change-me'; uvicorn app.main:app --host 0.0.0.0 --port 8001" "$LOG_DIR\agent-harness-backend.log"
 Start-ServiceWindow "Agent-Harness-Frontend" "$ROOT\agent-harness\frontend" "npm run dev" "$LOG_DIR\agent-harness-frontend.log"
-Start-ServiceWindow "Django-Backend" "$ROOT\backend" "`$env:AI_ORCHESTRATION_SERVICE_URL='http://localhost:8001'; python manage.py runserver 0.0.0.0:8000 --noreload" "$LOG_DIR\django-backend.log"
-Start-ServiceWindow "AI-Platform-Frontend" "$ROOT\frontend" "npm run dev" "$LOG_DIR\ai-platform-frontend.log"
 
-Write-Host "  4 个服务窗口已启动`n" -ForegroundColor Green
+Write-Host "  2 个服务窗口已启动`n" -ForegroundColor Green
 
 Write-Host "[4/5] 等待服务就绪..." -ForegroundColor Yellow
 
 $services = @(
     @{Name="Agent-Harness 底座";  URL="http://127.0.0.1:8001/api/v1/health"; Ready=$false},
-    @{Name="Django 后端";          URL="http://127.0.0.1:8000/api/auth/login/"; Ready=$false; Method="POST"; Body='{"username":"admin","password":"dummy"}'},
-    @{Name="Agent-Harness 前端";   URL="http://127.0.0.1:5174"; Ready=$false},
-    @{Name="AI平台前端";           URL="http://127.0.0.1:5173"; Ready=$false}
+    @{Name="Agent-Harness 前端";   URL="http://127.0.0.1:5174"; Ready=$false}
 )
 
 $ELAPSED = 0
@@ -169,9 +155,7 @@ if ($notReady.Count -eq 0) {
 Write-Host "`n  ┌──────────────────────────────────────────────┐" -ForegroundColor Cyan
 Write-Host "  │  服务                地址                    │" -ForegroundColor Cyan
 Write-Host "  ├──────────────────────────────────────────────┤" -ForegroundColor Cyan
-Write-Host "  │  AI测试平台前端       http://localhost:5173   │" -ForegroundColor Cyan
 Write-Host "  │  Agent-Harness中台    http://localhost:5174   │" -ForegroundColor Cyan
-Write-Host "  │  Django 后端 API       http://localhost:8000   │" -ForegroundColor Cyan
 Write-Host "  │  Harness 底座 API      http://localhost:8001   │" -ForegroundColor Cyan
 Write-Host "  ├──────────────────────────────────────────────┤" -ForegroundColor Cyan
 Write-Host "  │  默认账号: admin / admin123456               │" -ForegroundColor Cyan
@@ -179,7 +163,6 @@ Write-Host "  │  日志目录: $LOG_DIR" -ForegroundColor Cyan
 Write-Host "  └──────────────────────────────────────────────┘" -ForegroundColor Cyan
 
 if ($notReady.Count -eq 0) {
-    Start-Process "http://localhost:5173"
     Start-Sleep -Milliseconds 500
     Start-Process "http://localhost:5174"
 }

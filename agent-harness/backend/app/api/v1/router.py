@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import audit, auth, health, llm, mcp, memory, sandbox, tasks, team, templates, tenants, tool_registry, webhooks, workflow, supervisor
+from app.api.v1.endpoints import audit, auth, health, llm, mcp, memory, sandbox, tasks, team, templates, tenants, tool_registry, webhooks, workflow, supervisor, environments
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -13,6 +13,7 @@ api_router.include_router(memory.router, prefix="/memory", tags=["memory"])
 api_router.include_router(llm.router, prefix="/llm", tags=["llm"])
 api_router.include_router(tool_registry.router, prefix="/tools", tags=["tools"])
 api_router.include_router(sandbox.router, prefix="/agent/sandbox", tags=["sandbox"])
+api_router.include_router(environments.router, prefix="/agent/environments", tags=["environments"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(tenants.router, prefix="/agent/tenants", tags=["tenants"])
 api_router.include_router(team.router, prefix="/team", tags=["team-orchestration"])

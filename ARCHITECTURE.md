@@ -16,7 +16,7 @@ ai-test-platform/  （统一仓库）
 │   ├── backend/  (FastAPI :8001)    ReAct/工作流/LLM路由
 │   └── frontend/ (Vue 3 :5174)     运维中台UI
 │
-├── backend/      (Django :8000)     上层业务系统
+├── agent-harness/ (FastAPI :8001)   唯一自包含服务
 ├── frontend/     (Vue 3 :5173)      测试平台UI
 │
 ├── docker-compose.yml               统一容器编排
@@ -79,7 +79,7 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 
 ```
 ┌─────────────────────────────────────────────┐
-│              Django REST Framework           │
+│              FastAPI + Pydantic              │
 │  ┌──────────────┐  ┌──────────────────────┐ │
 │  │ accounts/    │  │ testcases/           │ │
 │  │ 用户/角色/权限 │  │ 用例 CRUD/AI 生成     │ │
@@ -124,10 +124,10 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 ### 1. 两套 Harness → 统一为独立底座
 
 **背景**：项目早期同时存在两套 Agent Harness：
-- Django 内的 `backend/core/agents/harness/workflow.py`
+- `agent-harness/backend/app/core/workflow.py`（唯一 Agent Harness 大脑）
 - 独立服务 `ai-orchestration-service/app/core/workflow.py`（现已迁移到 `agent-harness/backend/app/core/workflow.py`）
 
-**决策**：不打通两套，统一以 `agent-harness/backend` 为唯一 Agent Harness 大脑；Django 退化为工具/网关层，只暴露 Agent 工具 API，并负责调用底座。
+**决策**：彻底移除 Django。统一以 `agent-harness/backend` 为唯一自包含服务，所有工具（search/generator/data_factory/execution/evaluator）用 FastAPI 本地函数重写，由本地 ToolRegistry 管理，无跨服务 HTTP 调用。
 
 **理由**：
 - 为 SaaS 化铺路：平台提供通用业务，底座提供通用工作流原语，各团队可有自己的工作流模板
@@ -135,9 +135,9 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 - 平台适配团队风格，而不是团队削足适履适配平台
 - 物理隔离后，底座可以单独卖给其他团队/业务线使用
 
-### 2. Django 职责剥离
+### 2. Django 职责剥离（已废弃：Django 已彻底移除）
 
-| 保留在 Django（业务层） | 迁移到 Agent Harness（底座层） |
+| 原 Django 业务层职责 | 现状（已迁移到 Agent Harness 底座层） |
 |------------------------|------------------------|
 | RAG 知识库（CRUD、向量检索） | 用例生成策略/决策 |
 | 用例管理、测试执行 | 评估流程编排 |
@@ -148,12 +148,12 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 
 ### 3. 服务间认证设计
 
-**问题**：编排服务调 Django 工具 API 时，没有"用户登录 token"，直接 401。
+**问题（历史）**：早期编排服务调底座 workflow 时，缺少"用户登录 token"会导致 401。现已通过 JWT 中间件统一注入 `request.state.user` 解决。
 
 **方案**：
 - 两层认证：`X-Service-Token`（服务间）+ 用户 token fallback
 - 编排服务的 `ToolGatewayClient` 自动注入服务 token
-- Django 侧 `ServiceTokenAuthentication` 返回 `is_authenticated=True` 的 service account
+- Agent Harness 侧 JWT 中间件注入 `request.state.user`（含 role），`require_admin` 统一校验
 - 工作流接收 `auth_token` 参数但不强制要求，自动兜底
 
 ### 4. 多租户预留
@@ -170,7 +170,7 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 - [x] Workflow Harness（Plan/Orchestrate/Verify/ReAct/Checkpoint）
 - [x] ReAct Agent 思考循环
 - [x] LLM Router（多模型选择 + fallback）
-- [x] ToolGatewayClient → Django MCP 打通
+- [x] 本地 ToolRegistry 集成（Django MCP 已移除，改本地函数）
 - [x] 服务间认证（X-Service-Token）
 - [x] workflow.py `_resolve_auth_token()` 兜底逻辑
 - [x] orchestrator Docker 健康检查修复
@@ -194,7 +194,7 @@ ToolGateway / MCP 工具 / 记忆 / 沙箱
 - [ ] 前端 6 页面对接真实后端数据
 
 ### 第三阶段：业务链路跑稳
-- [ ] 用例生成端到端（Django → 底座 workflow → LLM）
+- [x] 用例生成端到端（workflow → LLM Router → 本地工具）
 - [ ] 用例执行端到端（沙箱执行 → 结果回传）
 - [ ] RAG 问答端到端（文档 → Milvus → 检索增强）
 - [ ] 团队级记忆/工具/模型隔离验证

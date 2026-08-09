@@ -124,7 +124,6 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - GLM_API_KEY=${GLM_API_KEY:-}
-      - DJANGO_BASE_URL=http://backend:8000
       - REDIS_URL=redis://redis:6379/1
       - LOG_LEVEL=INFO
       - OTEL_SERVICE_NAME=ai-orchestration-service

@@ -28,6 +28,7 @@ from typing import Any, Optional
 from app.core.robustness import call_llm_with_fallback
 from app.core.router import get_llm_router
 from app.core.task_store import TaskStore
+from app.core.workflow import _resolve_system_prompt
 from app.schemas.team import (
     Artifact,
     HandoffIntent,
@@ -309,7 +310,7 @@ class TeamOrchestrator:
 
     def _execute_orchestrator(self, task: TeamTask) -> tuple[TeamTask, str]:
         messages = [
-            {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+            {"role": "system", "content": _resolve_system_prompt("orchestrator", ORCHESTRATOR_SYSTEM_PROMPT)},
             {"role": "user", "content": f"任务标题: {task.title}\n描述: {task.description}\n上下文: {json.dumps(task.context, ensure_ascii=False)}"},
         ]
         try:
@@ -342,7 +343,7 @@ class TeamOrchestrator:
 
     def _execute_planner(self, task: TeamTask) -> tuple[TeamTask, str]:
         messages = [
-            {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+            {"role": "system", "content": _resolve_system_prompt("planner", PLANNER_SYSTEM_PROMPT)},
             {"role": "user", "content": f"任务: {task.title}\n{task.description}\n上下文: {json.dumps(task.context, ensure_ascii=False)}"},
         ]
         try:
@@ -487,7 +488,7 @@ class TeamOrchestrator:
                 f"[{a.name}]\n{a.content[:2000]}" for a in task.artifacts
             )
             messages = [
-                {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
+                {"role": "system", "content": _resolve_system_prompt("reviewer", REVIEWER_SYSTEM_PROMPT)},
                 {"role": "user", "content": f"任务: {task.title}\n{task.description}\n产物:\n{artifacts_text}"},
             ]
             try:

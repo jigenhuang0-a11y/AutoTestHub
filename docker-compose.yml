@@ -87,7 +87,6 @@ services:
       - GLM_API_KEY=${GLM_API_KEY:-}
       - SERVICE_TOKEN=${SERVICE_TOKEN:-service-token-dev}
       - JWT_SIGNING_KEY=${JWT_SIGNING_KEY:-dev-secret-key-2026}
-      - DJANGO_BASE_URL=http://backend:8000
     volumes:
       - orchestrator_data:/app/data
     depends_on:
@@ -98,59 +97,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ===== Django 业务后端 =====
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgres://postgres:${DB_PASSWORD:-ai_test_2026}@postgres:5432/ai_test_platform
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-2026}
-      - SERVICE_TOKEN=${SERVICE_TOKEN:-service-token-dev}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - ORCHESTRATOR_URL=http://ai-orchestrator:8001
-      - DJANGO_SETTINGS_MODULE=core.settings
-      - DEBUG=False
-      - ALLOWED_HOSTS=*
-    volumes:
-      - django_media:/app/media
-      - django_static:/app/static
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  celery:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: celery -A core worker -l info -c 4
-    environment:
-      - DATABASE_URL=postgres://postgres:${DB_PASSWORD:-ai_test_2026}@postgres:5432/ai_test_platform
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-2026}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - ORCHESTRATOR_URL=http://ai-orchestrator:8001
-    depends_on:
-      - postgres
-      - redis
-      - backend
-
-  # ===== 测试平台前端（Vue + Nginx） =====
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
-      - ai-orchestrator
 
   # ===== Agent 运维中台前端（Vue + Nginx） =====
   harness-frontend:
@@ -168,5 +114,3 @@ volumes:
   minio_data:
   milvus_data:
   orchestrator_data:
-  django_media:
-  django_static:

@@ -221,29 +221,31 @@
       <!-- ═══════ Tab 2: 平台监控 ═══════ -->
       <el-tab-pane label="平台监控" name="monitor">
         <div class="monitor-grid">
-          <!-- 资源使用 -->
+          <!-- 资源使用（真实服务健康，来自 /health/services） -->
           <div class="tech-card resource-card">
             <div class="card-header">
               <div class="header-left">
                 <span class="card-icon"><el-icon><Odometer /></el-icon></span>
-                <span class="card-title">系统资源</span>
+                <span class="card-title">系统资源 · 服务健康</span>
               </div>
               <span class="header-live">LIVE</span>
             </div>
             <div class="card-body">
               <div class="resource-bars">
-                <div class="res-item" v-for="r in resources" :key="r.label">
+                <div class="res-item" v-for="s in healthServices" :key="s.name">
                   <div class="res-header">
-                    <span class="res-label">{{ r.label }}</span>
-                    <span class="res-value" :class="r.pct > 80 ? 'danger' : r.pct > 60 ? 'warn' : ''">{{ r.pct }}%</span>
+                    <span class="res-label">{{ s.name }}</span>
+                    <span class="res-value" :class="s.status === 'ok' ? 'ok' : s.status === 'warn' ? 'warn' : 'danger'">
+                      {{ s.status === 'ok' ? '正常' : s.status === 'warn' ? '警告' : '异常' }}
+                    </span>
                   </div>
                   <div class="res-bar-track">
-                    <div class="res-bar-fill" :class="r.pct > 80 ? 'danger' : r.pct > 60 ? 'warn' : 'ok'"
-                      :style="{ width: r.pct + '%' }">
-
+                    <div class="res-bar-fill"
+                      :class="s.status === 'ok' ? 'ok' : s.status === 'warn' ? 'warn' : 'danger'"
+                      :style="{ width: s.status === 'ok' ? '92%' : s.status === 'warn' ? '55%' : '20%' }">
                     </div>
                   </div>
-                  <div class="res-detail">{{ r.detail }}</div>
+                  <div class="res-detail">{{ s.detail }}</div>
                 </div>
               </div>
             </div>
@@ -254,7 +256,7 @@
             <div class="card-header">
               <div class="header-left">
                 <span class="card-icon"><el-icon><List /></el-icon></span>
-                <span class="card-title">任务队列 · Celery</span>
+                <span class="card-title">任务队列 · 本地调度</span>
               </div>
             </div>
             <div class="card-body">

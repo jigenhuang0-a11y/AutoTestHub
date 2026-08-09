@@ -5,6 +5,7 @@ Phase 2.4：工具列表持久化到 SQLite，替换 MOCK_TOOLS 内存数据。
 真实沙箱执行（code_runner / sql_executor）保持不变，
 审计日志保留内存 mock（后期可持久化到审计表）。
 """
+import json
 import logging
 import random
 import time
@@ -258,7 +259,33 @@ async def call_tool(payload: MCPToolCall):
             duration_ms=duration_ms,
         )
 
-    # ---------- 回退：mock ----------
+    # ---------- 本地真实工具（tool_registry 自注册） ----------
+    try:
+        from app.tools.registry import get_registry as get_tool_registry
+        registry = get_tool_registry()
+        spec = registry.get(payload.tool_name)
+        if spec is not None and spec.handler is not None:
+            raw = registry.call_tool(payload.tool_name, **(payload.arguments or {}))
+            duration_ms = int((time.time() - t0) * 1000)
+            text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+            _log_audit(payload.tool_name, "success", duration_ms, str(payload.arguments)[:120], text[:200])
+            return MCPToolCallResult(
+                tool_name=payload.tool_name,
+                status="success",
+                result=f"[本地工具 {payload.tool_name}]\n{text}",
+                duration_ms=duration_ms,
+            )
+    except Exception as e:
+        duration_ms = int((time.time() - t0) * 1000)
+        _log_audit(payload.tool_name, "error", duration_ms, str(payload.arguments)[:120], str(e)[:200])
+        return MCPToolCallResult(
+            tool_name=payload.tool_name,
+            status="error",
+            result=f"工具 {payload.tool_name} 执行失败: {e}",
+            duration_ms=duration_ms,
+        )
+
+    # ---------- 最终回退：mock（仅用于 MCP 网关里没有对应本地实现的占位工具） ----------
     duration = random.randint(50, 500)
     _log_audit(payload.tool_name, "success", duration, str(payload.arguments)[:120], "mock result")
     return MCPToolCallResult(

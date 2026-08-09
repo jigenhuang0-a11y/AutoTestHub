@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import JWTUser, get_current_user
 from app.core.task_store import TaskStore
@@ -37,7 +37,6 @@ def _get_orchestrator(store: TaskStore = Depends(TaskStore)) -> TeamOrchestrator
     summary="创建团队编排任务",
 )
 def create_team_task(
-    request: Request,
     req: TeamTaskCreate,
     orchestrator: TeamOrchestrator = Depends(_get_orchestrator),
     current_user: JWTUser = Depends(get_current_user),

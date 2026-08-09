@@ -17,16 +17,6 @@ scrape_configs:
           service: ai-orchestration-service
           component: agent-harness
 
-  # FastAPI 编排服务（暴露 /metrics 端点）
-  - job_name: backend
-    metrics_path: /metrics/
-    static_configs:
-      - targets:
-          - backend:8000
-        labels:
-          service: backend
-          component: tool-gateway
-
   # Prometheus 自身
   - job_name: prometheus
     static_configs:

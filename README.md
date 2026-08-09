@@ -2,7 +2,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10-blue?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/Django-4.2-green?logo=django&logoColor=white" alt="Django">
   <img src="https://img.shields.io/badge/Vue-3.4-4FC08D?logo=vue.js&logoColor=white" alt="Vue3">
   <img src="https://img.shields.io/badge/Milvus-2.4-00A3E0?logo=apache&logoColor=white" alt="Milvus">
   <img src="https://img.shields.io/badge/Playwright-1.45-2EAD33?logo=microsoft-edge&logoColor=white" alt="Playwright">
@@ -100,7 +99,7 @@ graph TB
         K[静态资源] --> L["/api/* 反向代理"]
     end
 
-    subgraph 后端["后端 (Django 4.2 + DRF)"]
+    subgraph 后端["Agent Harness 底座 (FastAPI)"]
         M[accounts<br/>JWT 认证]
         N[testcases<br/>用例管理]
         O[execution<br/>Pytest 引擎]
@@ -166,7 +165,7 @@ graph TB
 
 | 层级 | 技术 | 说明 |
 |------|------|------|
-| **后端框架** | Django 4.2 + DRF | REST API + JWT 认证 + ORM |
+| **后端框架** | FastAPI + Pydantic | REST API + JWT 认证 |
 | **数据库** | SQLite / PostgreSQL | 开发/生产切换，环境变量配置 |
 | **向量数据库** | Milvus 2.4 | 企业级向量存储，支持亿级向量 |
 | **AI 引擎** | DashScope (通义千问/豆包/DeepSeek) | 多模型统一调用，支持 VL 多模态 |
@@ -222,10 +221,8 @@ docker compose up -d
 # 后端（仅业务平台）
 cd backend
 pip install -r requirements.txt
-python manage.py migrate
 # 创建默认管理员（admin / admin123456）
 python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.filter(username='admin').exists() or U.objects.create_superuser('admin', 'admin@example.com', 'admin123456')"
-python manage.py runserver 0.0.0.0:8000
 
 # 前端（仅业务平台）
 cd ../frontend
@@ -234,7 +231,6 @@ npm run dev
 
 # 访问：http://localhost:5173
 ```
-python manage.py migrate
 python manage.py runserver
 
 # 前端
@@ -267,7 +263,7 @@ npm run dev
 
 ```
 AutoTestHub/
-├── backend/                    # Django 后端（11 个模块）
+├── agent-harness/               # Agent Harness 单服务（FastAPI 底座 + Vue 中台）
 │   ├── accounts/              # JWT 用户认证
 │   ├── testcases/             # 接口测试用例 + AI 生成
 │   ├── testsuites/            # 测试套件编排
@@ -280,7 +276,6 @@ AutoTestHub/
 │   ├── ai_evaluator/          # AI 测评师（5 类问题 + 4 维安全）
 │   ├── agent_gateway/         # 统一 AI 入口（多模型管理）
 │   ├── core/                  # 核心工具（Milvus 存储、DashScope 客户端）
-│   └── ai_test_platform/      # Django 配置
 ├── frontend/                   # Vue3 前端（21 个页面）
 │   └── src/views/
 │       ├── Login.vue

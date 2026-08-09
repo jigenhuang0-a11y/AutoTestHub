@@ -20,15 +20,17 @@
       </div>
 
       <div class="wb-nav-pills">
-        <router-link
-          v-for="item in navPills"
-          :key="item.path"
-          :to="item.path"
+        <div
+          v-for="item in domainTabs"
+          :key="item.key"
           class="nav-pill"
-          :class="{ active: isWorkbenchActive(item) }"
+          :class="{ active: activeDomain === item.key }"
+          @click="switchDomain(item.key)"
         >
-          {{ item.label }}
-        </router-link>
+          <el-icon :size="14"><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+          <el-tag v-if="item.comingSoon" size="small" type="info" effect="plain" round class="domain-tag">规划中</el-tag>
+        </div>
       </div>
 
       <div class="header-actions">
@@ -72,8 +74,8 @@
           </div>
         </div>
         <div class="hero-text">
-          <h1 class="hero-title">AI效能中台</h1>
-          <p class="hero-subtitle">企业大模型应用质量管控与研发效能一体化平台</p>
+          <h1 class="hero-title">{{ currentDomain.label }}</h1>
+          <p class="hero-subtitle">{{ currentDomain.desc }}</p>
         </div>
       </div>
 
@@ -85,10 +87,10 @@
             v-for="card in section.cards"
             :key="card.id"
             class="wb-card"
-            :class="['card-' + card.type]"
+            :class="['card-' + card.type, { disabled: card.disabled }]"
             @click="navigateCard(card)"
-            @mousemove="handleMouseMove"
-            @mouseleave="handleMouseLeave"
+            @mousemove="!card.disabled && handleMouseMove($event)"
+            @mouseleave="!card.disabled && handleMouseLeave($event)"
           >
             <div class="card-base"></div>
             <div class="card-shine"></div>
@@ -103,6 +105,7 @@
                 <h3 class="card-title">{{ card.title }}</h3>
                 <p class="card-subtitle">{{ card.subtitle }}</p>
               </div>
+              <div v-if="card.disabled" class="card-lock">规划中</div>
             </div>
           </div>
         </div>
@@ -123,16 +126,17 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
   Setting, Cpu, Collection, DataAnalysis, ChatDotRound, MagicStick,
   Document, Connection, Monitor, Odometer, FolderAdd, Timer,
   DocumentChecked, TrendCharts, PieChart, Link, SetUp, Grid,
-  ChatDotRound as MsgIcon, Bell, Tools, ArrowDown, SwitchButton
+  ChatDotRound as MsgIcon, Bell, Tools, ArrowDown, SwitchButton,
+  Cpu as DomainBase, DataLine as DomainTest, Tickets, Calendar
 } from '@element-plus/icons-vue'
-import { categories } from '@/data/workbench'
+import { domains, domainMap } from '@/data/workbench'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,11 +146,13 @@ const userInitial = computed(() => {
   return (authStore.user?.username?.[0] || 'U').toUpperCase()
 })
 
-const displaySections = computed(() =>
-  categories.map(c => ({ key: c.key, title: c.title, cards: c.cards }))
-)
+// 当前选中的产品域，默认 AI 效能中台
+const activeDomain = ref('base')
+const currentDomain = computed(() => domainMap[activeDomain.value] || domains[0])
+const displaySections = computed(() => currentDomain.value.sections)
 
 const navigateCard = (card) => {
+  if (card.disabled) return
   if (card.route) router.push(card.route)
 }
 
@@ -189,18 +195,16 @@ const handleMouseLeave = (e) => {
   e.currentTarget.style.removeProperty('--mouse-y')
 }
 
-const navPills = [
-  { label: '工作台', path: '/workbench', activeMatch: '/workbench' },
-  { label: '评测中心', path: '/eval-center', activeMatch: '/eval' },
-  { label: '监控中心', path: '/monitor', activeMatch: '/monitor' },
-  { label: '系统设置', path: '/settings', activeMatch: '/settings' },
-]
+// 产品域顶部导航
+const domainTabs = computed(() => [
+  { key: 'base', label: 'AI 效能中台', icon: DomainBase },
+  { key: 'test', label: 'AI 测试平台', icon: DomainTest },
+  { key: 'case', label: '用例平台', icon: Tickets, comingSoon: true },
+  { key: 'schedule', label: '团队排期', icon: Calendar, comingSoon: true },
+])
 
-const isWorkbenchActive = (item) => {
-  if (route.path === item.path) return true
-  if (item.activeMatch && route.path.startsWith(item.activeMatch)) return true
-  if (item.path === '/workbench' && route.path.startsWith('/category')) return true
-  return false
+const switchDomain = (key) => {
+  activeDomain.value = key
 }
 </script>
 
@@ -697,6 +701,20 @@ const isWorkbenchActive = (item) => {
   letter-spacing: 0.6px;
   transition: color 0.3s;
 }
+
+.wb-card.disabled { cursor: not-allowed; opacity: 0.55; }
+.wb-card.disabled:hover { transform: none; box-shadow: none; }
+.card-lock {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(58, 46, 18, 0.25);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(58, 46, 18, 0.55);
+  white-space: nowrap;
+}
+.domain-tag { margin-left: 4px; }
 
 /* ====== hover 效果 ====== */
 .wb-card:hover {

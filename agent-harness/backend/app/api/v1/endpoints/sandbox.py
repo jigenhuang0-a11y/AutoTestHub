@@ -38,6 +38,67 @@ SANDBOX_TYPES = ["python", "node", "browser"]
 STATUSES = ["running", "idle", "terminated"]
 
 
+class SandboxInstanceManager:
+    """
+    进程内沙箱实例管理器：维护常驻 SandboxExecutor 实例，
+    让「沙箱管控」页面真实对接运行中的沙箱（而非空表占位）。
+    - create: 实例化 SandboxExecutor 并探活（执行探针脚本）
+    - list:   实时回写存活状态与资源占用
+    - stop:   停止并清理常驻实例
+    """
+
+    def __init__(self):
+        self._instances: dict[str, "SandboxExecutor"] = {}
+        self._created_at: dict[str, float] = {}
+
+    def create(self, sbx_id: str, sbx_type: str, memory_mb: int) -> bool:
+        """拉起常驻沙箱实例并探活。"""
+        try:
+            config = SandboxConfig(
+                timeout_seconds=1800,
+                max_memory_mb=memory_mb,
+                cleanup_after=False,  # 常驻，由 manager 显式停止
+            )
+            executor = SandboxExecutor(config)
+            probe_script = "print('sandbox_probe_ok')" if sbx_type == "python" else "console.log('sandbox_probe_ok')"
+            probe = (
+                executor.run_script(probe_script)
+                if sbx_type == "python"
+                else executor.run_command(["node", "-e", probe_script], cwd=executor._jail.setup())
+            )
+            if not probe.ok:
+                logger.warning(f"[SandboxManager] 探活失败 {sbx_id}: {probe.error_message}")
+                return False
+            self._instances[sbx_id] = executor
+            self._created_at[sbx_id] = __import__("time").time()
+            return True
+        except Exception as e:
+            logger.warning(f"[SandboxManager] 创建失败 {sbx_id}: {e}")
+            return False
+
+    def is_alive(self, sbx_id: str) -> bool:
+        return sbx_id in self._instances
+
+    def stop(self, sbx_id: str) -> None:
+        inst = self._instances.pop(sbx_id, None)
+        if inst is not None:
+            try:
+                if hasattr(inst, "_jail"):
+                    inst._jail.cleanup()
+            except Exception:
+                pass
+        self._created_at.pop(sbx_id, None)
+
+    def uptime(self, sbx_id: str) -> int:
+        ts = self._created_at.get(sbx_id)
+        if ts is None:
+            return 0
+        return int(__import__("time").time() - ts)
+
+
+_manager = SandboxInstanceManager()
+
+
 class SandboxItem(BaseModel):
     id: str
     name: str
@@ -165,28 +226,41 @@ def _clone_repo(repo_url: str, branch: str = "main"):
 async def list_sandboxes(
     type: Optional[str] = Query(None, description="按类型过滤"),
 ):
-    """获取沙箱实例列表。"""
+    """获取沙箱实例列表（实时回写运行中实例的状态/资源）。"""
     store = get_task_store()
     items = store.list_sandboxes()
     if type:
         items = [s for s in items if s.get("type") == type]
+    # 实时同步进程内常驻实例状态
+    for s in items:
+        sbx_id = s.get("id") or s.get("sbx_id")
+        if _manager.is_alive(sbx_id):
+            s["status"] = "running"
+            s["uptime_seconds"] = _manager.uptime(sbx_id)
+        elif s.get("status") not in ("terminated",):
+            s["status"] = "idle"
     return SandboxList(items=items, summary=_build_summary(items))
 
 
 @router.post("/")
 async def create_sandbox(payload: SandboxCreate, user: dict = Depends(require_non_viewer)):
-    """创建沙箱实例。"""
+    """创建沙箱实例（真实拉起并探活）。"""
     sb_type = payload.type if payload.type in SANDBOX_TYPES else "python"
     memory_mb = max(256, min(payload.memory_mb or 512, 4096))
     name = payload.name or f"sbx-{sb_type}-{uuid.uuid4().hex[:4]}"
 
     store = get_task_store()
     record = store.create_sandbox(name=name, sbx_type=sb_type, memory_mb=memory_mb)
+    sbx_id = record.sbx_id
+
+    # 真实拉起沙箱实例
+    ok = _manager.create(sbx_id, sb_type, memory_mb)
+    store.update_sandbox_status(sbx_id, "running" if ok else "error")
 
     return {
-        "id": record.sbx_id,
+        "id": sbx_id,
         "name": record.name,
-        "status": "created",
+        "status": "running" if ok else "error",
         "type": record.sbx_type,
         "memory_mb": record.memory_mb,
         "host": record.host,
@@ -197,6 +271,8 @@ async def create_sandbox(payload: SandboxCreate, user: dict = Depends(require_no
 @router.delete("/{sandbox_id}/")
 async def destroy_sandbox(sandbox_id: str, user: dict = Depends(require_non_viewer)):
     """销毁沙箱实例。"""
+    # 先停止常驻实例
+    _manager.stop(sandbox_id)
     store = get_task_store()
     deleted = store.delete_sandbox(sandbox_id)
     if deleted:

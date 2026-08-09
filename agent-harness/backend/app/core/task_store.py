@@ -297,6 +297,34 @@ class WebhookRecord:
         }
 
 
+@dataclass
+class EnvironmentRecord:
+    """测试环境配置记录（环境管理页面）"""
+    id: Optional[int] = None
+    env_id: str = ""                         # 对外 ID 如 env-1
+    name: str = ""                            # 预发环境 / 生产环境
+    env_type: str = "test"                    # test / staging / prod
+    base_url: str = ""
+    description: str = ""
+    owner: str = ""
+    status: str = "active"                    # active / inactive
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.env_id,
+            "name": self.name,
+            "env_type": self.env_type,
+            "base_url": self.base_url,
+            "description": self.description,
+            "owner": self.owner,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 # ============================================================
 # TaskStore 实现
 # ============================================================
@@ -439,6 +467,23 @@ class TaskStore:
             if 'secret' not in cols:
                 conn.execute("ALTER TABLE webhook_configs ADD COLUMN secret TEXT NOT NULL DEFAULT ''")
             conn.commit()
+
+            # ── 测试环境配置表（环境管理页面） ──
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS environments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    env_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    env_type TEXT NOT NULL DEFAULT 'test',   -- test/staging/prod
+                    base_url TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    owner TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_environments_env_id ON environments(env_id);
+            """)
 
             # ── 团队模型偏好表（SaaS 核心：团队可覆盖全局路由表） ──
             conn.executescript("""
@@ -1031,6 +1076,19 @@ class TaskStore:
                 return None
             return PromptRecord(**dict(row))
 
+    def get_active_prompt(self, agent_name: str, prompt_subtype: str = "default") -> Optional[PromptRecord]:
+        """获取某 Agent 当前激活（is_active=1）的 Prompt，用于运行时热加载"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM prompts
+                   WHERE agent_name = ? AND prompt_subtype = ? AND is_active = 1
+                   ORDER BY version DESC LIMIT 1""",
+                (agent_name, prompt_subtype),
+            ).fetchone()
+            if row is None:
+                return None
+            return PromptRecord(**dict(row))
+
     def update_prompt(self, prompt_id: int, system_prompt: str, user_prompt_template: str) -> Optional[PromptRecord]:
         """更新 Prompt（版本号 +1，更新 updated_at）"""
         now = datetime.now(timezone.utc).isoformat()
@@ -1066,6 +1124,17 @@ class TaskStore:
                 "SELECT * FROM model_configs ORDER BY name"
             ).fetchall()
             return [ModelConfigRecord(**dict(r)) for r in rows]
+
+    def get_model_config_by_provider(self, provider: str) -> Optional[ModelConfigRecord]:
+        """按 provider 取一条模型配置（用于把 DB 的 base_url 注入运行时 Provider）"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM model_configs WHERE provider = ? AND is_enabled = 1 LIMIT 1",
+                (provider,),
+            ).fetchone()
+            if row is None:
+                return None
+            return ModelConfigRecord(**dict(row))
 
     # ── 租户管理（Phase 2.2） ──
 
@@ -1115,6 +1184,18 @@ class TaskStore:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM tenants WHERE id = ?", (tenant_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return TenantRecord(**dict(row))
+
+    def get_tenant_by_team(self, team: str) -> Optional[TenantRecord]:
+        """按 team 字段取租户（限流用）"""
+        if not team or team == "default":
+            return None
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM tenants WHERE team = ? LIMIT 1", (team,)
             ).fetchone()
             if row is None:
                 return None
@@ -1439,6 +1520,74 @@ class TaskStore:
             with self._get_conn() as conn:
                 cursor = conn.execute(
                     "DELETE FROM webhook_configs WHERE wh_id = ?", (wh_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
+    # ── 环境管理（Phase 2.6） ──
+
+    def list_environments(self, env_type: str = "") -> list[EnvironmentRecord]:
+        with self._get_conn() as conn:
+            if env_type:
+                rows = conn.execute(
+                    "SELECT * FROM environments WHERE env_type = ? ORDER BY created_at DESC",
+                    (env_type,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM environments ORDER BY created_at DESC"
+                ).fetchall()
+            return [EnvironmentRecord(**dict(r)) for r in rows]
+
+    def get_environment(self, env_id: str) -> Optional[EnvironmentRecord]:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM environments WHERE env_id = ?", (env_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return EnvironmentRecord(**dict(row))
+
+    def create_environment(self, name: str, env_type: str = "test", base_url: str = "",
+                           description: str = "", owner: str = "", status: str = "active") -> EnvironmentRecord:
+        import uuid
+        from datetime import datetime
+        now = datetime.now().isoformat(timespec="seconds")
+        env_id = f"env-{uuid.uuid4().hex[:8]}"
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """INSERT INTO environments
+                       (env_id, name, env_type, base_url, description, owner, status, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (env_id, name, env_type, base_url, description, owner, status, now, now),
+                )
+                conn.commit()
+        return self.get_environment(env_id)
+
+    def update_environment(self, env_id: str, **kwargs) -> Optional[EnvironmentRecord]:
+        allowed = {"name", "env_type", "base_url", "description", "owner", "status"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return self.get_environment(env_id)
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        from datetime import datetime
+        now = datetime.now().isoformat(timespec="seconds")
+        updates["updated_at"] = now
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    f"UPDATE environments SET {set_clause} WHERE env_id = ?",
+                    (*updates.values(), env_id),
+                )
+                conn.commit()
+        return self.get_environment(env_id)
+
+    def delete_environment(self, env_id: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM environments WHERE env_id = ?", (env_id,)
                 )
                 conn.commit()
                 return cursor.rowcount > 0

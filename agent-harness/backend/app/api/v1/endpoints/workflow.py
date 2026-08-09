@@ -87,7 +87,7 @@ async def workflow_invoke(
                     user_id=request.user_id,
                     auth_token=resolved_token,
                     progress_callback=None,
-                    team_id=request.team_id or "default",
+                    team_id=user.team_id or request.team_id or "default",
                     template_id=request.template_id,
                 )
             else:
@@ -95,7 +95,7 @@ async def workflow_invoke(
                     "user_request": request.user_request,
                     "task_id": task_id,
                     "user_id": request.user_id,
-                    "team_id": request.team_id or "default",
+                    "team_id": user.team_id or request.team_id or "default",
                     "template_id": request.template_id,
                     "auth_token": resolved_token,
                     "context": {},
@@ -142,7 +142,7 @@ async def workflow_stream(
             task_id=task_id,
             user_id=request.user_id,
             auth_token=resolved_token,
-            team_id=request.team_id or "default",
+            team_id=user.team_id or request.team_id or "default",
             template_id=request.template_id,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

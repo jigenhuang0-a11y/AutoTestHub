@@ -272,4 +272,27 @@ export const agentAPI = {
   mcpTools: (params) => api.get('/mcp/tools/', { params }),
 }
 
+// 环境管理 API
+export const environmentAPI = {
+  list: (params) => api.get('/agent/environments/', { params }),
+  create: (data) => api.post('/agent/environments/', data),
+  update: (id, data) => api.put(`/agent/environments/${id}/`, data),
+  delete: (id) => api.delete(`/agent/environments/${id}/`),
+}
+
+// 多 Agent 团队编排 API（对接后端 /api/v1/team/team/tasks 任务生命周期）
+export const teamAPI = {
+  list: (params) => api.get('/team/team/tasks', { params }),
+  get: (id) => api.get(`/team/team/tasks/${id}`),
+  create: (data) => api.post('/team/team/tasks', { req: data }),
+  update: (id, data) => api.patch(`/team/team/tasks/${id}`, { req: data }),
+  next: (id) => api.post(`/team/team/tasks/${id}/next`),
+  assign: (id, role, message) => api.post(`/team/team/tasks/${id}/assign`, null, { params: { role, message } }),
+  execute: (id) => api.post(`/team/team/tasks/${id}/execute`),
+  submitReview: (id) => api.post(`/team/team/tasks/${id}/submit-review`),
+  review: (id, verdict) => api.post(`/team/team/tasks/${id}/review`, null, { params: { verdict } }),
+  unblock: (id) => api.post(`/team/team/tasks/${id}/unblock`),
+  orchestrate: (data) => api.post('/team/team/tasks/orchestrate', { req: data }),
+}
+
 export default api
