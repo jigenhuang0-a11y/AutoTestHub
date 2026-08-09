@@ -204,25 +204,41 @@ const router = createRouter({
   routes,
 })
 
-let profileFetched = false
+// 导航守卫
+// 注意：在 Pinia store 中 access_token / user 已从 localStorage 恢复。
+// 若已登录但 user 缺失（例如旧数据未持久化），访问 adminOnly 路由前会重新拉取 profile。
 router.beforeEach(async (to, from) => {
   const authStore = useAuthStore()
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    return '/login'
-  }
-  // 已登录但 user 尚未加载（如刷新后从 token 恢复），先拉取 profile 再判定权限
-  if (authStore.isAuthenticated && !authStore.user && !profileFetched) {
-    profileFetched = true
-    try { await authStore.fetchProfile() } catch { /* 失败不阻断导航 */ }
-  }
-  // 访客（非 admin）禁止访问管理类路由
-  if (to.meta.adminOnly && authStore.user?.role !== 'admin') {
-    ElMessage.warning('演示账号仅可查看效果，无权访问此页面')
-    return '/workbench'
-  }
+  // 1. 已登录用户不应再看到登录页
   if (to.path === '/login' && authStore.isAuthenticated) {
-    return '/workbench'
+    return { path: '/workbench', replace: true }
+  }
+
+  // 2. 需要登录但未登录 -> 引导登录
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  // 3. 已登录但 user 信息缺失：在进入 adminOnly 页面前拉取 profile
+  // 使用 to.meta 上的标记避免同一次导航链中重复拉取
+  if (authStore.isAuthenticated && !authStore.user && to.meta.adminOnly && !to.meta._profileFetched) {
+    to.meta._profileFetched = true
+    try {
+      await authStore.fetchProfile()
+    } catch (err) {
+      console.error('fetchProfile failed:', err)
+    }
+  }
+
+  // 4. adminOnly 权限判定
+  if (to.meta.adminOnly && authStore.user?.role !== 'admin') {
+    // 如果 user 仍未获取到，为避免误拦截，给出明确提示
+    const tip = authStore.user
+      ? '演示账号仅可查看效果，无权访问此页面'
+      : '用户身份信息未加载，无法访问此页面'
+    ElMessage.warning(tip)
+    return { path: '/workbench', replace: true }
   }
 })
 

@@ -42,7 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const logout = () => {
+  const logout = (silent = false) => {
     accessToken.value = ''
     refreshToken.value = ''
     user.value = null
@@ -50,7 +50,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
     router.push('/login')
-    ElMessage.success('已退出登录')
+    if (!silent) ElMessage.success('已退出登录')
   }
 
   const fetchProfile = async () => {
@@ -61,6 +61,37 @@ export const useAuthStore = defineStore('auth', () => {
       if (user.value) localStorage.setItem('user', JSON.stringify(user.value))
     } catch (error) {
       console.error('Failed to fetch profile:', error)
+      throw error
+    }
+  }
+
+  // 应用启动时调用：恢复持久化身份，并确保 user 至少包含 role
+  const initialize = async () => {
+    const token = localStorage.getItem('access_token')
+    const storedUser = localStorage.getItem('user')
+    if (token) {
+      accessToken.value = token
+      refreshToken.value = localStorage.getItem('refresh_token') || ''
+    }
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser)
+        if (parsed && parsed.role) {
+          user.value = parsed
+          return
+        }
+      } catch (e) {
+        console.warn('Failed to parse stored user:', e)
+        localStorage.removeItem('user')
+      }
+    }
+    // 有 token 但无有效 user 信息时，主动拉取 profile
+    if (token) {
+      try {
+        await fetchProfile()
+      } catch (error) {
+        console.error('Initialize fetchProfile failed:', error)
+      }
     }
   }
 
@@ -72,5 +103,6 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     fetchProfile,
+    initialize,
   }
 })
