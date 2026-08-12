@@ -698,12 +698,29 @@
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { testcaseAPI, executionAPI, testsuiteAPI } from '@/api'
+import { testcaseAPI, executionAPI, testsuiteAPI, aiBaseAPI } from '@/api'
 import { ElMessage } from 'element-plus'
 import EmptyState from '@/components/EmptyState.vue'
 import { showDeleteConfirm, showSuccess, showError } from '@/utils/helpers'
 import { Delete, Plus, InfoFilled, VideoPlay, FolderAdd, MagicStick, DocumentChecked, View, Loading, Check, DocumentCopy, Fold, Expand, Search, Lightning, CircleCheck, CircleClose, Close, DataAnalysis, Timer, Star, Connection } from '@element-plus/icons-vue'
 const router = useRouter()
+
+// AI 底座模型选择（供 AI 生成 / 解析 / 调试 走真实 LLM）
+const aiModels = ref([])
+const selectedModelId = ref('')
+async function loadAiModels() {
+  try {
+    const res = await aiBaseAPI.listModels()
+    aiModels.value = res.items || res.results || []
+    if (!selectedModelId.value && aiModels.value.length) {
+      const active = aiModels.value.find(m => m.is_enabled)
+      selectedModelId.value = String(active ? active.id : aiModels.value[0].id)
+    }
+  } catch (e) {
+    aiModels.value = []
+  }
+}
+onMounted(loadAiModels)
 
 const loading = ref(false)
 const testCases = ref([])
@@ -944,6 +961,7 @@ const aiParseInterface = async () => {
       method: formData.method || '',
       response_json: expectedText.value || '',
       request_body: bodyText.value || '',
+      model_id: selectedModelId.value,
     })
 
     // 1. 自动填充请求方法（如果当前为空或是GET但AI识别为其他）
@@ -1124,6 +1142,7 @@ const oneClickDebug = async () => {
           extract_rules: formData.extract_rules,
           assertion_rules: formData.assertion_rules,
           global_variables: globalVars,
+          model_id: selectedModelId.value,
         })
         // 更新提取的变量到全局变量池
         extractedVariables.value = []

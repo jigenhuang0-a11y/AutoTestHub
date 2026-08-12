@@ -47,7 +47,7 @@ export const domains = [
         cards: [
           { id: 'r1-3', title: '知识中枢', subtitle: 'RAG 知识点加载与问答', icon: Collection, route: '/knowledge/chat', type: 'normal' },
           { id: 'r1-4', title: '全链路评测中心', subtitle: '基于AI底座的智能体评估追踪', icon: DataAnalysis, route: '/eval-center', type: 'highlight' },
-          { id: 'r1-5', title: '质量数字人', subtitle: '评估测试用例、问答报告', icon: ChatDotRound, route: '/quality-checker', type: 'normal' },
+          { id: 'r1-5', title: '需求评审师', subtitle: '评审需求、评估测试用例', icon: ChatDotRound, route: '/quality-checker', type: 'normal' },
           { id: 'r1-6', title: '数据工厂', subtitle: '测试数据构造与生成', icon: MagicStick, route: '/data-factory', type: 'normal' }
         ]
       },
@@ -58,8 +58,7 @@ export const domains = [
           { id: 'r2-1', title: '用例生成', subtitle: 'AI生成用例、测试数据', icon: Document, route: '/testcases/ai-generate', type: 'normal' },
           { id: 'r2-2', title: '接口测试', subtitle: '自动化、套件、报表', icon: Connection, route: '/testcases', type: 'focus' },
           { id: 'r2-3', title: 'UI自动化', subtitle: 'Web流程、回放', icon: Monitor, route: '/web-testcases', type: 'normal' },
-          { id: 'r2-4', title: 'Web测试', subtitle: '接口、Web流程', icon: Link, route: '/web-testcases', type: 'normal' },
-          { id: 'r2-5', title: '性能测试', subtitle: '压测、瓶颈、分析', icon: Odometer, route: '/perf-testcases', type: 'normal' },
+          { id: 'r2-4', title: '性能测试', subtitle: '压测、瓶颈、分析', icon: Odometer, route: '/perf-testcases', type: 'normal' },
           { id: 'r2-6', title: '测试套件', subtitle: '组合编排、批量执行', icon: FolderAdd, route: '/testsuites', type: 'normal' },
           { id: 'r2-7', title: '执行历史', subtitle: '运行记录、实时追踪', icon: Timer, route: '/history', type: 'normal' }
         ]

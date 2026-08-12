@@ -12,9 +12,16 @@ W2 新增：
 # 最先加载 .env，确保所有环境变量在导入前就绪
 from pathlib import Path
 from dotenv import load_dotenv
-_env_file = Path(__file__).resolve().parent.parent / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+
+# 1) 优先加载 backend 自身目录下的 .env（如果存在）
+_backend_env = Path(__file__).resolve().parent.parent / ".env"
+# 2) 否则回退到项目根目录 .env（兼容旧项目结构）
+# backend 路径: agent-harness/backend/app/main.py -> agent-harness/backend -> agent-harness -> ai-test-platform
+_root_env = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+_env_file = _backend_env if _backend_env.exists() else (_root_env if _root_env.exists() else None)
+if _env_file:
+    load_dotenv(_env_file, override=True)
+    print(f"[ENV] Loaded env file: {_env_file}", flush=True)
 
 import contextvars
 import json

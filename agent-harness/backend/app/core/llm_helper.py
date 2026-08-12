@@ -1,0 +1,79 @@
+"""
+统一的「AI 底座」调用助手。
+
+测试平台各模块（用例生成 / 接口调试 / 数据工厂 LLM 造数 / 执行）需要真实 LLM 能力时，
+统一从这里取 Provider，避免各自重复构造。
+
+- 优先使用调用方传入的 model_id（来自前端选中的 AI 底座模型）
+- 否则回退到 DB 中当前激活的模型
+- 再不行回退到 provider_pool 的默认可用模型
+- 全部不可用时抛出清晰异常，由调用方降级为 mock
+"""
+import logging
+from typing import Optional
+
+from app.core.task_store import get_task_store, ModelConfigRecord
+from app.core.provider_pool import get_provider_pool
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_model_id(model_id: Optional[str]) -> Optional[str]:
+    """把前端传来的 model_id 解析成真实的 provider 模型名。
+
+    model_id 可能是：
+      - 数字字符串（DB 的 model_configs.id）
+      - 直接是模型名（如 deepseek-chat / qwen-plus）
+      - 空（回退到激活模型）
+    """
+    if not model_id:
+        return None
+    # 已是模型名
+    store = get_task_store()
+    try:
+        m = store.get_model_config_by_id(int(model_id))
+        if m:
+            return m.name
+    except (ValueError, TypeError):
+        # 不是数字，当作模型名
+        return model_id
+    return model_id
+
+
+def get_llm_for_test(model_id: Optional[str] = None):
+    """返回 (provider, model_name)。失败时抛 ValueError。"""
+    pool = get_provider_pool()
+    store = get_task_store()
+
+    # 1. 调用方指定模型
+    resolved = _resolve_model_id(model_id)
+    if resolved:
+        try:
+            return pool.get_for_model(resolved), resolved
+        except Exception as e:
+            logger.warning(f"[llm_helper] 指定模型 {resolved} 不可用: {e}")
+
+    # 2. DB 激活模型
+    active: Optional[ModelConfigRecord] = store.get_active_model()
+    if active:
+        try:
+            return pool.get_for_model(active.name), active.name
+        except Exception as e:
+            logger.warning(f"[llm_helper] 激活模型 {active.name} 不可用: {e}")
+
+    # 3. provider_pool 默认可用
+    provider = pool.get_default()
+    return provider, provider.model
+
+
+async def generate_text(prompt: str, model_id: Optional[str] = None, temperature: float = 0.7) -> str:
+    """调用真实 LLM 生成文本（同步 Provider 包成 async）。"""
+    provider, model_name = get_llm_for_test(model_id)
+    logger.info(f"[llm_helper] generate_text via {model_name}")
+    result = provider.chat([
+        {"role": "system", "content": "你是资深测试开发工程师。"},
+        {"role": "user", "content": prompt},
+    ], temperature=temperature)
+    if isinstance(result, dict):
+        return result.get("content", "")
+    return str(result)

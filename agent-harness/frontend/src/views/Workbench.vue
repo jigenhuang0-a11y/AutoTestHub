@@ -16,6 +16,7 @@
         </div>
         <div class="brand-text-group">
           <span class="brand-title-sm">Agent Harness</span>
+          <span class="brand-subtitle-sm">AI 效能中台</span>
         </div>
       </div>
 
@@ -146,8 +147,10 @@ const userInitial = computed(() => {
   return (authStore.user?.username?.[0] || 'U').toUpperCase()
 })
 
-// 当前选中的产品域，默认 AI 效能中台
-const activeDomain = ref('base')
+// 当前选中的产品域；优先根据 URL query.domain，其次默认 AI 效能中台
+const validDomains = ['base', 'test', 'case', 'schedule']
+const initialDomain = validDomains.includes(route.query.domain) ? route.query.domain : 'base'
+const activeDomain = ref(initialDomain)
 const currentDomain = computed(() => domainMap[activeDomain.value] || domains[0])
 const displaySections = computed(() => currentDomain.value.sections)
 
@@ -205,6 +208,7 @@ const domainTabs = computed(() => [
 
 const switchDomain = (key) => {
   activeDomain.value = key
+  router.replace({ path: '/workbench', query: { domain: key } })
 }
 </script>
 
@@ -293,6 +297,11 @@ const switchDomain = (key) => {
   font-weight: 700;
   color: #b0c8e8;
   letter-spacing: 0.3px;
+}
+.brand-subtitle-sm {
+  font-size: 11px;
+  color: #6b8ab6;
+  letter-spacing: 0.5px;
 }
 
 /* 中间导航 - 胶囊容器 */

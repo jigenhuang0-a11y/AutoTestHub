@@ -80,6 +80,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = """你是 AutoTestHub 的 Agent 团队编排专家�
 - builder: 直接生成测试用例、测试数据或代码
 - reviewer: 对 builder 产出做质量评审
 - ops: 执行测试套件或运行验证
+- knowledge: 基于团队知识库（RAG）检索规范/需求/历史经验并回答
 
 只输出 JSON，不要 Markdown 代码块。"""
 
@@ -87,6 +88,7 @@ PLANNER_SYSTEM_PROMPT = """你是 AutoTestHub 的规划专家（Planner）。
 请把任务拆解为可执行的步骤，每个步骤包含 role、goal、acceptance_criteria。
 输出 JSON 数组，例如：
 [{"role": "builder", "goal": "生成登录功能测试用例", "acceptance_criteria": ["覆盖正常流程", "覆盖异常流程"]}]
+可选 role：planner / builder / reviewer / ops / knowledge（knowledge 用于检索团队知识库回答规范/需求/历史经验类问题）。
 只输出 JSON 数组，不要 Markdown 代码块。"""
 
 REVIEWER_SYSTEM_PROMPT = """你是 AutoTestHub 的质量评审专家（Reviewer）。

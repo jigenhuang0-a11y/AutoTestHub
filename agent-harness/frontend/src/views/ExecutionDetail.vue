@@ -59,19 +59,19 @@
           <el-col :span="8">
             <div class="stats-overview">
               <div class="stat-box total">
-                <div class="stat-number">{{ execution.total_count }}</div>
+                <div class="stat-number">{{ execution.total_cases }}</div>
                 <div class="stat-label">总数</div>
               </div>
               <div class="stat-box passed">
-                <div class="stat-number">{{ execution.passed_count }}</div>
+                <div class="stat-number">{{ execution.passed_cases }}</div>
                 <div class="stat-label">通过</div>
               </div>
               <div class="stat-box failed">
-                <div class="stat-number">{{ execution.failed_count }}</div>
+                <div class="stat-number">{{ execution.failed_cases }}</div>
                 <div class="stat-label">失败</div>
               </div>
               <div class="stat-box skipped">
-                <div class="stat-number">{{ execution.skipped_count }}</div>
+                <div class="stat-number">{{ execution.skipped_cases }}</div>
                 <div class="stat-label">跳过</div>
               </div>
             </div>
@@ -444,7 +444,8 @@ const rerunExecution = async () => {
     await ElMessageBox.confirm('确认重新执行此测试？', '重跑确认', { type: 'warning' })
     ElMessage.info('正在重新执行...')
     const response = await executionAPI.rerun(execution.value.id)
-    ElMessage.success(`重新执行完成: ${response.passed_count || 0} 通过, ${response.failed_count || 0} 失败`)
+    const exec = response.execution || response || {}
+    ElMessage.success(`重新执行完成: ${exec.passed_cases || 0} 通过, ${exec.failed_cases || 0} 失败`)
     loadDetail()
   } catch (error) {
     if (error !== 'cancel') {

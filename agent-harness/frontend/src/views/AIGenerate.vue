@@ -6,7 +6,7 @@
         <el-card>
           <template #header>
             <div style="display: flex; justify-content: space-between; align-items: center">
-              <span>接口文档输入</span>
+              <span>接口需求输入</span>
               <el-button type="primary" @click="handleGenerate" :loading="generating">
                 <el-icon><MagicStick /></el-icon>
                 AI生成
@@ -15,13 +15,28 @@
           </template>
 
           <el-form label-width="80px">
-            <el-form-item label="接口文档">
+            <el-form-item label="AI 模型">
+              <el-select v-model="selectedModelId" placeholder="选择 AI 底座模型" style="width: 100%">
+                <el-option v-for="m in aiModels" :key="m.id" :label="`${m.name}（${m.provider}）`" :value="String(m.id)" />
+                <el-option v-if="!aiModels.length" label="未配置模型（将降级 mock）" value="" disabled />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="测试需求">
               <el-input
-                v-model="apiDocument"
+                v-model="requirement"
                 type="textarea"
-                :rows="25"
-                placeholder="请粘贴接口文档内容，例如：&#10;&#10;接口名称：用户登录&#10;请求地址：POST /api/auth/login/&#10;请求参数：&#10;- username: 用户名（必填）&#10;- password: 密码（必填）&#10;&#10;响应示例：&#10;{&#10;  &quot;access&quot;: &quot;eyJ...&quot;,&#10;  &quot;refresh&quot;: &quot;eyJ...&quot;&#10;}"
+                :rows="10"
+                placeholder="请描述接口测试需求，例如：&#10;为用户登录接口 /api/auth/login 生成正向/异常用例，覆盖用户名密码校验、错误码、超时等场景"
               />
+            </el-form-item>
+
+            <el-form-item label="项目名称">
+              <el-input v-model="project" placeholder="如：用户中心" />
+            </el-form-item>
+
+            <el-form-item label="生成数量">
+              <el-input-number v-model="count" :min="1" :max="20" />
             </el-form-item>
 
             <el-form-item label="保存选项">
@@ -35,14 +50,7 @@
             :closable="false"
             style="margin-top: 10px"
           >
-            <p>请输入详细的接口文档，包括：</p>
-            <ul style="margin: 5px 0; padding-left: 20px">
-              <li>接口名称和描述</li>
-              <li>请求方法（GET/POST等）</li>
-              <li>请求URL和参数</li>
-              <li>响应格式和示例</li>
-              <li>错误码说明</li>
-            </ul>
+            <p>AI 将基于需求真实调用「AI 底座」配置的模型生成用例；若未配置有效模型 Key，将自动降级为本地 mock。</p>
           </el-alert>
         </el-card>
       </el-col>
@@ -123,52 +131,82 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { testcaseAPI } from '@/api'
+import { ref, onMounted } from 'vue'
+import { testcaseAPI, aiBaseAPI } from '@/api'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Loading } from '@element-plus/icons-vue'
 
-const apiDocument = ref('')
+const requirement = ref('')
+const project = ref('')
+const count = ref(5)
+const selectedModelId = ref('')
+const aiModels = ref([])
+
 const generating = ref(false)
 const saving = ref(false)
 const generatedCases = ref([])
 const activeNames = ref([])
 const saveToDb = ref(false)
 
+async function loadAiModels() {
+  try {
+    const res = await aiBaseAPI.listModels()
+    aiModels.value = res.items || res.results || []
+    if (aiModels.value.length) {
+      const active = aiModels.value.find(m => m.is_enabled)
+      selectedModelId.value = String(active ? active.id : aiModels.value[0].id)
+    }
+  } catch (e) {
+    aiModels.value = []
+  }
+}
+onMounted(loadAiModels)
+
 // 生成测试用例
 const handleGenerate = async () => {
-  if (!apiDocument.value.trim()) {
-    ElMessage.warning('请输入接口文档')
+  if (!requirement.value.trim()) {
+    ElMessage.warning('请输入测试需求')
     return
   }
 
   generating.value = true
   try {
     const response = await testcaseAPI.aiGenerate({
-      api_document: apiDocument.value,
-      save_to_db: saveToDb.value,
+      requirement: requirement.value,
+      project: project.value,
+      count: count.value,
+      model_id: selectedModelId.value,
     })
 
+    const cases = response.test_cases || []
+    generatedCases.value = cases.map(tc => ({
+      title: tc.title,
+      description: tc.description || '',
+      api_endpoint: tc.api_endpoint || '',
+      method: tc.method || 'GET',
+      headers: typeof tc.headers === 'string' ? {} : (tc.headers || {}),
+      request_body: tc.request_body,
+      expected_response: tc.expected_response,
+      assertions: Array.isArray(tc.assertion_rules) ? JSON.stringify(tc.assertion_rules) : (tc.assertion_rules || ''),
+      priority: tc.priority || 'P2',
+      status: 'draft',
+      tags: Array.isArray(tc.tags) ? tc.tags : (tc.tags ? [tc.tags] : []),
+      selected: true,
+    }))
+
     if (saveToDb.value) {
-      generatedCases.value = (response.test_cases || []).map(tc => ({
-        ...tc,
-        selected: true,
-      }))
-      ElMessage.success(`已生成并保存 ${response.test_cases?.length || 0} 个测试用例`)
+      await saveSelected(true)
+      ElMessage.success(`已生成并保存 ${cases.length} 个测试用例${response.ai_enhanced ? '' : '（mock）'}`)
     } else {
-      generatedCases.value = (response.test_cases || []).map(tc => ({
-        ...tc,
-        selected: true,
-      }))
-      ElMessage.success(`成功生成 ${response.count || 0} 个测试用例`)
+      ElMessage.success(`成功生成 ${cases.length} 个测试用例${response.ai_enhanced ? '' : '（mock）'}`)
     }
 
-    // 默认展开第一个
     if (generatedCases.value.length > 0) {
       activeNames.value = [0]
     }
   } catch (error) {
     console.error('Generate error:', error)
+    ElMessage.error('生成失败：' + (error.response?.data?.detail || error.message))
   } finally {
     generating.value = false
   }
@@ -183,10 +221,10 @@ const selectAll = () => {
 }
 
 // 保存选中的用例
-const saveSelected = async () => {
+const saveSelected = async (silent = false) => {
   const selected = generatedCases.value.filter(tc => tc.selected)
   if (selected.length === 0) {
-    ElMessage.warning('请至少选择一个测试用例')
+    if (!silent) ElMessage.warning('请至少选择一个测试用例')
     return
   }
 
@@ -200,8 +238,8 @@ const saveSelected = async () => {
         api_endpoint: testCase.api_endpoint || '',
         method: testCase.method || 'GET',
         headers: testCase.headers || {},
-        request_body: testCase.request_body || {},
-        expected_response: testCase.expected_response || {},
+        request_body: typeof testCase.request_body === 'string' ? testCase.request_body : JSON.stringify(testCase.request_body || {}),
+        expected_response: typeof testCase.expected_response === 'string' ? testCase.expected_response : JSON.stringify(testCase.expected_response || {}),
         assertions: testCase.assertions || '',
         priority: testCase.priority || 'P2',
         status: 'draft',
@@ -209,9 +247,10 @@ const saveSelected = async () => {
       })
       savedCount++
     }
-    ElMessage.success(`成功保存 ${savedCount} 个测试用例`)
+    if (!silent) ElMessage.success(`成功保存 ${savedCount} 个测试用例`)
   } catch (error) {
     console.error('Save error:', error)
+    if (!silent) ElMessage.error('保存失败：' + (error.response?.data?.detail || error.message))
   } finally {
     saving.value = false
   }

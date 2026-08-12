@@ -25,7 +25,7 @@ class BaseLLMProvider(ABC):
         ...
 
     @abstractmethod
-    def chat_stream(self, messages: list, **kwargs) -> Generator[str, None, None]:
+    def chat_stream(self, messages: list, **kwargs) -> Generator[dict, None, None]:
         ...
 
     def chat_raw(self, messages: list, **kwargs) -> dict:
@@ -97,7 +97,7 @@ class DashScopeProvider(BaseLLMProvider):
         data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-    def chat_stream(self, messages: list, **kwargs) -> Generator[str, None, None]:
+    def chat_stream(self, messages: list, **kwargs) -> Generator[dict, None, None]:
         import requests
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
@@ -110,6 +110,7 @@ class DashScopeProvider(BaseLLMProvider):
         payload.update(kwargs)
         resp = requests.post(self.BASE_URL, headers=headers, json=payload, stream=True, timeout=120)
         resp.raise_for_status()
+        full = []
         for line in resp.iter_lines():
             if line:
                 line = line.decode("utf-8")
@@ -120,10 +121,12 @@ class DashScopeProvider(BaseLLMProvider):
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        if "content" in delta:
-                            yield delta["content"]
+                        if "content" in delta and delta["content"]:
+                            full.append(delta["content"])
+                            yield {"type": "delta", "content": delta["content"]}
                     except json.JSONDecodeError:
                         continue
+        yield {"type": "done", "content": "".join(full)}
 
 
 class DeepSeekProvider(BaseLLMProvider):
@@ -155,11 +158,15 @@ class DeepSeekProvider(BaseLLMProvider):
         data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-    def chat_stream(self, messages: list, **kwargs) -> Generator[str, None, None]:
+    REASONING_MODEL = "deepseek-reasoner"
+
+    def chat_stream(self, messages: list, enable_reasoning: bool = False, **kwargs) -> Generator[dict, None, None]:
         import requests
+        # 开启推理时路由到原生 reasoner 模型
+        model = self.REASONING_MODEL if enable_reasoning else self.model
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -168,6 +175,7 @@ class DeepSeekProvider(BaseLLMProvider):
         payload.update(kwargs)
         resp = requests.post(self.BASE_URL, headers=headers, json=payload, stream=True, timeout=120)
         resp.raise_for_status()
+        full = []
         for line in resp.iter_lines():
             if line:
                 line = line.decode("utf-8")
@@ -178,10 +186,14 @@ class DeepSeekProvider(BaseLLMProvider):
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        if "content" in delta:
-                            yield delta["content"]
+                        if "reasoning_content" in delta and delta["reasoning_content"]:
+                            yield {"type": "reasoning", "content": delta["reasoning_content"]}
+                        if "content" in delta and delta["content"]:
+                            full.append(delta["content"])
+                            yield {"type": "delta", "content": delta["content"]}
                     except json.JSONDecodeError:
                         continue
+        yield {"type": "done", "content": "".join(full)}
 
 
 class GLMProvider(BaseLLMProvider):
@@ -213,7 +225,7 @@ class GLMProvider(BaseLLMProvider):
         data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-    def chat_stream(self, messages: list, **kwargs) -> Generator[str, None, None]:
+    def chat_stream(self, messages: list, **kwargs) -> Generator[dict, None, None]:
         import requests
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
@@ -226,6 +238,7 @@ class GLMProvider(BaseLLMProvider):
         payload.update(kwargs)
         resp = requests.post(self.BASE_URL, headers=headers, json=payload, stream=True, timeout=120)
         resp.raise_for_status()
+        full = []
         for line in resp.iter_lines():
             if line:
                 line = line.decode("utf-8")
@@ -236,10 +249,12 @@ class GLMProvider(BaseLLMProvider):
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        if "content" in delta:
-                            yield delta["content"]
+                        if "content" in delta and delta["content"]:
+                            full.append(delta["content"])
+                            yield {"type": "delta", "content": delta["content"]}
                     except json.JSONDecodeError:
                         continue
+        yield {"type": "done", "content": "".join(full)}
 
 
 class OllamaProvider(BaseLLMProvider):
@@ -286,7 +301,7 @@ class OllamaProvider(BaseLLMProvider):
         data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-    def chat_stream(self, messages: list, **kwargs) -> Generator[str, None, None]:
+    def chat_stream(self, messages: list, **kwargs) -> Generator[dict, None, None]:
         import requests
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -299,6 +314,7 @@ class OllamaProvider(BaseLLMProvider):
         payload.update(kwargs)
         resp = requests.post(self.BASE_URL, headers=headers, json=payload, stream=True, timeout=300)
         resp.raise_for_status()
+        full = []
         for line in resp.iter_lines():
             if line:
                 line = line.decode("utf-8")
@@ -309,10 +325,12 @@ class OllamaProvider(BaseLLMProvider):
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        if "content" in delta:
-                            yield delta["content"]
+                        if "content" in delta and delta["content"]:
+                            full.append(delta["content"])
+                            yield {"type": "delta", "content": delta["content"]}
                     except json.JSONDecodeError:
                         continue
+        yield {"type": "done", "content": "".join(full)}
 
 
 class LLMProviderFactory:

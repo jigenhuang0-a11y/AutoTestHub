@@ -121,7 +121,7 @@
                 </svg>
               </div>
               <div class="capability-body">
-                <span class="capability-title">质量数字人</span>
+                <span class="capability-title">需求评审师</span>
                 <span class="capability-desc">智能问答 / 测试报告 / 质量洞察</span>
               </div>
             </div>

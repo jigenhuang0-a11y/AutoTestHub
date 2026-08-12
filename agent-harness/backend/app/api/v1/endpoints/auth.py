@@ -62,6 +62,22 @@ class CreateRoleRequest(BaseModel):
     permissions: list[str] = []
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: str = ""
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class RefreshResponse(BaseModel):
+    access: str
+    user: dict
+
+
 class UpdateRoleRequest(BaseModel):
     name: str = None
     description: str = None
@@ -151,6 +167,59 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return {"detail": "已登出"}
 
 
+@router.post("/register")
+async def register(req: RegisterRequest):
+    """公开注册：创建普通用户（默认 viewer 角色）"""
+    if len(req.username) < 3:
+        raise HTTPException(status_code=422, detail="用户名长度不能少于3位")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=422, detail="密码长度不能少于6位")
+
+    store = get_auth_store()
+    result = store.create_user(
+        username=req.username,
+        password=req.password,
+        email=req.email,
+        role_names=["viewer"],
+    )
+    if result is None:
+        raise HTTPException(status_code=409, detail=f"用户名 '{req.username}' 已存在")
+
+    # 注册后直接签发 token，便于前端自动登录
+    user_id = result.get("id")
+    token = _issue_token(req.username, user_id, "viewer")
+    user_payload = {
+        "user_id": user_id,
+        "username": req.username,
+        "role": "viewer",
+        "email": req.email,
+        "roles": ["viewer"],
+    }
+    TOKEN_STORE[token] = user_payload
+    logger.info(f"[Auth] 新用户注册：{req.username}")
+    return {"access": token, "user": user_payload}
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """刷新 token：使用现有有效 token 换发新的 access token"""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="未提供认证信息")
+    old_token = credentials.credentials
+    if old_token not in TOKEN_STORE:
+        raise HTTPException(status_code=401, detail="登录已过期或 token 无效")
+    user_payload = TOKEN_STORE[old_token]
+    # 作废旧 token，签发新 token
+    new_token = _issue_token(
+        user_payload["username"],
+        user_payload["user_id"],
+        user_payload["role"],
+    )
+    TOKEN_STORE.pop(old_token, None)
+    TOKEN_STORE[new_token] = user_payload
+    return {"access": new_token, "user": user_payload}
+
+
 # ============================================================
 # 依赖项（给其他模块用）
 # ============================================================
@@ -197,6 +266,30 @@ def require_non_viewer(user: dict = Depends(get_current_user)) -> dict:
             detail="访客模式不支持此操作。如需完整功能，请联系管理员升级为测试工程师。",
         )
     return user
+
+
+@router.put("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user: dict = Depends(get_current_user),
+):
+    """已登录用户修改自己的密码"""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=422, detail="新密码长度不能少于6位")
+
+    store = get_auth_store()
+    # 验证旧密码并拿到 user_id
+    info = store.authenticate(user["username"], req.old_password)
+    if info is None:
+        raise HTTPException(status_code=400, detail="原密码错误")
+    store.update_user(info["user_id"], password=req.new_password)
+
+    # 改密后作废该用户所有 token（安全起见）
+    for t, p in list(TOKEN_STORE.items()):
+        if p.get("username") == user["username"]:
+            TOKEN_STORE.pop(t, None)
+    logger.info(f"[Auth] 用户 {user['username']} 修改了密码")
+    return {"detail": "密码修改成功，请重新登录"}
 
 
 # ============================================================

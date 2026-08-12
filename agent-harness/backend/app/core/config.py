@@ -34,6 +34,7 @@ class LLMRouterConfig:
         "fast_chat": ["qwen-turbo", "glm-4-flash"],
         "data_generation": ["deepseek-chat", "qwen-plus"],
         "rag_query": ["qwen-plus", "qwen-turbo"],
+        "reasoning": ["deepseek-chat", "qwen-max"],      # 深度思考优先原生推理模型
         "fallback": ["qwen-turbo"],
     })
     default_model: str = "deepseek-chat"

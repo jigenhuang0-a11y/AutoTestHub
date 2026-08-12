@@ -1,5 +1,33 @@
 <template>
   <el-container v-if="$route.path !== '/login'" style="height: 100vh">
+    <!-- 顶部产品域 Tab 导航 -->
+    <el-header class="domain-nav" height="56px">
+      <div class="domain-nav-inner">
+        <div class="logo-mini">AI 中台</div>
+        <div class="domain-tabs">
+          <div
+            v-for="d in domainTabs"
+            :key="d.key"
+            class="domain-tab"
+            :class="{ active: activeDomain === d.key }"
+            @click="switchDomain(d.key)"
+          >
+            <el-icon><component :is="d.icon" /></el-icon>
+            <span>{{ d.label }}</span>
+            <el-tag v-if="d.comingSoon" size="small" type="info" effect="plain" round>规划</el-tag>
+          </div>
+        </div>
+        <div class="domain-nav-right">
+          <el-button
+            circle text class="theme-toggle"
+            :icon="isDark ? Sunny : Moon"
+            @click="toggleTheme"
+            :title="isDark ? '亮色' : '暗色'"
+          />
+        </div>
+      </div>
+    </el-header>
+
     <!-- 侧边栏 -->
     <el-aside width="200px" style="background-color: #304156; position: relative; z-index: 10;">
       <div class="logo">
@@ -57,7 +85,7 @@
         </el-menu-item>
         <el-menu-item index="/quality-checker">
           <el-icon><Monitor /></el-icon>
-          <span>质量数字人</span>
+          <span>需求评审师</span>
         </el-menu-item>
         <el-menu-item index="/ai-evaluator">
           <el-icon><Cpu /></el-icon>
@@ -83,14 +111,6 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-button
-            circle
-            text
-            class="theme-toggle"
-            :icon="isDark ? Sunny : Moon"
-            @click="toggleTheme"
-            :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
-          />
           <el-dropdown @command="handleCommand" trigger="click">
             <div class="user-info">
               <div class="user-avatar">
@@ -173,10 +193,25 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { ArrowDown, User, Document, VideoPlay, DataLine, Connection, SwitchButton, Reading, MagicStick, SetUp, Monitor, Cpu, Collection, Link, Timer, DataAnalysis, Moon, Sunny } from '@element-plus/icons-vue'
+import { ArrowDown, User, Document, VideoPlay, DataLine, Connection, SwitchButton, Reading, MagicStick, SetUp, Monitor, Cpu, Collection, Link, Timer, DataAnalysis, Moon, Sunny, Calendar, Tickets } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
+
+// 产品域 Tab
+const domainTabs = [
+  { key: 'base', label: 'AI 效能中台', icon: Cpu },
+  { key: 'test', label: 'AI 测试平台', icon: DataLine },
+  { key: 'case', label: '用例平台', icon: Tickets, comingSoon: true },
+  { key: 'schedule', label: '团队排期', icon: Calendar, comingSoon: true },
+]
+const activeDomain = ref('base')
+const switchDomain = (key) => {
+  activeDomain.value = key
+  if (key === 'base') router.push('/workbench')
+  else if (key === 'test') router.push('/workbench')
+  else router.push('/workbench')
+}
 
 const isDark = ref(false)
 
@@ -400,5 +435,54 @@ html, body, #app {
   flex: 1;
   min-height: 0;
   background-color: var(--app-bg);
+}
+
+/* 顶部产品域导航 */
+.domain-nav {
+  background: var(--app-header-bg);
+  border-bottom: 1px solid var(--app-border);
+  padding: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+.domain-nav-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 20px;
+  gap: 24px;
+}
+.logo-mini {
+  font-size: 16px;
+  font-weight: 700;
+  color: #409eff;
+  white-space: nowrap;
+}
+.domain-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  height: 100%;
+}
+.domain-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 16px;
+  cursor: pointer;
+  color: var(--app-text-secondary);
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.domain-tab:hover { color: var(--app-text); }
+.domain-tab.active {
+  color: #409eff;
+  border-bottom-color: #409eff;
+}
+.domain-nav-right {
+  display: flex;
+  align-items: center;
 }
 </style>

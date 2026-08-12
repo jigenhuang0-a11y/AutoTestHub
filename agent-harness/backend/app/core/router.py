@@ -46,18 +46,30 @@ class LLMRouter:
         task_type: str = "fast_chat",
         model: Optional[str] = None,
         team_id: Optional[str] = None,
+        enable_reasoning: bool = False,
         **kwargs,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[dict, None, None]:
+        """
+        流式对话，返回事件字典（与 BaseLLMProvider.chat_stream 契约一致）：
+          {"type": "delta", "content": str}
+          {"type": "reasoning", "content": str}
+          {"type": "done", "content": str}
+          {"type": "error", "message": str}
+        """
+        # 深度思考模式：优先走原生推理模型（DeepSeek Reasoner），
+        # 并把任务类型改为 reasoning，避免被路由到不具备 reasoning 能力的模型。
+        if enable_reasoning:
+            task_type = "reasoning"
         provider, used_model = self._resolve_provider(
             task_type=task_type, model=model, team_id=team_id, **kwargs
         )
-        logger.info(f"[LLMRouter] stream {task_type} -> {used_model}")
+        logger.info(f"[LLMRouter] stream {task_type} -> {used_model} (reasoning={enable_reasoning})")
         try:
-            yield from provider.chat_stream(messages)
+            yield from provider.chat_stream(messages, enable_reasoning=enable_reasoning, **kwargs)
         except Exception as e:
             logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
             fallback = self._pool.get("dashscope", model="qwen-turbo")
-            yield from fallback.chat_stream(messages)
+            yield from fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **kwargs)
 
     def chat_with_tools(
         self,

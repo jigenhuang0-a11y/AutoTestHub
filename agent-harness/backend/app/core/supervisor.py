@@ -107,9 +107,10 @@ class Supervisor:
             '  "intent": "用户核心意图（一句话）",\n'
             '  "sub_goals": ["子目标1", "子目标2"],\n'
             '  "complexity": "simple|medium|complex",\n'
-            '  "required_workers": ["search", "generator", "data_factory", "execution", "evaluator"]\n'
+            '  "required_workers": ["search", "generator", "data_factory", "execution", "evaluator", "knowledge"]\n'
             "}\n"
-            "required_workers 只能从上述 5 个中选，且只选真正需要的。"
+            "required_workers 只能从上述 6 个中选，且只选真正需要的。"
+            "注意：当用户请求涉及「知识库/文档/规范/需求/历史经验/已有资料」时，应加入 knowledge。"
         )
         user_prompt = f"用户请求：{user_request}\n\n团队偏好提示：{team_hint}\n\n请输出分析 JSON。"
 
@@ -163,7 +164,7 @@ class Supervisor:
             "决定下一步派发哪个 worker，或是否结束。输出 JSON：\n"
             "{\n"
             '  "action": "dispatch" 或 "finish",\n'
-            '  "worker": "search|generator|data_factory|execution|evaluator",\n'
+            '  "worker": "search|generator|data_factory|execution|evaluator|knowledge",\n'
             '  "description": "本次派给该 worker 的具体子任务",\n'
             '  "reason": "决策依据"\n'
             "}\n"
@@ -219,6 +220,7 @@ class Supervisor:
             "data_factory": "data_factory",
             "execution": "execution",
             "evaluator": "evaluator",
+            "knowledge": "knowledge",
         }
         return {
             "agent": agent_map[worker],
@@ -286,6 +288,8 @@ class Supervisor:
             workers.append("data_factory")
         if any(k in req for k in ["执行", "跑", "运行", "execute", "run"]):
             workers.append("execution")
+        if any(k in req for k in ["知识库", "文档", "规范", "需求", "历史经验", "资料", "knowledge", "rag"]):
+            workers.append("knowledge")
         # 评估几乎总是需要
         workers.append("evaluator")
         # 去重保序
@@ -489,6 +493,14 @@ def _dispatch_worker(supervisor: Supervisor, worker: str, description: str,
         span.set_attribute("team_id", supervisor.team_id)
         with supervisor_worker_duration_seconds.labels(worker=worker).time():
             try:
+                # knowledge worker：不经过 workflow 的通用步骤执行，直接走 RAG 检索问答
+                if worker == "knowledge":
+                    res = _dispatch_knowledge_worker(description, state)
+                    status = res.get("status", "completed")
+                    supervisor_decisions_total.labels(worker=worker, status=status).inc()
+                    return WorkerResult(
+                        worker=worker, description=description, status=status, output=res
+                    )
                 res = _execute_single_step(step, state)
                 status = res.get("status", "completed")
                 supervisor_decisions_total.labels(worker=worker, status=status).inc()
@@ -506,6 +518,48 @@ def _dispatch_worker(supervisor: Supervisor, worker: str, description: str,
                 )
 
 
+def _dispatch_knowledge_worker(description: str, state: dict) -> dict:
+    """knowledge worker：检索团队知识库并回答。
+
+    优先使用用户请求中显式指定的 kb_id（state.context.kb_id），
+    否则取该团队/全局第一个可用知识库。问题来自 supervisor 派发的子任务描述。
+    """
+    from app.core import rag
+    from app.core.task_store import get_task_store
+
+    ctx = (state or {}).get("context", {}) or {}
+    user_request = state.get("user_request", "") if isinstance(state, dict) else ""
+    question = description or user_request
+
+    store = get_task_store()
+    kb_id = ctx.get("kb_id")
+    if not kb_id:
+        bases = store.list_knowledge_bases()
+        if not bases:
+            return {
+                "status": "failed",
+                "result": "尚未创建任何知识库，无法使用 knowledge worker。请先在「需求评审师」中创建知识库并上传文档。",
+            }
+        kb_id = bases[0]["kb_id"]
+
+    try:
+        answer_result = rag.answer(kb_id, question)
+        out = {
+            "status": "completed",
+            "result": answer_result.get("answer", ""),
+            "sources": answer_result.get("sources", []),
+            "kb_id": kb_id,
+        }
+        if answer_result.get("needs_human"):
+            out["needs_human"] = True
+            out["eval_score"] = answer_result.get("eval_score")
+            out["note"] = "RAG 回答经多轮评估仍未达标，已转人工协同复核。"
+        return out
+    except Exception as e:
+        logger.exception(f"[Supervisor] knowledge worker 失败: {e}")
+        return {"status": "failed", "result": f"知识库检索失败: {e}"}
+
+
 def _summarize(supervisor: Supervisor, user_request: str, done: list[WorkerResult]) -> str:
     """用 LLM 把多个 worker 结果汇总成面向用户的结论"""
     parts = []
@@ -519,6 +573,7 @@ def _summarize(supervisor: Supervisor, user_request: str, done: list[WorkerResul
     system_prompt = (
         "你是测试平台的结果汇总器。请将各专家 worker 的执行结果，"
         "整理成一份简洁的结论（结构化，中文），包含：完成内容、关键产出、风险提示。"
+        "使用有序列表时，编号必须按 1、2、3… 递增，不要重复用 1.。"
     )
     user_prompt = f"用户原始请求：{user_request}\n\n各 worker 结果：\n{context[:6000]}"
     try:

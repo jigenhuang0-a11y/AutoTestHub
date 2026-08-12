@@ -125,7 +125,7 @@
                 </svg>
               </div>
               <div class="feature-content">
-                <span class="feature-title">质量数字人</span>
+                <span class="feature-title">需求评审师</span>
                 <span class="feature-desc">7×24 值守、风险播报与质量报告</span>
               </div>
             </div>

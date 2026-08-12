@@ -11,7 +11,7 @@
 """
 
 import logging
-from typing import Optional
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException
@@ -184,3 +184,66 @@ async def health():
     """记忆系统健康检查"""
     mm = MemoryManager()
     return HealthResponse(status="ok", details=mm.health())
+
+
+# ============================================================
+# 记忆管理（对接 memory_bridge，承载对话实际沉淀的长期记忆）
+# ============================================================
+
+class MemoryListResponse(BaseModel):
+    memories: List[Dict]
+
+
+class MemoryDeleteRequest(BaseModel):
+    user_id: Optional[int] = None
+    memory_id: str
+    mode: Optional[str] = None
+
+
+class MemoryDeleteResponse(BaseModel):
+    deleted: bool
+
+
+class MemoryClearRequest(BaseModel):
+    user_id: Optional[int] = None
+    mode: Optional[str] = None
+
+
+class MemoryClearResponse(BaseModel):
+    cleared: int
+
+
+@router.get("/manage/list", response_model=MemoryListResponse)
+async def list_memories(user_id: Optional[int] = None, mode: Optional[str] = None):
+    """列出某用户的长期记忆（按 chat/knowledge 分组）。"""
+    from app.core.memory_bridge import list_memories as bridge_list
+    try:
+        memories = bridge_list(user_id=str(user_id), mode=mode)
+        return MemoryListResponse(memories=memories)
+    except Exception as e:
+        logger.exception(f"[MemoryAPI] list 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/manage/delete", response_model=MemoryDeleteResponse)
+async def delete_memory(request: MemoryDeleteRequest):
+    """删除一条长期记忆。"""
+    from app.core.memory_bridge import delete_memory as bridge_delete
+    try:
+        ok = bridge_delete(user_id=str(request.user_id), memory_id=request.memory_id, mode=request.mode)
+        return MemoryDeleteResponse(deleted=ok)
+    except Exception as e:
+        logger.exception(f"[MemoryAPI] delete 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/manage/clear", response_model=MemoryClearResponse)
+async def clear_memories(request: MemoryClearRequest):
+    """清空某用户的长期记忆。"""
+    from app.core.memory_bridge import clear_memories as bridge_clear
+    try:
+        n = bridge_clear(user_id=str(request.user_id), mode=request.mode)
+        return MemoryClearResponse(cleared=n)
+    except Exception as e:
+        logger.exception(f"[MemoryAPI] clear 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

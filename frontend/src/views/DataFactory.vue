@@ -89,6 +89,9 @@
                     <el-tag size="small" :type="getTypeColor(dataset.dataset_type)">
                       {{ getTypeLabel(dataset.dataset_type) }}
                     </el-tag>
+                    <el-tag v-if="dataset.status && dataset.status !== 'completed'" size="small" :type="getStatusColor(dataset.status)">
+                      {{ getStatusLabel(dataset.status) }}
+                    </el-tag>
                     <span class="item-count">{{ dataset.record_count }} 条</span>
                   </div>
                 </div>
@@ -616,6 +619,13 @@ const selectedPreviewRows = ref([]) // 预览数据选中的行
 
 // 版本管理
 const currentVersion = ref('ecommerce') // 当前版本：'ecommerce' | 'fintech'
+
+// 判断是否为后端真实数据集ID（字符串 ds-xxx 或数字小id）
+const isBackendId = (id) => {
+  if (typeof id === 'string' && id.startsWith('ds-')) return true
+  if (typeof id === 'number' && id < 10000000000) return true
+  return false
+}
 
 // 数据集列表
 const datasets = ref([])
@@ -1172,7 +1182,7 @@ const selectDataset = async (dataset) => {
     }
     
     // 如果数据集有真实后端ID，加载真实数据；否则才用模拟数据
-    if (dataset.id && typeof dataset.id === 'number' && dataset.id < 10000000000) {
+    if (dataset.id && isBackendId(dataset.id)) {
       console.log('[DEBUG] Dataset has real backend ID, loading real records')
       await loadDatasetRecords(dataset)
     }
@@ -1222,8 +1232,8 @@ const selectDataset = async (dataset) => {
         name: dataset.name,
         type: dataset.dataset_type
       })
-      // 只有后端真实ID（小于10000000000）才请求后端
-      if (typeof dataset.id === 'number' && dataset.id < 10000000000) {
+      // 只有后端真实ID（ds- 字符串或数字小id）才请求后端
+      if (isBackendId(dataset.id)) {
         await loadLLMDatasetRecords(dataset)
       } else {
         console.log('[DEBUG] Dataset has temporary frontend ID, skipping backend load')
@@ -1866,390 +1876,151 @@ const generatePreviewData = (dataset) => {
   previewData.value = allData
 }
 
-// 生成LLM评测数据
+// 生成LLM评测数据（异步：提交后后台生成，期间可浏览其它数据）
 const generateLLMDataset = async () => {
   if (!llmForm.value.scenario) {
     ElMessage.warning('请输入场景描述')
     return
   }
 
+  const totalCount = Number(llmForm.value.positive_count || 0) +
+                     Number(llmForm.value.negative_count || 0) +
+                     Number(llmForm.value.boundary_count || 0)
+  if (totalCount <= 0) {
+    ElMessage.warning('请至少设置一种用例数量（正/负/边界）')
+    return
+  }
+
   generating.value = true
-  
-  // 创建180秒超时的AbortController (增加超时时间,因为DashScope API可能较慢)
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => {
-    controller.abort()
-  }, 180000) // 180秒超时 (3分钟)
-  
   try {
-    // 获取token
     const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-    
     if (!token) {
       ElMessage.error('未登录，请先登录')
+      generating.value = false
       return
     }
 
-    // 显示等待提示
-    const totalCount = llmForm.value.positive_count + 
-                       llmForm.value.negative_count + 
-                       llmForm.value.boundary_count
-    
-    console.log('[DEBUG] Sending request with params:', {
-      scenario: llmForm.value.scenario,
-      positive_count: llmForm.value.positive_count,
-      negative_count: llmForm.value.negative_count,
-      boundary_count: llmForm.value.boundary_count,
-      languages: llmForm.value.languages
-    })
-    
-    if (totalCount > 50) {
-      ElMessage.warning(`将生成 ${totalCount} 条数据，可能需要较长时间（预计1-3分钟），请稍候...`)
-    } else {
-      ElMessage.info('正在调用通义千问API生成数据，请稍候...')
-    }
-    
-    // 关键修复：在生成数据前，先删除其他同名的旧数据集（保留当前选中的）
-    const datasetName = selectedDataset.value?.name || ''
-    if (datasetName && selectedDataset.value?.id) {
-      // 删除其他同名的数据集（排除当前选中的）
-      const oldDatasets = datasets.value.filter(d => d.name === datasetName && d.id !== selectedDataset.value.id)
-      if (oldDatasets.length > 0) {
-        console.log('[DEBUG] Removing', oldDatasets.length, 'other old datasets with same name:', datasetName)
-        console.log('[DEBUG] Keeping current selected dataset ID:', selectedDataset.value.id)
-        oldDatasets.forEach(oldDs => {
-          const idx = datasets.value.findIndex(d => d.id === oldDs.id)
-          if (idx !== -1) {
-            datasets.value.splice(idx, 1)
-          }
-        })
-        saveDatasetsToStorage()
-        console.log('[DEBUG] After removal, datasets count:', datasets.value.length)
-      }
-    }
+    const scenario = llmForm.value.scenario.trim()
+    const datasetName = (llmForm.value.datasetName && llmForm.value.datasetName.trim()) ||
+      scenario.slice(0, 28) || 'LLM评测数据集'
 
-    // 调用后端API生成LLM评测数据（带超时控制）
     const requestBody = {
-      scenario: llmForm.value.scenario,
-      positive_count: llmForm.value.positive_count,
-      negative_count: llmForm.value.negative_count,
-      boundary_count: llmForm.value.boundary_count,
-      languages: llmForm.value.languages,
-      dataset_name: datasetName  // 传递用户设置的数据集名称
-      
+      scenario,
+      positive_count: Number(llmForm.value.positive_count) || 0,
+      negative_count: Number(llmForm.value.negative_count) || 0,
+      boundary_count: Number(llmForm.value.boundary_count) || 0,
+      languages: llmForm.value.languages && llmForm.value.languages.length ? llmForm.value.languages : ['中文'],
+      dataset_name: datasetName,
+      model_id: llmForm.value.model || ''
     }
-    
-    console.log('[DEBUG] Request body:', JSON.stringify(requestBody, null, 2))
-    console.log('[DEBUG] Selected dataset before API call - ID:', selectedDataset.value?.id, 'Name:', selectedDataset.value?.name)
 
-    const response = await fetch('/api/data-factory/datasets/generate_llm_dataset/', {
+    // 后端为异步：立即返回 running 占位数据集，不阻塞当前页面
+    const response = await fetch('/api/v1/data-factory/datasets/generate_llm_dataset/', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal // 添加超时信号
+      body: JSON.stringify(requestBody)
     })
 
-    // 清除超时定时器
-    clearTimeout(timeoutId)
-
     if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || errorData.error || `HTTP error! status: ${response.status}`)
     }
 
     const result = await response.json()
-    
-    console.log('[DEBUG] API Response:', result)
-    console.log('[DEBUG] Result dataset:', JSON.stringify(result.dataset, null, 2))
-    
-    // 直接使用后端返回的数据集信息
-    let newDataset = result.dataset
-    
-    if (!newDataset) {
-      console.error('[ERROR] No dataset in response:', result)
-      ElMessage.error('数据集创建失败：后端未返回数据集信息。请检查后端日志')
+    const backendDataset = result.dataset
+    if (!backendDataset) {
+      ElMessage.error('数据集创建失败：后端未返回数据集信息')
+      generating.value = false
       return
     }
-    
-    // 关键修复：确保数据集有正确的 dataset_type 和 version 字段
-    newDataset = {
-      ...newDataset,
-      dataset_type: 'llm_eval',  // 强制设置为LLM评测类型
-      version: currentVersion.value  // 设置当前版本（电商版或金融版）
+
+    const datasetId = backendDataset.id || backendDataset.ds_id
+    // 占位数据集（状态 running），立即加入列表，用户可自由切换浏览其它数据
+    const placeholder = {
+      id: datasetId,
+      ds_id: datasetId,
+      name: backendDataset.name || datasetName,
+      description: backendDataset.description || scenario,
+      dataset_type: 'llm_eval',
+      record_count: 0,
+      status: 'running',
+      version: currentVersion.value,
+      created_at: backendDataset.created_at || new Date().toISOString(),
+      updated_at: backendDataset.updated_at || new Date().toISOString(),
+      generation_config: { scenario, languages: requestBody.languages }
     }
-    
-    console.log('[DEBUG] New dataset ID:', newDataset.id, 'Name:', newDataset.name, 'Type:', newDataset.dataset_type, 'Version:', newDataset.version)
-    
-    // 判断是否有选中的数据集
-    if (selectedDataset.value && selectedDataset.value.id) {
-      // 更新现有数据集
-      console.log('更新现有数据集:', selectedDataset.value?.name || 'unknown', 'record_count:', newDataset.record_count)
-      
-      // 使用用户修改后的名称（如果有的话），否则使用后端返回的名称
-      const finalName = selectedDataset.value.name || newDataset.name
-      
-      // 关键修复：用后端返回的新数据集完全替换前端旧的数据集
-      // 包括更新ID为后端返回的真实数据库ID
-      const updatedDataset = {
-        ...newDataset,
-        name: finalName  // 保留用户修改的名称
-      }
-      
-      // 找到当前选中数据集在列表中的位置
-      const currentIdx = datasets.value.findIndex(d => d.id === selectedDataset.value.id)
-      console.log('[DEBUG] Current dataset index in list:', currentIdx)
-      
-      if (currentIdx !== -1) {
-        // 直接替换当前位置的数据集（不删除再unshift，保持位置不变）
-        console.log('[DEBUG] Replacing dataset at index:', currentIdx)
-        datasets.value.splice(currentIdx, 1, updatedDataset)
-      } else {
-        // 如果找不到（异常情况），添加到顶部
-        console.warn('[WARN] Current dataset not found in list, adding to top')
-        datasets.value.unshift(updatedDataset)
-      }
-      
-      // 更新选中数据集为新数据集
-      selectedDataset.value = updatedDataset
-      
-      // 关键修复：保存到localStorage，确保数据同步
-      saveDatasetsToStorage()
-      
-      // 保存选中的数据集ID（使用后端返回的真实ID）
-      localStorage.setItem('data_factory_selected_dataset_id', String(updatedDataset.id))
-      console.log('[DEBUG] Updated dataset saved. New ID:', updatedDataset.id, 'Name:', updatedDataset.name)
+
+    const existingIdx = datasets.value.findIndex(d => String(d.id) === String(datasetId))
+    if (existingIdx >= 0) {
+      datasets.value[existingIdx] = { ...datasets.value[existingIdx], ...placeholder }
     } else {
-      // 创建新数据集
-      console.log('创建新数据集:', newDataset.name, 'record_count:', newDataset.record_count)
-      
-      // 将新数据集添加到列表顶部
-      datasets.value.unshift(newDataset)
-      
-      // 选中新建的数据集
-      selectedDataset.value = newDataset
-      
-      // 保存到localStorage
-      saveDatasetsToStorage()
-      
-      // 保存选中的数据集ID
-      localStorage.setItem('data_factory_selected_dataset_id', String(newDataset.id))
+      datasets.value.unshift(placeholder)
     }
-    
-    // 使用后端返回的真实测试数据作为预览数据
-    if (result.test_cases && result.test_cases.length > 0) {
-      console.log('[DEBUG] Using real test cases from backend:', result.test_cases.length, 'cases')
-      previewData.value = result.test_cases
-      
-      // 动态生成列定义
-      const firstCase = result.test_cases[0]
-      const dynamicColumns = []
-      
-      // 固定显示的列：用例ID、类型
-      if (firstCase.case_id) {
-        dynamicColumns.push({ prop: 'case_id', label: '用例ID', width: 80 })
-      }
-      if (firstCase.type) {
-        dynamicColumns.push({ 
-          prop: 'type', 
-          label: '类型', 
-          width: 100,
-          formatter: (row) => {
-            const typeMap = {
-              'positive': '正例',
-              'negative': '负例',
-              'boundary': '边界'
-            }
-            return typeMap[row.type] || row.type
-          }
-        })
-      }
-      
-      // 优先使用 generation_config 中保存的 business_keywords（如果存在）
-      // 这样可以确保列的顺序和名称与用户在字段Title中指定的完全一致
-      let businessKeywords = []
-      if (result.dataset && result.dataset.generation_config && result.dataset.generation_config.business_keywords) {
-        businessKeywords = result.dataset.generation_config.business_keywords
-        console.log('[DEBUG] Using business keywords from generation_config:', businessKeywords)
-      } else if (newDataset.generation_config && newDataset.generation_config.business_keywords) {
-        businessKeywords = newDataset.generation_config.business_keywords
-        console.log('[DEBUG] Using business keywords from newDataset:', businessKeywords)
-      }
-      
-      console.log('[DEBUG] First case data:', JSON.stringify(firstCase, null, 2))
-      console.log('[DEBUG] All available keys in first case:', Object.keys(firstCase))
-      
-      // 提取业务字段（排除基础字段和技术字段，以及场景限定内容字段）
-      const excludeFields = ['case_id', 'type', 'label', 'language', 'scenario', '内容', 'content']
-      
-      if (businessKeywords.length > 0) {
-        // 如果有明确的 business_keywords，按该顺序添加列
-        businessKeywords.forEach((keyword, index) => {
-          console.log(`[DEBUG] Processing keyword ${index+1}/${businessKeywords.length}: "${keyword}"`)
-          
-          // 查找对应的字段名（可能就是关键词本身，或者有变体）
-          let foundKey = null
-          // 首先尝试精确匹配
-          if (firstCase[keyword]) {
-            foundKey = keyword
-            console.log(`[DEBUG]  - Exact match found for "${keyword}"`)
-          } else {
-            // 尝试多种模糊匹配策略
-            const normalizedKeyword = keyword.replace(/\s+/g, '').toLowerCase()
-            
-            // 策略1：关键词包含字段名或字段名包含关键词
-            foundKey = Object.keys(firstCase).find(key => {
-              if (excludeFields.includes(key)) return false
-              const normalizedKey = key.replace(/\s+/g, '').toLowerCase()
-              return normalizedKeyword.includes(normalizedKey) || normalizedKey.includes(normalizedKeyword)
-            })
-            
-            if (foundKey) {
-              console.log(`[DEBUG]  - Fuzzy match found: "${foundKey}" for "${keyword}"`)
-            } else {
-              // 策略2：部分匹配（单个字匹配）
-              foundKey = Object.keys(firstCase).find(key => {
-                if (excludeFields.includes(key)) return false
-                return keyword.split('').some(char => key.includes(char))
-              })
-              
-              if (foundKey) {
-                console.log(`[DEBUG]  - Partial character match found: "${foundKey}" for "${keyword}"`)
-              }
-            }
-          }
-          
-          if (foundKey) {
-            dynamicColumns.push({ 
-              prop: foundKey, 
-              label: keyword,  // 直接使用用户指定的关键词作为列标题
-              minWidth: 150 
-            })
-          } else {
-            // 如果没有找到，仍然添加列（显示为空，确保列完整性）
-            console.log(`[WARN]  - No match found for "${keyword}", adding empty column`)
-            dynamicColumns.push({ 
-              prop: keyword, 
-              label: keyword, 
-              minWidth: 150 
-            })
-          }
-        })
-        
-        // 再添加其他可能存在但未在 business_keywords 中列出的字段
-        Object.keys(firstCase).forEach(key => {
-          if (!excludeFields.includes(key) && !businessKeywords.includes(key)) {
-            // 检查是否已经通过模糊匹配添加了
-            const alreadyAdded = dynamicColumns.some(col => col.prop === key)
-            if (!alreadyAdded) {
-              // 对额外的字段使用正常的标题转换
-              const labelMap = {
-                'return_reason': '退货原因',
-                'refund_amount': '退款金额',
-                'exchange_reason': '换货原因',
-                'new_product': '换货商品',
-                'damage_type': '破损类型',
-                'compensation_amount': '赔偿金额',
-                'missing_items': '漏发商品',
-                'claim_amount': '索赔金额'
-              }
-              
-              let label
-              if (labelMap[key]) {
-                label = labelMap[key]
-              } else if (/^[\u4e00-\u9fa5]+$/.test(key)) {
-                label = key
-              } else {
-                label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-              }
-              
-              dynamicColumns.push({ prop: key, label: label, minWidth: 150 })
-            }
-          }
-        })
-      } else {
-        // 如果没有 business_keywords，正常处理所有字段
-        Object.keys(firstCase).forEach(key => {
-          if (!excludeFields.includes(key)) {
-            const labelMap = {
-              'return_reason': '退货原因',
-              'refund_amount': '退款金额',
-              'exchange_reason': '换货原因',
-              'new_product': '换货商品',
-              'damage_type': '破损类型',
-              'compensation_amount': '赔偿金额',
-              'missing_items': '漏发商品',
-              'claim_amount': '索赔金额'
-            }
-            
-            let label
-            if (labelMap[key]) {
-              label = labelMap[key]
-            } else if (/^[\u4e00-\u9fa5]+$/.test(key)) {
-              label = key
-            } else {
-              label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-            }
-            
-            dynamicColumns.push({ prop: key, label: label, minWidth: 150 })
-          }
-        })
-      }
-      
-      previewColumns.value = dynamicColumns
-      console.log('[DEBUG] Dynamic columns:', dynamicColumns.map(c => c.label).join(', '))
-      
-      // 更新分页信息
-      previewPagination.value.total = selectedDataset.value.record_count
-      previewPagination.value.currentPage = 1
-      previewPagination.value.pageSize = 20
-    } else {
-      console.log('[INFO] No test_cases in response, showing empty state')
-      // 如果没有真实数据，显示空状态（不再生成占位符数据）
-      previewData.value = []
-      previewColumns.value = []
-    }
-    
-    // 切换到数据集Tab
-    leftPanelTab.value = 'datasets'
-    
-    // 根据是更新还是创建显示不同的消息
-    if (selectedDataset.value && selectedDataset.value.id) {
-      ElMessage.success(`✓ 已更新 "${selectedDataset.value.name}"，共 ${newDataset.record_count} 条LLM评测数据`)
-    } else {
-      ElMessage.success(`✓ 已生成 "${newDataset.name}"，共 ${newDataset.record_count} 条LLM评测数据`)
-    }
-    
-    // 优先使用保存的generation_config中的配置
-    const config = newDataset.generation_config || {}
-    if (config.positive_count && config.negative_count && config.boundary_count) {
-      // 使用保存的实际配置
-      llmForm.value.positive_count = config.positive_count
-      llmForm.value.negative_count = config.negative_count
-      llmForm.value.boundary_count = config.boundary_count
-      llmForm.value.languages = config.languages || ['zh']
-    } else {
-      // 如果没有保存的配置，根据record_count估算（兼容旧数据）
-      llmForm.value.positive_count = Math.floor(newDataset.record_count * 0.5) || 3
-      llmForm.value.negative_count = Math.floor(newDataset.record_count * 0.3) || 1
-      llmForm.value.boundary_count = Math.floor(newDataset.record_count * 0.2) || 1
-    }
+    renumberDuplicateNames()
+    saveDatasetsToStorage()
+    localStorage.setItem('data_factory_selected_dataset_id', String(datasetId))
+
+    ElMessage.success('已提交 LLM 生成任务，后台生成中，可继续浏览其它数据')
+    // 立即选中占位（不阻塞），并启动轮询
+    await selectDataset(placeholder)
+    pollLLMDataset(datasetId)
   } catch (error) {
-    // 清除超时定时器
-    clearTimeout(timeoutId)
-    
     console.error('Generate LLM dataset error:', error)
-    
-    if (error.name === 'AbortError') {
-      ElMessage.error('请求超时：AI生成数据时间过长，请稍后重试或减少数据量')
-    } else {
-      ElMessage.error('生成失败: ' + (error.message || '未知错误'))
-    }
+    ElMessage.error('提交失败: ' + (error.message || '未知错误'))
   } finally {
     generating.value = false
   }
+}
+
+// 轮询 LLM 数据集生成状态（异步），完成/失败后刷新预览
+const pollLLMDataset = (datasetId, attempt = 0) => {
+  if (attempt > 60) return // 最多约 5 分钟
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
+  if (!token) return
+  setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/v1/data-factory/datasets/${datasetId}/`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const ds = await res.json()
+      const status = ds.status
+
+      // 更新列表项状态
+      const idx = datasets.value.findIndex(d => String(d.id) === String(datasetId))
+      if (idx >= 0) {
+        datasets.value[idx] = {
+          ...datasets.value[idx],
+          status,
+          record_count: ds.record_count || datasets.value[idx].record_count,
+          error: ds.error || ''
+        }
+      }
+
+      if (status === 'completed') {
+        // 重新加载完整记录到预览
+        const target = datasets.value.find(d => String(d.id) === String(datasetId))
+        if (target) {
+          await loadDatasetRecords(target)
+          if (selectedDataset.value && String(selectedDataset.value.id) === String(datasetId)) {
+            ElMessage.success(`LLM 数据集已生成完成，共 ${ds.record_count || 0} 条`)
+          }
+        }
+      } else if (status === 'failed') {
+        ElMessage.error(`LLM 生成失败：${ds.error || '未知错误'}`)
+      } else {
+        // 仍 running，继续轮询
+        pollLLMDataset(datasetId, attempt + 1)
+      }
+    } catch (e) {
+      console.warn('轮询 LLM 状态失败:', e)
+      if (attempt < 60) pollLLMDataset(datasetId, attempt + 1)
+    }
+  }, 3000)
 }
 
 // 生成LLM评测预览数据（已废弃 - 现在使用后端返回的真实数据）
@@ -3307,6 +3078,7 @@ const getBusinessTypeLabel = (type) => {
 const getStatusLabel = (status) => {
   const map = {
     'draft': '草稿',
+    'running': '生成中',
     'generating': '生成中',
     'completed': '已完成',
     'failed': '失败'
@@ -3317,6 +3089,7 @@ const getStatusLabel = (status) => {
 const getStatusColor = (status) => {
   const map = {
     'draft': 'info',
+    'running': 'warning',
     'generating': 'warning',
     'completed': 'success',
     'failed': 'danger'

@@ -14,7 +14,7 @@
     <div class="app-layout">
       <!-- 侧边栏 -->
       <aside class="sidebar">
-        <div class="logo" @click="$router.push('/workbench')" title="回到工作台">
+        <div class="logo" @click="goWorkbench()" title="回到工作台">
           <div class="logo-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="logo-svg">
               <circle cx="12" cy="12" r="3"/>
@@ -27,10 +27,10 @@
 
         <nav class="sidebar-nav">
           <!-- 工作台快捷入口 -->
-          <router-link to="/workbench" class="nav-item" :class="{ active: isActive('/workbench') }">
+          <div @click="goWorkbench()" class="nav-item" :class="{ active: isActive('/workbench') }" style="cursor: pointer;">
             <el-icon :size="18"><HomeFilled /></el-icon>
             <span>工作台</span>
-          </router-link>
+          </div>
 
           <div class="nav-divider"></div>
 
@@ -54,7 +54,7 @@
                 class="nav-item"
                 :class="{ active: isActive(item.to) }"
               >
-                <el-icon :size="18"><component :is="iconMap[item.icon]" /></el-icon>
+                <el-icon :size="18"><component :is="iconMap[item.icon]" :key="item.icon" /></el-icon>
                 <span>{{ item.label }}</span>
               </router-link>
             </div>
@@ -85,7 +85,11 @@
           </div>
         </header>
         <main class="main-content">
-          <router-view />
+          <router-view v-slot="{ Component }">
+            <keep-alive include="DataFactory">
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
         </main>
       </div>
     </div>
@@ -137,7 +141,7 @@ const menuGroups = [
     items: [
       { to: '/knowledge/chat', icon: 'Collection', label: '知识中枢' },
       { to: '/eval-center', icon: 'DataAnalysis', label: '全链路评测中心' },
-      { to: '/quality-checker', icon: 'User', label: '质量数字人' },
+      { to: '/quality-checker', icon: 'User', label: '需求评审师' },
       { to: '/data-factory', icon: 'Coin', label: '数据工厂' },
       { to: '/testcases/ai-generate', icon: 'MagicStick', label: 'AI 用例生成' },
       { to: '/testcases', icon: 'Connection', label: '接口测试' },
@@ -164,7 +168,7 @@ const isHubRoute = computed(() => route.path === '/workbench')
 
 const visibleGroups = computed(() => {
   let groups = menuGroups
-    .map(g => ({ ...g, items: g.items.filter(i => !i.adminOnly || isAdmin.value) }))
+    .map(g => ({ ...g, items: g.items.filter(i => !i.hidden && (!i.adminOnly || isAdmin.value)) }))
     .filter(g => !g.adminOnly || isAdmin.value)
     .filter(g => g.items.length > 0)
 
@@ -214,6 +218,12 @@ const userInitial = computed(() => {
 
 const handleLogout = () => {
   authStore.logout()
+}
+
+const goWorkbench = () => {
+  const group = route.meta?.group
+  const domain = ['test', 'case', 'schedule'].includes(group) ? group : 'base'
+  router.push({ path: '/workbench', query: { domain } })
 }
 </script>
 

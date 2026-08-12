@@ -57,6 +57,12 @@ const routes = [
     meta: { requiresAuth: true, title: '知识中枢', group: 'test' },
   },
   {
+    path: '/knowledge/:id',
+    name: 'KnowledgeChatDetail',
+    component: () => import('@/views/KnowledgeChat.vue'),
+    meta: { requiresAuth: true, title: '知识中枢', group: 'test' },
+  },
+  {
     path: '/eval-center',
     name: 'EvalCenter',
     component: () => import('@/views/EvalCenter.vue'),
@@ -66,7 +72,7 @@ const routes = [
     path: '/quality-checker',
     name: 'QualityChecker',
     component: () => import('@/views/QualityChecker.vue'),
-    meta: { requiresAuth: true, title: '质量数字人', group: 'test' },
+    meta: { requiresAuth: true, title: '需求评审师', group: 'test' },
   },
   {
     path: '/data-factory',

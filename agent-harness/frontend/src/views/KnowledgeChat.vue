@@ -2,7 +2,17 @@
   <div class="knowledge-chat-container">
     <!-- 顶部导航 -->
     <div class="chat-header">
-      <div class="header-actions" style="margin-left: auto; display: flex; gap: 8px;">
+      <div class="header-actions" style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+        <el-button
+          :type="isDark ? 'default' : 'default'"
+          size="small"
+          text
+          @click="toggleTheme"
+          :title="isDark ? '当前深色主题，点击切换浅色' : '当前浅色主题，点击切换深色'"
+        >
+          <el-icon :size="18"><component :is="isDark ? Moon : Sunny" /></el-icon>
+          <span style="margin-left: 4px;">{{ isDark ? '深色' : '浅色' }}</span>
+        </el-button>
         <el-button 
           v-if="qaMode === 'knowledge'"
           size="small" 
@@ -14,14 +24,67 @@
           v-if="qaMode === 'knowledge'"
           :show-file-list="false"
           :before-upload="handleUpload"
-          accept=".pdf,.docx,.txt"
+          accept=".txt,.md,.markdown,.pdf,.docx"
         >
           <el-button size="small" type="primary">
             <el-icon><Upload /></el-icon> 上传文档
           </el-button>
         </el-upload>
+        <el-button size="small" text @click="openMemoryDrawer">
+          <el-icon><Memo /></el-icon> 记忆管理
+        </el-button>
       </div>
     </div>
+
+    <!-- 记忆管理抽屉 -->
+    <el-drawer
+      v-model="memoryDrawerVisible"
+      title="记忆管理"
+      direction="rtl"
+      size="420px"
+      :append-to-body="true"
+    >
+      <div class="memory-manage">
+        <div class="memory-manage-toolbar">
+          <span class="memory-manage-count">共 {{ totalMemoryCount }} 条长期记忆</span>
+          <el-button size="small" type="danger" plain :disabled="totalMemoryCount === 0" @click="clearAllMemories">清空全部</el-button>
+        </div>
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px;">
+          这里展示 AI 在对话 / 知识库问答中自动沉淀的长期记忆（用户偏好、决策、经验等），跨会话保留，用于让回答更贴合你的习惯。
+        </el-alert>
+        <div v-if="memoryLoading" class="memory-loading">
+          <el-icon class="is-loading"><Loading /></el-icon> 加载中...
+        </div>
+        <div v-else-if="totalMemoryCount === 0" class="memory-empty">
+          <el-empty description="暂无长期记忆" :image-size="80" />
+        </div>
+        <div v-else class="memory-groups">
+          <div v-for="group in memoryGroups" :key="group.mode" class="memory-group">
+            <div class="memory-group-header">
+              <span class="memory-group-title">{{ group.mode === 'chat' ? '日常对话' : '知识库问答' }}</span>
+              <span class="memory-group-count">{{ group.entries.length }} 条</span>
+              <el-button
+                v-if="group.entries.length"
+                size="small" text type="danger"
+                @click="clearMemoriesByMode(group.mode)"
+              >清空</el-button>
+            </div>
+            <div
+              v-for="item in group.entries"
+              :key="item.id"
+              class="memory-item"
+            >
+              <div class="memory-item-content">{{ item.content }}</div>
+              <div class="memory-item-meta">
+                <el-tag size="small" :type="memoryTypeTag(item.memory_type)">{{ memoryTypeName(item.memory_type) }}</el-tag>
+                <span class="memory-item-time" v-if="item.created_at">{{ formatMemoryTime(item.created_at) }}</span>
+                <el-button size="small" text type="danger" @click="deleteMemory(item)">删除</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
 
     <div class="chat-content">
       <!-- 左侧：历史对话列表 -->
@@ -31,7 +94,25 @@
         </div>
         <div v-else class="history-panel-expanded">
           <div class="history-panel-header-compact">
-            <span class="history-panel-title">历史记录</span>
+            <div class="history-panel-header-left">
+              <span class="history-panel-title">历史记录</span>
+              <el-checkbox
+                v-if="chatHistory.length"
+                :model-value="isAllSelected"
+                @change="toggleSelectAll"
+              >
+                全选
+              </el-checkbox>
+              <el-button
+                v-if="selectedMessages.size"
+                size="small"
+                type="danger"
+                text
+                @click="batchDelete"
+              >
+                删除({{ selectedMessages.size }})
+              </el-button>
+            </div>
             <el-button size="small" text @click="toggleHistoryPanel">
               <el-icon><ArrowLeft /></el-icon>
             </el-button>
@@ -70,7 +151,7 @@
             @stop="stopWorkflow"
           />
 
-          <div v-if="kbNotFound" class="welcome-message">
+          <div v-if="kbNotFound && qaMode === 'knowledge'" class="welcome-message">
             <div class="welcome-content">
               <div class="welcome-icon icon-knowledge">
                 <el-icon :size="60"><Reading /></el-icon>
@@ -93,7 +174,7 @@
             </div>
           </div>
           
-          <div v-for="(msg, index) in messages" :key="index" class="message-item" :class="{ 'user-message': msg.isUser }">
+          <div v-for="(msg, index) in messages" :key="msg._id || msg.tempId || index" class="message-item" :class="{ 'user-message': msg.isUser }">
             <div class="message-avatar">
               <!-- AI助手头像 - 科技感渐变圆形 -->
               <div v-if="!msg.isUser" class="avatar-ai">
@@ -105,14 +186,26 @@
               </div>
             </div>
             <div class="message-content">
-              <!-- AI 回答元信息行：Skill + 响应耗时 -->
-              <div v-if="!msg.isUser && (msg.skill || msg.responseTime)" class="message-meta-row">
+              <!-- AI 回答元信息行：Skill + 响应耗时 + 质量评分 + 人工协同 -->
+              <div v-if="!msg.isUser && (msg.skill || msg.responseTime || msg.evalScore !== undefined || msg.needsHuman || (msg.evalPending && showEvalMeta))" class="message-meta-row">
                 <el-tag v-if="msg.skill" size="small" type="success" effect="light">
                   <el-icon><SetUp /></el-icon> {{ msg.skill }}
                 </el-tag>
                 <span v-if="msg.responseTime" class="message-meta-time">
                   <el-icon><Timer /></el-icon> {{ formatResponseTime(msg.responseTime) }}
                 </span>
+                <el-tag v-if="msg.evalPending && showEvalMeta" size="small" type="info" effect="plain">
+                  质量评估中...
+                </el-tag>
+                <el-tag v-else-if="msg.evalScore !== undefined" size="small" :type="msg.evalScore >= 0.7 ? 'success' : 'warning'" effect="plain">
+                  质量评分 {{ Math.round(msg.evalScore * 100) }}%
+                </el-tag>
+                <el-tag v-if="!msg.evalPending && msg.evalIterations && msg.evalIterations > 1" size="small" type="info" effect="plain">
+                  循环 {{ msg.evalIterations }} 轮
+                </el-tag>
+                <el-tag v-if="msg.needsHuman" size="small" type="danger" effect="dark">
+                  已转人工协同
+                </el-tag>
               </div>
               <div v-if="msg.isUser" class="message-text">
                 <div v-if="msg.images && msg.images.length > 0" class="message-images">
@@ -134,28 +227,19 @@
               </div>
               <div v-else class="message-text ai-message-bubble" v-html="formatMessage(msg.content)"></div>
               <!-- AI 思考过程折叠面板（历史消息中可展开查看） -->
-              <div v-if="!msg.isUser && (msg.thinkingProcess?.length || msg.reasoningText)" class="message-thinking-collapse">
+              <!-- 历史消息：折叠式思考过程，默认不展开，不抢正文视觉焦点 -->
+              <div v-if="!msg.isUser && msg.isDeepThinking && msg.reasoningText" class="message-thinking-collapse">
                 <el-collapse>
                   <el-collapse-item>
                     <template #title>
                       <span class="thinking-collapse-title">
-                        深度思考 {{ msg.thinkingProcess?.length ? '(' + msg.thinkingProcess.length + ' 步)' : '' }}
+                        <el-icon><Opportunity /></el-icon> 思考过程
                         <el-tag size="small" type="success" class="thinking-response-tag">{{ formatDuration(msg.responseTime / 1000) }}</el-tag>
                       </span>
                     </template>
-                    <div v-if="msg.reasoningText" class="thinking-history-steps">
+                    <div class="thinking-history-steps">
                       <div class="reasoning-text-area reasoning-done" style="margin-top: 0;">
                         <div class="reasoning-text-content" v-html="formatMessage(msg.reasoningText)"></div>
-                      </div>
-                    </div>
-                    <div v-else class="thinking-history-steps">
-                      <div 
-                        v-for="(step, idx) in msg.thinkingProcess" 
-                        :key="idx" 
-                        class="thinking-history-item"
-                      >
-                        <span class="step-check-done">✓</span>
-                        <span class="step-text-done">{{ step }}</span>
                       </div>
                     </div>
                   </el-collapse-item>
@@ -194,8 +278,13 @@
                 <el-collapse>
                   <el-collapse-item title="参考文档片段">
                     <div v-for="(ctx, i) in msg.contextDocs" :key="i" class="context-item">
-                      <el-tag size="small" type="info">片段 {{ i + 1 }}</el-tag>
-                      <p>{{ ctx.content }}</p>
+                      <div class="context-header">
+                        <el-tag size="small" type="info">片段 {{ i + 1 }}</el-tag>
+                        <span class="context-filename" :title="ctx.filename">{{ ctx.filename }}</span>
+                        <span v-if="ctx.chunk_index !== undefined" class="context-meta">chunk #{{ ctx.chunk_index }}</span>
+                        <span v-if="ctx.score !== undefined" class="context-score">score {{ ctx.score }}</span>
+                      </div>
+                      <p class="context-content">{{ ctx.content }}</p>
                     </div>
                   </el-collapse-item>
                 </el-collapse>
@@ -203,93 +292,45 @@
             </div>
           </div>
           
-          <!-- 流式输出中：实时显示AI回答 + 思考过程 + 计时器 + 停止按钮 -->
-          <div v-if="answering && streamingText.length > 0" class="message-item">
+          <!-- 流式输出中：实时显示AI回答 + 可折叠思考过程 + 计时器 + 停止按钮 -->
+          <div v-if="answering" class="message-item">
             <div class="message-avatar">
               <div class="avatar-ai">
                 <el-icon :size="24"><Reading /></el-icon>
               </div>
             </div>
             <div class="message-content">
-              <!-- 思考过程面板：状态步骤 + 真实推理文本（始终在流式文字上方） -->
-              <div v-if="thinkingSteps.length > 0 || streamingReasoning" class="thinking-steps-panel streaming-thinking-panel">
-                <div class="thinking-panel-header">
-                  <span class="thinking-panel-title">深度思考</span>
-                  <span class="thinking-panel-timer">{{ formatDuration(elapsedTime) }}</span>
-                </div>
-                <div 
-                  v-for="(step, idx) in thinkingSteps" 
-                  :key="idx" 
-                  class="thinking-step-item step-completed"
-                >
-                  <span class="step-icon">
-                    <span class="step-check">✓</span>
-                  </span>
-                  <span class="step-text">{{ step }}</span>
-                </div>
-                <div v-if="streamingReasoning" class="reasoning-text-area reasoning-done">
-                  <div class="reasoning-text-content" v-html="formatMessage(streamingReasoning)"></div>
-                </div>
-              </div>
-              <!-- AI 回答正文 -->
-              <div class="message-text ai-message-bubble" v-html="formatMessage(streamingText)"></div>
-              <div class="streaming-footer">
-                <span class="streaming-timer">
-                  <span class="timer-dot"></span>
-                  {{ formatDuration(elapsedTime) }}
-                </span>
-                <span class="streaming-cursor">▊</span>
-              </div>
-              <div class="streaming-actions">
-                <el-button 
-                  size="small" 
-                  type="danger" 
-                  plain
-                  @click="stopStreaming"
-                  class="stop-stream-btn"
-                >
-                  <el-icon><Close /></el-icon>
-                  停止生成
-                </el-button>
-              </div>
-            </div>
-          </div>
-          
-          <!-- 思考过程 / 加载中提示（尚未收到任何 token）+ 停止按钮 -->
-          <div v-if="answering && streamingText.length === 0" class="message-item" role="status" aria-live="polite" aria-label="AI正在思考">
-            <div class="message-avatar">
-              <div class="avatar-ai">
-                <el-icon :size="24" aria-hidden="true"><Reading /></el-icon>
-              </div>
-            </div>
-            <div class="message-content">
-              <!-- 思考过程面板（加载中）：状态步骤 + 真实推理文本流式输出 -->
-              <div v-if="thinkingSteps.length > 0" class="thinking-steps-panel loading-thinking-panel">
-                <div class="thinking-panel-header">
-                  <span class="thinking-panel-title">深度思考</span>
-                  <span class="thinking-panel-timer">{{ formatDuration(elapsedTime) }}</span>
-                </div>
-                <!-- 状态步骤列表 -->
-                <div 
-                  v-for="(step, idx) in thinkingSteps" 
-                  :key="idx" 
-                  class="thinking-step-item"
-                  :class="{ 'step-completed': idx < thinkingSteps.length - 1, 'step-active': idx === thinkingSteps.length - 1 }"
-                >
-                  <span class="step-icon">
-                    <span v-if="idx < thinkingSteps.length - 1" class="step-check">✓</span>
-                    <span v-else class="step-spinner"></span>
-                  </span>
-                  <span class="step-text">{{ step }}</span>
-                </div>
-                <!-- 真实推理文本（模型输出） -->
-                <div v-if="streamingReasoning" class="reasoning-text-area">
-                  <div class="reasoning-text-content" v-html="formatMessage(streamingReasoning)"></div>
-                  <span v-if="!streamingText" class="reasoning-cursor">▊</span>
-                </div>
-              </div>
-              <!-- 无思考步骤时的回退显示 -->
-              <div v-else class="thinking-indicator">
+              <!-- 思考过程折叠面板：默认收起，不抢占正文视觉焦点 -->
+              <el-collapse v-if="reasoningMode === 'reasoning' && (streamingReasoning || thinkingSteps.length > 0)" v-model="activeStreamingThinkingPanel">
+                <el-collapse-item name="reasoning">
+                  <template #title>
+                    <span class="thinking-panel-title-inline">
+                      <el-icon><Opportunity /></el-icon> 思考过程
+                      <span class="thinking-panel-timer">{{ formatDuration(elapsedTime) }}</span>
+                    </span>
+                  </template>
+                  <div v-if="thinkingSteps.length > 0" class="thinking-steps-panel streaming-thinking-panel">
+                    <div 
+                      v-for="(step, idx) in thinkingSteps" 
+                      :key="idx" 
+                      class="thinking-step-item"
+                      :class="{ 'step-completed': idx < thinkingSteps.length - 1, 'step-active': idx === thinkingSteps.length - 1 }"
+                    >
+                      <span class="step-icon">
+                        <span v-if="idx < thinkingSteps.length - 1" class="step-check">✓</span>
+                        <span v-else class="step-spinner"></span>
+                      </span>
+                      <span class="step-text">{{ step }}</span>
+                    </div>
+                  </div>
+                  <div v-if="streamingReasoning" class="reasoning-text-area reasoning-terminal">
+                    <div ref="reasoningContentRef" class="reasoning-text-content" v-html="formatMessage(streamingReasoning)"></div>
+                    <span v-if="!streamingText" class="reasoning-cursor">▊</span>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+              <!-- 非深度思考模式或无推理内容时的加载提示 -->
+              <div v-else-if="answering && streamingText.length === 0" class="thinking-indicator">
                 <div class="thinking-dots">
                   <span></span>
                   <span></span>
@@ -298,7 +339,20 @@
                 <span class="thinking-text">{{ currentThinkingStatus }}</span>
                 <span class="thinking-timer">{{ formatDuration(elapsedTime) }}</span>
               </div>
-              <div class="streaming-actions" style="margin-top: 8px;">
+              <!-- AI 回答正文：深度思考模式下先隐藏答案，思考结束后一次性完整显示 -->
+              <div v-if="streamingText.length > 0 && !isReasoningPhase" class="message-text ai-message-bubble" v-html="formatMessage(streamingText)"></div>
+              <div v-else-if="answering && reasoningMode === 'reasoning'" class="answer-placeholder">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>{{ isReasoningPhase ? '推理完成后再输出答案…' : '正在整理最终答案…' }}</span>
+              </div>
+              <div v-if="streamingText.length > 0 && !isReasoningPhase" class="streaming-footer">
+                <span class="streaming-timer">
+                  <span class="timer-dot"></span>
+                  {{ formatDuration(elapsedTime) }}
+                </span>
+                <span class="streaming-cursor">▊</span>
+              </div>
+              <div class="streaming-actions">
                 <el-button 
                   size="small" 
                   type="danger" 
@@ -551,12 +605,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { knowledgeBaseAPI } from '@/api/index'
+import { knowledgeBaseAPI, memoryAPI, authAPI } from '@/api/index'
 import api from '@/api/index'
-import { ArrowLeft, Upload, Reading, User, Promotion, Plus, Delete, ChatDotRound, Document, SetUp, Picture, Close, Download, Timer, Loading, CircleCheckFilled, CircleCloseFilled, CopyDocument, Opportunity } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { ArrowLeft, Upload, Reading, User, Promotion, Plus, Delete, ChatDotRound, Document, SetUp, Picture, Close, Download, Timer, Loading, CircleCheckFilled, CircleCloseFilled, CopyDocument, Opportunity, Moon, Sunny, Memo } from '@element-plus/icons-vue'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import * as XLSX from 'xlsx'
@@ -614,17 +669,27 @@ const elapsedTime = ref(0) // 计时器（秒）
 const thinkingSteps = ref([]) // 思考过程步骤累积列表
 const currentThinkingStatus = ref('') // 当前（最新）状态文字
 const streamingReasoning = ref('') // 模型真正的推理文本（reasoning 事件流式累积）
+const activeStreamingThinkingPanel = ref([]) // 流式思考过程折叠面板展开状态（默认收起）
+const isReasoningPhase = ref(false) // 深度思考模式：是否仍处于思考阶段（未出答案）
+const answerBuffer = ref('')      // 思考阶段缓存的首批答案 token
+const reasoningContentRef = ref(null) // 流式思考文本容器，用于自动滚动
 let streamTimer = null // 计时器 interval
 let streamAbortController = null // 用于取消请求
 let typewriterTimer = null // 打字机效果 timer
 let typewriterIndex = 0 // 打字机当前显示到的位置
 let streamReader = null // 当前流式读取器（用于手动取消）
+let messageKeySeed = 0 // 本地消息 key 自增种子，避免 v-for 用 index 闪烁
+const nextMessageKey = () => `msg-${Date.now()}-${++messageKeySeed}`
 
 // 问答模式：'chat' - 日常对话，'knowledge' - 知识库问答
 const qaMode = ref('chat')
 
 // 推理模式：'fast' - 直接回答，'reasoning' - 深度思考
 const reasoningMode = ref('fast')
+
+// 是否展示质量评估元信息（QualityChecker/多 Agent 测试任务才显示；
+// 日常对话与知识库问答默认不展示，避免每次问答都出现"质量评估中"并误触飞书推送）
+const showEvalMeta = computed(() => false)
 const toggleReasoningMode = () => {
   reasoningMode.value = reasoningMode.value === 'fast' ? 'reasoning' : 'fast'
 }
@@ -632,6 +697,130 @@ const toggleReasoningMode = () => {
 // 历史面板折叠状态
 const historyCollapsed = ref(false)
 const toggleHistoryPanel = () => { historyCollapsed.value = !historyCollapsed.value }
+
+// ========== 记忆管理 ==========
+const authStore = useAuthStore()
+const currentUserId = computed(() => authStore.user?.id ?? null)
+
+const memoryDrawerVisible = ref(false)
+const memoryLoading = ref(false)
+const memoryGroups = ref([]) // [{ mode, entries: [{id, content, memory_type, importance, created_at}] }]
+
+const totalMemoryCount = computed(() =>
+  memoryGroups.value.reduce((sum, g) => sum + g.entries.length, 0)
+)
+
+const memoryTypeName = (t) => {
+  const map = { fact: '事实', decision: '决策', pattern: '模式', lesson: '经验' }
+  return map[t] || t || '事实'
+}
+const memoryTypeTag = (t) => {
+  const map = { fact: 'info', decision: 'warning', pattern: 'success', lesson: 'danger' }
+  return map[t] || 'info'
+}
+const formatMemoryTime = (iso) => {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch (e) {
+    return ''
+  }
+}
+
+const loadMemories = async () => {
+  memoryLoading.value = true
+  try {
+    const res = await memoryAPI.list(currentUserId.value)
+    memoryGroups.value = res.memories || []
+  } catch (e) {
+    console.error('[Memory] 加载失败:', e)
+    if (e && e.status === 401) {
+      ElMessage.error('登录已过期，请重新登录后再查看记忆')
+    } else {
+      ElMessage.error('记忆加载失败')
+    }
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+const openMemoryDrawer = () => {
+  memoryDrawerVisible.value = true
+  loadMemories()
+}
+
+const deleteMemory = async (item) => {
+  try {
+    await ElMessageBox.confirm(`确定删除这条记忆？\n\n「${item.content}」`, '删除记忆', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await memoryAPI.delete(currentUserId.value, item.id, item.mode)
+    ElMessage.success('已删除')
+    await loadMemories()
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
+}
+
+const clearMemoriesByMode = async (mode) => {
+  try {
+    await ElMessageBox.confirm(`确定清空「${mode === 'chat' ? '日常对话' : '知识库问答'}」的全部记忆？`, '清空记忆', {
+      confirmButtonText: '清空',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await memoryAPI.clear(currentUserId.value, mode)
+    ElMessage.success('已清空')
+    await loadMemories()
+  } catch (e) {
+    ElMessage.error('清空失败')
+  }
+}
+
+const clearAllMemories = async () => {
+  try {
+    await ElMessageBox.confirm('确定清空全部长期记忆（日常对话 + 知识库问答）？', '清空全部记忆', {
+      confirmButtonText: '全部清空',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await memoryAPI.clear(currentUserId.value)
+    ElMessage.success('已清空全部记忆')
+    await loadMemories()
+  } catch (e) {
+    ElMessage.error('清空失败')
+  }
+}
+
+// 主题切换
+const isDark = ref(false)
+const applyTheme = () => {
+  const html = document.documentElement
+  if (isDark.value) {
+    html.classList.add('dark')
+  } else {
+    html.classList.remove('dark')
+  }
+  localStorage.setItem('knowledge-theme', isDark.value ? 'dark' : 'light')
+}
+const toggleTheme = () => {
+  isDark.value = !isDark.value
+  applyTheme()
+}
 
 // ========== Skill 相关状态 ==========
 const skills = ref([])
@@ -851,7 +1040,7 @@ const processImageFiles = (files) => {
       ElMessage.warning('单张图片不能超过 5MB')
       continue
     }
-    const reader = new FileReader()
+    const reader = new window.FileReader()
     reader.onload = (e) => {
       pendingImages.value.push(e.target.result)
     }
@@ -877,7 +1066,16 @@ const loadKnowledgeBase = async () => {
   if (qaMode.value === 'chat') {
     try {
       const listRes = await knowledgeBaseAPI.list({ page_size: 100 })
-      const kbs = listRes.results || listRes || []
+      let kbs = listRes.results || listRes || []
+      if (kbs.length === 0) {
+        try {
+          const created = await knowledgeBaseAPI.create({ name: '默认知识库', description: '系统自动创建' })
+          kbs = [created]
+          console.log('[KB] Chat mode auto-created default KB:', created.id)
+        } catch (createErr) {
+          console.error('Failed to auto-create default KB in chat mode:', createErr)
+        }
+      }
       if (kbs.length > 0) {
         const firstKb = kbs[0]
         kbId.value = firstKb.id
@@ -905,11 +1103,22 @@ const loadKnowledgeBase = async () => {
     console.log('[KB] Invalid kbId:', kbId.value, '- skipping direct fetch, listing available KBs')
     try {
       const listRes = await knowledgeBaseAPI.list({ page_size: 100 })
-      const kbs = listRes.results || listRes || []
+      let kbs = listRes.results || listRes || []
+      if (kbs.length === 0) {
+        // 多租户下自动创建默认知识库，避免用户首次使用就弹创建框
+        try {
+          const created = await knowledgeBaseAPI.create({ name: '默认知识库', description: '系统自动创建' })
+          kbs = [created]
+          console.log('[KB] Auto-created default KB:', created.id)
+        } catch (createErr) {
+          console.error('Failed to auto-create default KB:', createErr)
+        }
+      }
       if (kbs.length > 0) {
         const firstKb = kbs[0]
         kbId.value = firstKb.id
         knowledgeBase.value = firstKb
+        kbNotFound.value = false
         window.history.replaceState(null, '', `/knowledge/${firstKb.id}`)
         console.log('[KB] Auto-selected KB:', firstKb.id, firstKb.name)
       } else {
@@ -934,12 +1143,22 @@ const loadKnowledgeBase = async () => {
     console.warn('KB not found, trying to find available KB:', error)
     try {
       const listRes = await knowledgeBaseAPI.list({ page_size: 100 })
-      const kbs = listRes.results || listRes || []
+      let kbs = listRes.results || listRes || []
+      if (kbs.length === 0) {
+        try {
+          const created = await knowledgeBaseAPI.create({ name: '默认知识库', description: '系统自动创建' })
+          kbs = [created]
+          console.log('[KB] Auto-created default KB after not found:', created.id)
+        } catch (createErr) {
+          console.error('Failed to auto-create default KB:', createErr)
+        }
+      }
       if (kbs.length > 0) {
         // 跳转到第一个可用的知识库
         const firstKb = kbs[0]
         kbId.value = firstKb.id
         knowledgeBase.value = firstKb
+        kbNotFound.value = false
         // 更新URL但不触发导航（避免死循环）
         window.history.replaceState(null, '', `/knowledge/${firstKb.id}`)
       } else {
@@ -977,33 +1196,62 @@ const createNewKB = async () => {
   }
 }
 
-// 加载对话历史（按会话分组）
-const loadChatHistory = async () => {
-  // 如果 kbId 无效，直接跳过（避免请求 undefined/字符串 导致 404）
-  if (!kbId.value || !Number.isFinite(Number(kbId.value)) || Number(kbId.value) <= 0) {
-    chatHistory.value = []
-    return
-  }
-  historyLoading.value = true
+// 加载对话历史（按会话分组）。采用增量合并，避免整表替换导致左侧列表闪烁。
+// silent=true 时不在左侧显示骨架屏，用于模式切换后的后台刷新，避免切换过程卡顿。
+const loadChatHistory = async (silent = false) => {
+  if (!silent) historyLoading.value = true
   historyLoadError.value = false
   try {
-    const res = await knowledgeBaseAPI.getSessionList(kbId.value)
-    // 将会话列表转换为消息格式，用于显示在历史列表中
-    chatHistory.value = res.map(session => ({
-      id: session.session_id, // 使用session_id作为id
-      session_id: session.session_id,
-      question: session.title,
-      answer: '', // 会话列表不需要显示答案
-      created_at: session.last_message_time,
-      message_count: session.message_count,
-      is_session: true, // 标记这是会话而不是单条消息
-      mode: session.mode || 'knowledge' // 添加模式标识，默认为知识库模式
+    let items = []
+    if (qaMode.value === 'chat') {
+      const res = await knowledgeBaseAPI.chatSessionList()
+      items = res.items || []
+    } else if (qaMode.value === 'knowledge' && kbId.value && String(kbId.value).trim()) {
+      const res = await knowledgeBaseAPI.getSessionList(kbId.value)
+      items = res.items || []
+    }
+
+    // 增量合并：保留当前列表中尚在后端不存在的本地临时项（如刚刚创建的新会话），
+    // 其余按后端数据更新，避免整表替换导致 v-for 闪烁。
+    const newMap = new Map((items || []).map(session => {
+      const mode = session.mode || (qaMode.value === 'chat' ? 'chat' : 'knowledge')
+      return [session.id, {
+        id: session.id,
+        session_id: session.id,
+        question: session.title,
+        answer: '',
+        created_at: session.updated_at || session.created_at,
+        updated_at: session.updated_at,
+        is_session: true,
+        mode,
+      }]
     }))
+
+    // 保留当前列表中属于当前模式、且后端尚未返回的临时会话（乐观插入的）
+    const preserved = chatHistory.value.filter(
+      h => h.mode === qaMode.value && h._isOptimistic && !newMap.has(h.id)
+    )
+
+    // 按 updated_at 倒序排列
+    const merged = [...preserved, ...newMap.values()].sort(
+      (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)
+    )
+
+    // 保留其他模式已加载的历史，避免切换模式时 chat/knowledge 互相覆盖导致"切着切着就没了"
+    const otherModeHistory = chatHistory.value.filter(h => h.mode !== qaMode.value)
+    chatHistory.value = [...otherModeHistory, ...merged].sort(
+      (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)
+    )
+    // 标记当前模式历史已加载，切换回来时不再重复请求
+    if (modeState[qaMode.value]) {
+      modeState[qaMode.value].historyLoaded = true
+      modeState[qaMode.value].historyLoadedAt = Date.now()
+    }
   } catch (error) {
     console.error('Load history error:', error)
     historyLoadError.value = true
   } finally {
-    historyLoading.value = false
+    if (!silent) historyLoading.value = false
   }
 }
 
@@ -1039,40 +1287,54 @@ const groupedHistory = computed(() => {
   return groups
 })
 
+// 当前模式可见的历史记录
+const visibleHistory = computed(() => chatHistory.value.filter(msg => msg.mode === qaMode.value))
+
+// 是否已全选当前模式可见记录
+const isAllSelected = computed(() => {
+  if (visibleHistory.value.length === 0) return false
+  return visibleHistory.value.every(msg => selectedMessages.value.has(msg.id))
+})
+
 // 选择历史消息（会话）
 const selectMessage = async (msg) => {
   currentMessageId.value = msg.id
-  currentSessionId.value = msg.session_id || '' // 保存会话ID
-  
-  console.log('选中会话，session_id:', currentSessionId.value)
-  
+  currentSessionId.value = msg.session_id || ''
+
   // 如果是会话，加载该会话的所有消息
   if (msg.is_session && msg.session_id) {
     try {
-      const res = await knowledgeBaseAPI.getSessionMessages(kbId.value, msg.session_id)
-      // 将后端返回的消息转换为前端格式
-      messages.value = res.map(m => ({
-        content: m.question,
-        isUser: true,
-        images: m.images || []  // 保留用户消息中的图片
-      })).flatMap((userMsg, index) => {
-        // 每个用户消息后面跟着AI回复
-        const aiMsg = res[index]
-        return [
-          userMsg,
-          {
-            content: aiMsg.answer,
-            isUser: false,
-            contextDocs: aiMsg.context_docs || []
-          }
-        ]
-      })
+      let items = []
+      if (qaMode.value === 'chat') {
+        const res = await knowledgeBaseAPI.chatSessionMessages(msg.session_id)
+        items = res.items || []
+      } else if (qaMode.value === 'knowledge' && kbId.value) {
+        const res = await knowledgeBaseAPI.getSessionMessages(kbId.value, msg.session_id)
+        items = res.items || []
+      }
+      // 后端消息字段：id / session_id / role / content / created_at
+      messages.value = items.map(m => ({
+        _id: m.id || nextMessageKey(),
+        content: m.content || '',
+        isUser: m.role === 'user',
+        images: [],
+        contextDocs: [],
+        evalScore: m.eval_score !== undefined ? m.eval_score : undefined,
+        evalIterations: m.eval_iterations || undefined,
+        needsHuman: !!m.needs_human,
+      }))
     } catch (error) {
       console.error('Load session messages error:', error)
-      // 如果加载失败，只显示第一条消息
       messages.value = [
-        { content: msg.question, isUser: true },
-        { content: msg.answer, isUser: false, contextDocs: msg.context_docs || [] },
+        { _id: nextMessageKey(), content: msg.question, isUser: true },
+        {
+          _id: nextMessageKey(),
+          content: msg.answer, isUser: false,
+          contextDocs: msg.context_docs || [],
+          evalScore: msg.eval_score !== undefined ? msg.eval_score : undefined,
+          evalIterations: msg.eval_iterations || undefined,
+          needsHuman: !!msg.needs_human,
+        },
       ]
     }
   } else {
@@ -1082,15 +1344,16 @@ const selectMessage = async (msg) => {
       { content: msg.answer, isUser: false, contextDocs: msg.context_docs || [] },
     ]
   }
-  
+
   scrollToBottom()
 }
 
-// ========== 模式独立状态（仅保留输入框内容、工作流UI状态；对话消息全局共享） ==========
+// ========== 模式独立状态（输入框、右侧消息、当前会话均按模式隔离） ==========
+const HISTORY_REFRESH_COOLDOWN_MS = 15000
 const modeState = reactive({
-  chat: { question: '' },
-  knowledge: { question: '' },
-  workflow: { question: '', workflowSteps: [], workflowDone: false, workflowError: false, workflowResult: '' },
+  chat: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0 },
+  knowledge: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0 },
+  workflow: { question: '', workflowSteps: [], workflowDone: false, workflowError: false, workflowResult: '', historyLoaded: false, historyLoadedAt: 0 },
 })
 
 // 切换问答模式
@@ -1120,12 +1383,14 @@ const switchMode = (mode) => {
     stopTypewriter()
   }
   
-  // 保存当前模式的输入框内容和工作流专属状态
-  // 对话消息和 sessionId 全局共享，切换模式时不清空
-  modeState[qaMode.value].question = question.value
+  // 保存当前模式的输入框内容、右侧消息和当前会话
+  const oldMode = qaMode.value
+  modeState[oldMode].question = question.value
+  modeState[oldMode].messages = messages.value.map(m => ({ ...m }))
+  modeState[oldMode].currentSessionId = currentSessionId.value || ''
   
   // 保存工作流专属状态
-  if (qaMode.value === 'workflow') {
+  if (oldMode === 'workflow') {
     modeState.workflow.workflowSteps = [...workflowSteps.value]
     modeState.workflow.workflowDone = workflowDone.value
     modeState.workflow.workflowError = workflowError.value
@@ -1144,15 +1409,16 @@ const switchMode = (mode) => {
   
   // 切换到新模式
   qaMode.value = mode
-  
-  // 切换到日常对话时，根据 kbId 有效性更新知识库状态
-  if (mode === 'chat') {
-    kbNotFound.value = !kbId.value || !Number.isFinite(Number(kbId.value)) || Number(kbId.value) <= 0
-  }
 
-  // 恢复目标模式的输入框内容；对话消息全局共享，不随模式切换清空
+  // 日常对话模式不依赖知识库，不设置 kbNotFound
+
+  // 恢复目标模式的输入框内容、右侧消息和当前会话（按模式隔离）
   currentMessageId.value = null
   question.value = modeState[mode].question || ''
+  if (mode !== 'workflow') {
+    messages.value = (modeState[mode].messages || []).map(m => ({ ...m }))
+    currentSessionId.value = modeState[mode].currentSessionId || ''
+  }
   
   // 恢复工作流专属状态
   if (mode === 'workflow') {
@@ -1162,29 +1428,60 @@ const switchMode = (mode) => {
     workflowResult.value = modeState.workflow.workflowResult || ''
   }
   
-  // 重新加载历史（确保切换到新模式后左侧历史正确显示）
-  if (kbId.value && !kbNotFound.value) {
-    loadChatHistory()
+  // 切换模式时不再立即请求历史：chatHistory 已按 mode 字段聚合，
+  // 直接过滤即可恢复目标模式列表，避免左侧骨架屏导致视觉卡顿。
+  // 首次进入某模式在下一帧后台静默刷新；已加载过的模式超过冷却时间后也后台刷新，
+  // 保持数据新鲜的同时不会阻塞切换动画。
+  if (mode !== 'workflow') {
+    const state = modeState[mode]
+    const needRefresh = !state.historyLoaded ||
+      (Date.now() - (state.historyLoadedAt || 0) > HISTORY_REFRESH_COOLDOWN_MS)
+    if (needRefresh) {
+      nextTick(() => loadChatHistory(true))
+    }
   }
-  
-  // 简洁模式切换提示
+
+  // 简洁模式切换提示：延迟一点，等切换动画跑完再出现，减少干扰
   const modeNames = { chat: '日常对话', knowledge: '知识库问答', workflow: '多Agent工作流' }
-  ElMessage.success(`已切换到${modeNames[mode]}模式`)
+  setTimeout(() => {
+    ElMessage.success(`已切换到${modeNames[mode]}模式`)
+  }, 120)
 }
 
-// 开始新对话（仅清空当前模式）
+// 开始新对话（仅清空当前模式）。聊天模式下乐观插入一个临时会话条目，
+// 让左侧列表立即出现新项，避免发送第一条消息后才抖动刷新。
 const startNewChat = () => {
   currentMessageId.value = null
   currentSessionId.value = ''
   messages.value = []
   question.value = ''
   // 同步保存到模式状态
-  modeState[qaMode.value].question = ''
-  if (qaMode.value === 'workflow') {
+  const mode = qaMode.value
+  modeState[mode].question = ''
+  modeState[mode].messages = []
+  modeState[mode].currentSessionId = ''
+  if (mode === 'workflow') {
     modeState.workflow.workflowSteps = []
     modeState.workflow.workflowDone = false
     modeState.workflow.workflowError = false
     modeState.workflow.workflowResult = ''
+  }
+
+  // 聊天/知识库模式：在左侧列表头部插入一个未命名的临时会话
+  if (qaMode.value === 'chat' || qaMode.value === 'knowledge') {
+    const tempId = `temp-${Date.now()}`
+    const tempSession = {
+      id: tempId,
+      session_id: tempId,
+      question: '新对话',
+      answer: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_session: true,
+      mode: qaMode.value,
+      _isOptimistic: true,
+    }
+    chatHistory.value = [tempSession, ...chatHistory.value.filter(h => h.id !== tempId)]
   }
 }
 
@@ -1196,17 +1493,22 @@ const deleteMessage = async (msgId) => {
     ElMessage.error('无法找到对应的会话')
     return
   }
-  
+
   try {
     await ElMessageBox.confirm('确定要删除这个对话会话吗？这将删除该会话中的所有消息。', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning'
     })
-    
-    const res = await knowledgeBaseAPI.deleteSession(kbId.value, msg.session_id)
-    if (res.success) {
-      ElMessage.success(`删除成功，共删除 ${res.deleted_count} 条消息`)
+
+    let res
+    if (qaMode.value === 'chat') {
+      res = await knowledgeBaseAPI.deleteChatSession(msg.session_id)
+    } else {
+      res = await knowledgeBaseAPI.deleteSession(kbId.value, msg.session_id)
+    }
+    if (res.ok || res.success) {
+      ElMessage.success('删除成功')
       // 刷新历史列表
       await loadChatHistory()
       // 如果删除的是当前选中的会话，清空右侧对话区域
@@ -1237,14 +1539,12 @@ const toggleSelect = (msgId) => {
 
 // 全选/取消全选
 const toggleSelectAll = () => {
-  if (selectedMessages.value.size === chatHistory.value.length) {
-    // 已全选，取消全选
-    selectedMessages.value.clear()
+  if (isAllSelected.value) {
+    // 已全选，取消全选（仅取消当前模式可见记录）
+    visibleHistory.value.forEach(msg => selectedMessages.value.delete(msg.id))
   } else {
-    // 全选
-    chatHistory.value.forEach(msg => {
-      selectedMessages.value.add(msg.id)
-    })
+    // 全选当前模式可见记录
+    visibleHistory.value.forEach(msg => selectedMessages.value.add(msg.id))
   }
 }
 
@@ -1275,12 +1575,14 @@ const batchDelete = async () => {
       }
     })
     
-    // 逐个删除会话
+    // 逐个删除会话（根据当前模式选择对应接口）
     let totalDeleted = 0
     for (const sessionId of selectedSessionIds) {
       try {
-        const res = await knowledgeBaseAPI.deleteSession(kbId.value, sessionId)
-        if (res.success) {
+        const res = qaMode.value === 'chat'
+          ? await knowledgeBaseAPI.deleteChatSession(sessionId)
+          : await knowledgeBaseAPI.deleteSession(kbId.value, sessionId)
+        if (res.success || res.ok) {
           totalDeleted += res.deleted_count || 0
         }
       } catch (error) {
@@ -1412,10 +1714,11 @@ const formatMessage = (content) => {
     return `<blockquote>${content}</blockquote>`
   })
   
-  // 6. 有序列表
-  formatted = formatted.replace(/(^\d+\. .+\n?)+/gm, (match) => {
-    const items = match.split('\n').filter(l => /^\d+\. /.test(l))
-    const lis = items.map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('')
+  // 6. 有序列表（支持模型输出多个 1. 时兜底重排为 1/2/3...，允许空行分隔）
+  formatted = formatted.replace(/((?:^\d+\. .+(?:\n|$))(?:\n*^\d+\. .+(?:\n|$))*)/gm, (match) => {
+    const items = match.split('\n').filter(l => /^\d+\. /.test(l.trim()))
+    if (items.length === 0) return match
+    const lis = items.map((l) => `<li>${l.trim().replace(/^\d+\. /, '')}</li>`).join('')
     return `<ol>${lis}</ol>`
   })
   
@@ -1628,11 +1931,11 @@ const showCodeModal = (code, language) => {
     width: 65vw;
     min-width: 500px;
     max-width: 900px;
-    background: #ffffff;
+    background: var(--tech-card);
     z-index: 9999;
     display: flex;
     flex-direction: column;
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+    box-shadow: -4px 0 24px var(--tech-shadow);
     transform: translateX(100%);
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   `
@@ -1732,7 +2035,7 @@ const showCodeModal = (code, language) => {
     flex: 1;
     overflow: auto;
     padding: 20px 0;
-    background: #ffffff;
+    background: var(--tech-card);
   `
 
   // 语法高亮处理
@@ -2021,33 +2324,51 @@ const flushTypewriter = () => {
 }
 
 // 完成流式输出：添加消息、清理状态、刷新历史
-const finishStreaming = (fullAnswer, contextDocs, skillName, responseTimeMs) => {
+const finishStreaming = (fullAnswer, contextDocs, skillName, responseTimeMs, { calledRef = null, evalInfo = null } = {}) => {
+  // 用局部引用防重，避免 HMR/多事件导致重复写入
+  if (calledRef && calledRef.value) return
+  if (calledRef) calledRef.value = true
+
   stopTimer()
   answering.value = false
-  
+
   // 将完成的 AI 回复添加到消息列表（附带思考过程和真实推理）
   if (fullAnswer) {
-    const thinkingSnapshot = [...thinkingSteps.value]
-    const reasoningSnapshot = streamingReasoning.value || ''
+    const isDeepThinking = reasoningMode.value === 'reasoning'
+    const thinkingSnapshot = isDeepThinking ? [...thinkingSteps.value] : []
+    const reasoningSnapshot = isDeepThinking ? (streamingReasoning.value || '') : ''
+    const evalData = evalInfo || null
     messages.value.push({
+      _id: nextMessageKey(),
       content: fullAnswer,
       isUser: false,
       contextDocs: contextDocs || [],
       skill: skillName || null,
       responseTime: responseTimeMs,
+      isDeepThinking,
       thinkingProcess: thinkingSnapshot.length > 0 ? thinkingSnapshot : undefined,
       reasoningText: reasoningSnapshot || undefined,
+      evalScore: evalData?.score ?? undefined,
+      evalIterations: evalData?.iterations ?? undefined,
+      needsHuman: evalData?.needsHuman ?? false,
+      evalPending: evalData?.pending ?? false,
     })
     scrollToBottom()
-    // 刷新历史列表
-    loadChatHistory()
+    // 新会话首次发完消息后，延迟刷新一次历史列表以获取后端持久化的会话 id；
+    // 后续同一会话内的消息不再触发整表刷新，避免左侧列表闪烁。
+    if (!currentSessionId.value || !chatHistory.value.some(h => h.id === currentSessionId.value)) {
+      setTimeout(() => loadChatHistory(), 500)
+    }
   }
-  
+
   // 清理流式状态
   streamingText.value = ''
   streamingReasoning.value = ''
   thinkingSteps.value = []
   currentThinkingStatus.value = ''
+  activeStreamingThinkingPanel.value = []
+  isReasoningPhase.value = false
+  answerBuffer.value = ''
 }
 
 // ========== 多Agent工作流 ==========
@@ -2072,7 +2393,7 @@ const getAgentLabel = (agent) => {
 // 发送工作流请求（SSE流式）
 const sendWorkflowMessage = async (userQuestion) => {
   // 添加用户消息
-  messages.value.push({ content: userQuestion, isUser: true })
+  messages.value.push({ _id: nextMessageKey(), content: userQuestion, isUser: true })
   scrollToBottom()
 
   // 初始化工作流状态
@@ -2160,6 +2481,7 @@ const sendWorkflowMessage = async (userQuestion) => {
     // 保存到消息列表
     const finalText = workflowResult.value || '工作流执行完成'
     messages.value.push({
+      _id: nextMessageKey(),
       content: finalText,
       isUser: false,
       skill: '多Agent工作流',
@@ -2194,6 +2516,7 @@ const sendWorkflowMessage = async (userQuestion) => {
     workflowSteps.value = [...workflowSteps.value, errorStep]
     
     messages.value.push({
+      _id: nextMessageKey(),
       content: '工作流执行失败: ' + (error.message || '未知错误'),
       isUser: false,
     })
@@ -2350,25 +2673,30 @@ const stopStreaming = () => {
     streamAbortController = null
   }
   
-  // 3. 保存当前已显示的内容作为完整回答
-  const currentAnswer = streamingText.value || fullStreamingText.value
+  // 3. 保存当前已显示的内容作为完整回答（思考阶段被停止时，也包含缓存的答案 token）
+  const currentAnswer = streamingText.value || answerBuffer.value || fullStreamingText.value
   if (currentAnswer) {
-    const thinkingSnapshot = [...thinkingSteps.value]
-    const reasoningSnapshot = streamingReasoning.value || ''
+    const isDeepThinking = reasoningMode.value === 'reasoning'
+    const thinkingSnapshot = isDeepThinking ? [...thinkingSteps.value] : []
+    const reasoningSnapshot = isDeepThinking ? (streamingReasoning.value || '') : ''
     messages.value.push({
+      _id: nextMessageKey(),
       content: currentAnswer,
       isUser: false,
       contextDocs: [],
       skill: activeSkill.value?.name || null,
       responseTime: elapsedTime.value * 1000,
+      isDeepThinking,
       thinkingProcess: thinkingSnapshot.length > 0 ? thinkingSnapshot : undefined,
       reasoningText: reasoningSnapshot || undefined,
     })
     scrollToBottom()
-    // 延迟刷新历史列表，等待后端保存完成（GeneratorExit 处理需要时间）
-    setTimeout(() => loadChatHistory(), 500)
+    // 同一会话内后续消息不再刷新左侧历史，避免闪烁
+    if (!currentSessionId.value || !chatHistory.value.some(h => h.id === currentSessionId.value)) {
+      setTimeout(() => loadChatHistory(), 500)
+    }
   }
-  
+
   // 4. 清理流式状态
   stopTimer()
   stopTypewriter()
@@ -2378,6 +2706,8 @@ const stopStreaming = () => {
   streamingReasoning.value = ''
   thinkingSteps.value = []
   currentThinkingStatus.value = ''
+  isReasoningPhase.value = false
+  answerBuffer.value = ''
   
   ElMessage.info('已停止生成')
 }
@@ -2386,8 +2716,8 @@ const stopStreaming = () => {
 const sendMessage = async () => {
   if ((!question.value.trim() && pendingImages.value.length === 0) || answering.value) return
 
-  // 没有可用知识库（kbId 无效），阻止发送并提示
-  if (kbNotFound.value || !kbId.value || !Number.isFinite(Number(kbId.value)) || Number(kbId.value) <= 0) {
+  // 知识库模式下，没有可用知识库时阻止发送并提示
+  if (qaMode.value === 'knowledge' && (kbNotFound.value || !kbId.value || !String(kbId.value).trim())) {
     ElMessage.warning('请先创建或选择一个知识库，才能进行对话')
     return
   }
@@ -2404,19 +2734,46 @@ const sendMessage = async () => {
   }
 
   // 添加用户消息（包含图片）
-  messages.value.push({ content: userQuestion, isUser: true, images: userImages })
+  messages.value.push({ _id: nextMessageKey(), content: userQuestion, isUser: true, images: userImages })
   scrollToBottom()
 
-    // 初始化流式状态：不再伪造“AI 正在连接”步骤，等后端推送真实状态
-    answering.value = true
-    streamingText.value = ''
-    streamingReasoning.value = ''
-    thinkingSteps.value = []
-    currentThinkingStatus.value = '思考中...'
-    startTimer()
-    streamAbortController = new AbortController()
+  // 初始化流式状态：不再伪造“AI 正在连接”步骤，等后端推送真实状态
+  answering.value = true
+  streamingText.value = ''
+  streamingReasoning.value = ''
+  thinkingSteps.value = []
+  isReasoningPhase.value = reasoningMode.value === 'reasoning'
+  answerBuffer.value = ''
+  currentThinkingStatus.value = reasoningMode.value === 'reasoning' ? '深度思考中...' : '生成中...'
+  startTimer()
+  streamAbortController = new AbortController()
+
+  // 总超时 120s，防止后端挂起导致前端无限等待
+  let totalTimeoutId = null
+  let idleTimeoutId = null
+  const clearStreamTimers = () => {
+    if (totalTimeoutId) clearTimeout(totalTimeoutId)
+    if (idleTimeoutId) clearTimeout(idleTimeoutId)
+    totalTimeoutId = null
+    idleTimeoutId = null
+  }
+  const resetIdleTimeout = () => {
+    if (idleTimeoutId) clearTimeout(idleTimeoutId)
+    idleTimeoutId = setTimeout(() => {
+      if (streamAbortController) {
+        streamAbortController.abort(new Error('IDLE_TIMEOUT'))
+      }
+    }, 45000)
+  }
+  totalTimeoutId = setTimeout(() => {
+    if (streamAbortController) {
+      streamAbortController.abort(new Error('REQUEST_TIMEOUT'))
+    }
+  }, 120000)
+  resetIdleTimeout()
 
   let streamDone = false
+  const finishCalled = ref(false)
 
   try {
     // 只在对话模式下使用 Skill，知识库模式不需要角色设定
@@ -2425,13 +2782,19 @@ const sendMessage = async () => {
     const skillName = isChatMode ? (activeSkill.value?.name || undefined) : undefined
 
     // 使用流式 SSE API（带 AbortController）
+    // 日常对话不依赖知识库，使用独立接口
+    // 注意：streamUrl 使用 /api/knowledge/... 前缀，让 Vite proxy 的 /api/knowledge 规则正确重写为 /api/v1/...
+    const streamUrl = qaMode.value === 'chat'
+      ? `/api/knowledge/chat/stream/`
+      : `/api/knowledge/knowledge-bases/${kbId.value}/ask_stream/`
+    const token = localStorage.getItem('access_token')
     const response = await fetch(
-      `${api.defaults.baseURL}/knowledge/knowledge-bases/${kbId.value}/ask_stream/`,
+      streamUrl,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           question: userQuestion,
@@ -2441,12 +2804,26 @@ const sendMessage = async () => {
           skill_name: skillName,
           enable_reasoning: reasoningMode.value === 'reasoning',
           images: userImages.length > 0 ? userImages : undefined,
+          user_id: currentUserId.value ?? undefined,
         }),
         signal: streamAbortController.signal,
       }
     )
 
+    // 收到响应首包即重置空闲计时
+    resetIdleTimeout()
+
     if (!response.ok) {
+      const errText = await response.text().catch(() => '')
+      console.error(`[KnowledgeChat] Ask stream failed status: ${response.status}`, errText.slice(0, 200))
+      if (response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('user')
+        router.replace('/login')
+        return
+      }
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
@@ -2461,6 +2838,9 @@ const sendMessage = async () => {
     while (true) {
       const { done, value } = await streamReader.read()
       if (done) break
+
+      // 收到数据则重置空闲超时
+      resetIdleTimeout()
 
       buffer += decoder.decode(value, { stream: true })
 
@@ -2495,42 +2875,88 @@ const sendMessage = async () => {
               // 接收 session_id 和 skill 信息
               if (data.session_id && !currentSessionId.value) {
                 currentSessionId.value = data.session_id
+                // 新会话立即在左侧插入占位，标题先用问题前 8 字兜底，等 finishStreaming 刷新
+                const placeholderTitle = (userQuestion || '新对话').slice(0, 8) || '新对话'
+                // 移除同模式的乐观临时项，避免 temp-xxx 和真实 session_id 同时存在导致闪烁
+                chatHistory.value = chatHistory.value.filter(
+                  h => !(h.mode === qaMode.value && h._isOptimistic)
+                )
+                chatHistory.value.unshift({
+                  id: data.session_id,
+                  session_id: data.session_id,
+                  question: placeholderTitle,
+                  answer: '',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  is_session: true,
+                  mode: qaMode.value,
+                })
               }
               break
 
             case 'status':
-              // 后端推送的进度提示（检索中、生成中）—— 累积为思考步骤
+              // 后端推送的进度提示（检索中、生成中）
               if (data.content) {
                 currentThinkingStatus.value = data.content
-                thinkingSteps.value = [...thinkingSteps.value, data.content]
+                // 仅在深度思考模式下累积为思考步骤，避免快速模式也显示思考面板
+                if (reasoningMode.value === 'reasoning') {
+                  thinkingSteps.value = [...thinkingSteps.value, data.content]
+                  // 进入深度思考即刻展开临时思考面板，让用户实时看到思考过程
+                  activeStreamingThinkingPanel.value = ['reasoning']
+                }
               }
               break
-            
+
             case 'reasoning':
-              // 模型真正的链式推理文本 —— 流式累积显示在深度思考面板
-              if (data.content) {
+              // 模型真正的链式推理文本 —— 仅在深度思考模式下流式累积显示
+              if (data.content && reasoningMode.value === 'reasoning') {
                 streamingReasoning.value += data.content
+                isReasoningPhase.value = true
+                // 思考阶段保持临时思考面板展开，让用户实时看到思考过程
+                activeStreamingThinkingPanel.value = ['reasoning']
               }
               break
             
             case 'token':
-              // 直接追加显示（不再使用打字机延迟）
-              fullAnswer += data.content
-              streamingText.value = fullAnswer
-              scrollToBottom()
+              // 深度思考模式：思考结束后，答案 token 先缓存，等流结束时一次性完整显示
+              if (reasoningMode.value === 'reasoning') {
+                if (isReasoningPhase.value) {
+                  isReasoningPhase.value = false
+                  activeStreamingThinkingPanel.value = []  // 思考结束，自动收起
+                }
+                answerBuffer.value += data.content
+              } else {
+                fullAnswer += data.content
+                streamingText.value = fullAnswer
+                scrollToBottom()
+              }
               break
             
             case 'done':
-              // 流式完成
-              streamDone = true
-              fullAnswer = data.full_answer || fullAnswer
-              contextDocs = data.context_docs || []
-              // 记录后端计算的响应耗时（毫秒）
-              if (data.response_time) {
-                responseTimeMs = data.response_time
+              // 流式完成：若已处理过则忽略，避免后端/网络重发导致重复渲染
+              if (!streamDone) {
+                streamDone = true
+                fullAnswer = data.full_answer || answerBuffer.value || fullAnswer
+                contextDocs = data.context_docs || []
+                // 记录后端计算的响应耗时（毫秒）
+                if (data.response_time) {
+                  responseTimeMs = data.response_time
+                }
+                // 评估闭环元数据（得分/轮次/人工协同/后台评估中）
+                const evalInfo = (data.eval_score !== undefined || data.needs_human || data.eval_pending)
+                  ? {
+                      score: data.eval_score,
+                      iterations: data.eval_iterations,
+                      needsHuman: !!data.needs_human,
+                      pending: !!data.eval_pending,
+                    }
+                  : null
+                if (data.needs_human) {
+                  ElMessage.warning('本次回答未通过质量评估，已转人工协同复核')
+                }
+                // 直接完成流式输出
+                finishStreaming(fullAnswer, contextDocs, skillName, responseTimeMs, { calledRef: finishCalled, evalInfo })
               }
-              // 直接完成流式输出
-              finishStreaming(fullAnswer, contextDocs, skillName, responseTimeMs)
               break
             
             case 'error':
@@ -2545,29 +2971,64 @@ const sendMessage = async () => {
 
     // 如果流结束但没有收到 done 事件（异常情况），也完成
     if (!streamDone) {
-      finishStreaming(fullAnswer, contextDocs, skillName, responseTimeMs)
+      finishStreaming(fullAnswer, contextDocs, skillName, responseTimeMs, { calledRef: finishCalled })
     }
+    // 保证流式显示已结束
+    answering.value = false
+    streamingText.value = ''
   } catch (error) {
+    clearStreamTimers()
     // 用户主动取消不算错误
     if (error.name === 'AbortError') {
-      console.log('用户停止了流式输出')
+      const msg = error.message || ''
+      if (msg === 'REQUEST_TIMEOUT') {
+        ElMessage.error('请求总超时，已停止等待')
+      } else if (msg === 'IDLE_TIMEOUT') {
+        ElMessage.error('响应超时，已停止等待')
+      } else {
+        console.log('用户停止了流式输出')
+      }
+      // 超时情况下保存已有内容
+      if ((msg === 'REQUEST_TIMEOUT' || msg === 'IDLE_TIMEOUT') && (streamingText.value || answerBuffer.value)) {
+        // 深度思考模式下答案缓存在 answerBuffer，优先用它保存
+        const currentAnswer = answerBuffer.value || streamingText.value
+        messages.value.push({
+          _id: nextMessageKey(),
+          content: currentAnswer,
+          isUser: false,
+          contextDocs: [],
+          responseTime: elapsedTime.value * 1000,
+          isDeepThinking: reasoningMode.value === 'reasoning',
+          thinkingProcess: reasoningMode.value === 'reasoning' && thinkingSteps.value.length > 0 ? [...thinkingSteps.value] : undefined,
+          reasoningText: reasoningMode.value === 'reasoning' && streamingReasoning.value ? streamingReasoning.value : undefined,
+        })
+        scrollToBottom()
+      }
       return
     }
     console.error('Ask stream error:', error)
     messages.value.push({
+      _id: nextMessageKey(),
       content: '抱歉，回答失败，请稍后重试。',
       isUser: false,
     })
   } finally {
+    clearStreamTimers()
     stopTimer()
-    if (!streamDone) {
-      answering.value = false
-      streamingText.value = ''
-      thinkingSteps.value = []
-      currentThinkingStatus.value = ''
-    }
+    // 兜底：任何情况下都要结束流式状态
+    answering.value = false
+    streamingText.value = ''
+    streamingReasoning.value = ''
+    thinkingSteps.value = []
+    currentThinkingStatus.value = ''
+    isReasoningPhase.value = false
+    answerBuffer.value = ''
     streamReader = null
     streamAbortController = null
+    // 兜底刷新历史：仅在可能是新会话时触发，避免同一会话重复刷新导致闪烁
+    if (!currentSessionId.value || !chatHistory.value.some(h => h.id === currentSessionId.value)) {
+      setTimeout(() => loadChatHistory(), 800)
+    }
   }
 }
 
@@ -2578,6 +3039,22 @@ const scrollToBottom = async () => {
     messageListRef.value.scrollTop = messageListRef.value.scrollHeight
   }
 }
+
+// 滚动思考过程文本到底部，保持最新内容可见
+const scrollReasoningToBottom = async () => {
+  await nextTick()
+  const el = reasoningContentRef.value
+  if (el) {
+    el.scrollTop = el.scrollHeight
+  }
+}
+
+// 思考内容变化时自动滚动到底部，营造“实时滚动”的专业感
+watch(streamingReasoning, () => {
+  if (activeStreamingThinkingPanel.value.includes('reasoning')) {
+    scrollReasoningToBottom()
+  }
+})
 
 // 显示文档管理对话框
 const showDocumentDialog = async () => {
@@ -2593,7 +3070,11 @@ const loadDocuments = async () => {
     documents.value = res.results || []
   } catch (error) {
     console.error('Load documents error:', error)
-    ElMessage.error('加载文档列表失败')
+    const status = error?.response?.status
+    // 404 多为后端未部署新接口或旧数据，静默处理，空文档由对话框自身展示
+    if (status !== 404) {
+      ElMessage.error(error?.response?.data?.detail || '加载文档列表失败，请稍后重试')
+    }
   } finally {
     documentsLoading.value = false
   }
@@ -2943,9 +3424,9 @@ const downloadFullWord = (testCases, summary, afterTable, msg, dateStr, timeStr)
     h1 { color: #409eff; border-bottom: 2px solid #409eff; padding-bottom: 10px; }
     h2 { color: #67c23a; margin-top: 24px; }
     table { border-collapse: collapse; width: 100%; margin: 16px 0; }
-    th { background: #409eff; color: white; padding: 10px 8px; text-align: left; font-size: 14px; }
-    td { border: 1px solid #dcdfe6; padding: 8px; font-size: 13px; }
-    tr:nth-child(even) td { background: #f5f7fa; }
+    th { background: #409eff; color: var(--tech-text); padding: 10px 8px; text-align: left; font-size: 14px; }
+    td { border: 1px solid var(--tech-border); padding: 8px; font-size: 13px; }
+    tr:nth-child(even) td { background: var(--tech-card-deep); }
     .summary { background: #ecf5ff; padding: 16px; border-radius: 8px; margin: 16px 0; white-space: pre-wrap; }
     .meta { color: #909399; font-size: 12px; margin-top: 20px; }
   </style>
@@ -2996,14 +3477,70 @@ const formatDate = (dateStr) => {
   })
 }
 
-onMounted(async () => {
-  await loadKnowledgeBase()  // 先加载知识库，确保kbId就绪
-  if (kbId.value && !kbNotFound.value && Number.isFinite(Number(kbId.value))) {
-    loadChatHistory()       // kbId有效才加载对话历史
+// 初始化时主动校验登录态，避免旧 token 残留导致挂载即 401 反复跳登录
+const ensureValidToken = async () => {
+  const token = localStorage.getItem('access_token')
+  if (!token) {
+    ElMessage.warning('请先登录')
+    router.replace('/login')
+    return false
   }
+  try {
+    // api/index.js 的响应拦截器已返回 response.data，所以 res 就是 profile 数据
+    const res = await authAPI.getProfile()
+    if (!res || (!res.user && !res.username)) {
+      throw new Error('invalid token')
+    }
+    return true
+  } catch (e) {
+    const status = e?.response?.status || e?.status
+    // 只有明确 401 才认定 token 过期并清理；其他错误可能是网络/代理抖动，不重定向
+    if (status === 401) {
+      console.warn('[Auth] token expired (401), redirect to login')
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('user')
+      ElMessage.error('登录已过期，请重新登录')
+      router.replace('/login')
+    } else {
+      console.warn('[Auth] profile check failed (non-401), keep session:', status, e?.message || e)
+    }
+    return false
+  }
+}
+
+onMounted(async () => {
+  // 兜底：确保全局 FileReader 在 window 上可用，避免某些 Vite HMR/编译场景下引用失败
+  if (typeof window !== 'undefined' && typeof window.FileReader === 'undefined' && typeof FileReader !== 'undefined') {
+    window.FileReader = FileReader
+  }
+
+  const savedTheme = localStorage.getItem('knowledge-theme')
+  isDark.value = savedTheme === 'dark'
+  applyTheme()
+
+  const ok = await ensureValidToken()
+  if (!ok) return  // token 失效，已跳登录页，停止后续初始化
+
+  await loadKnowledgeBase()  // 先加载知识库，确保kbId就绪
+  // 根据当前模式加载对应历史（知识库或日常对话）
+  loadChatHistory()
   setupCodeBlockCopy()
   loadSkills() // 加载 Skills
 })
+
+// 同步当前模式的消息和会话 id，确保切换模式时状态最新
+watch(
+  [() => messages.value.length, () => currentSessionId.value, qaMode],
+  () => {
+    const mode = qaMode.value
+    if (mode !== 'workflow') {
+      modeState[mode].messages = messages.value.map(m => ({ ...m }))
+      modeState[mode].currentSessionId = currentSessionId.value || ''
+    }
+  },
+  { immediate: true }
+)
 
 onUnmounted(() => {
   stopTimer()
@@ -3033,20 +3570,27 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: white;
+  background:
+    radial-gradient(circle at 80% 10%, rgba(64, 158, 255, 0.06) 0%, transparent 35%),
+    radial-gradient(circle at 20% 90%, rgba(168, 85, 247, 0.05) 0%, transparent 40%),
+    linear-gradient(180deg, var(--tech-bg) 0%, var(--tech-bg-deep) 100%);
+  color: var(--tech-text);
 }
 
 .chat-header {
   display: flex;
   align-items: center;
   padding: 15px 20px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--tech-border);
+  background: rgba(var(--tech-bg-rgb), 0.55);
+  backdrop-filter: blur(10px);
 }
 
 .chat-header h3 {
   margin-left: 10px;
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--tech-text);
 }
 
 .chat-content {
@@ -3060,10 +3604,14 @@ onUnmounted(() => {
   flex-direction: column;
   width: 280px;
   min-width: 280px;
-  border-right: 1px solid #e4e7ed;
-  background: #f5f7fa;
+  border-right: 1px solid var(--tech-border);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(64, 158, 255, 0.1) 0%, transparent 40%),
+    radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.08) 0%, transparent 45%),
+    linear-gradient(180deg, var(--tech-bg) 0%, var(--tech-bg-deep) 100%);
   transition: width 0.25s ease, min-width 0.25s ease;
   overflow: hidden;
+  color: var(--tech-text);
 }
 
 .history-panel-wrapper.collapsed {
@@ -3078,14 +3626,15 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #909399;
+  color: var(--tech-text-dim);
   transition: background 0.2s, color 0.2s;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--tech-border);
+  background: var(--tech-bg);
 }
 
 .history-collapsed-bar:hover {
-  background: #e4e7ed;
-  color: #409eff;
+  background: rgba(64, 158, 255, 0.12);
+  color: var(--tech-cyan);
 }
 
 .history-panel-expanded {
@@ -3100,16 +3649,104 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid #e4e7ed;
-  background: #f5f7fa;
+  border-bottom: 1px solid var(--tech-border);
+  background: rgba(var(--tech-bg-rgb), 0.7);
+  backdrop-filter: blur(8px);
   flex-shrink: 0;
+}
+
+.history-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .history-panel-title {
   font-size: 13px;
+  font-weight: 700;
+  color: var(--tech-text);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.history-panel-header-left .el-checkbox {
+  margin-right: 0;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* 用一个绝对定位的伪元素强制画出明显的外框，覆盖在 Element Plus 原框上方 */
+.history-panel-header-left .el-checkbox .el-checkbox__input::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  background-color: #ffffff;
+  border: 3.5px solid #0d47a1;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 0 5px rgba(13, 71, 161, 0.35);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.history-panel-header-left .el-checkbox.is-checked .el-checkbox__input::after {
+  background-color: #0d47a1;
+  border-color: #082d6b;
+  box-shadow: 0 0 14px rgba(13, 71, 161, 0.65);
+}
+
+.history-panel-header-left .el-checkbox .el-checkbox__label {
+  color: #141414 !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
+  padding-left: 34px !important;
+}
+
+.history-panel-header-left .el-checkbox.is-checked .el-checkbox__label {
+  color: #0d47a1 !important;
+}
+
+/* 让原生的 inner 变透明，只保留对勾 */
+.history-panel-header-left .el-checkbox .el-checkbox__inner {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  width: 24px !important;
+  height: 24px !important;
+  z-index: 3;
+}
+
+.history-panel-header-left .el-checkbox.is-checked .el-checkbox__inner::after {
+  border-color: #ffffff !important;
+  border-width: 3px !important;
+  width: 6px !important;
+  height: 12px !important;
+  left: 6px !important;
+  top: 0 !important;
+}
+
+.history-panel-header-left .el-button {
+  flex-shrink: 0;
+  padding: 4px 8px;
   font-weight: 600;
-  color: #303133;
+}
+
+.history-panel-header-left .el-button.is-text {
+  color: #f56c6c;
+}
+
+.history-panel-header-left .el-button.is-text:hover {
+  color: #ff8585;
+  background: rgba(245, 108, 108, 0.12);
 }
 
 .history-panel-wrapper .history-panel {
@@ -3125,10 +3762,11 @@ onUnmounted(() => {
 /* .history-panel 旧样式兼容 */
 .history-panel {
   width: 280px;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--tech-border);
   display: flex;
   flex-direction: column;
-  background: #e5e7eb; /* 更深的灰色背景，与气泡形成更好对比 */
+  background: transparent;
+  overflow: hidden;
 }
 
 .history-header {
@@ -3136,9 +3774,9 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--tech-border);
   font-weight: 500;
-  background: #e5e7eb; /* 与面板背景一致 */
+  background: rgba(var(--tech-bg-rgb), 0.5); /* 与面板背景一致 */
 }
 
 .header-left {
@@ -3252,71 +3890,114 @@ onUnmounted(() => {
 }
 
 .history-group {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .group-title {
-  font-size: 12px;
-  color: #4a4e57; /* 更深的灰色，与更深的背景形成更好对比 */
+  font-size: 11px;
+  color: var(--tech-cyan);
   padding: 8px 12px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1.2px;
+  text-shadow: 0 0 8px rgba(64, 158, 255, 0.35);
 }
 
-/* 历史项目 - 气泡式设计 */
+/* 历史项目 - 科技风毛玻璃卡片 */
 .history-item {
-  padding: 12px 16px;
+  position: relative;
+  padding: 12px 16px 12px 20px;
   margin-bottom: 10px;
   cursor: pointer;
-  transition: all 0.2s;
-  background: #dcdfe6; /* 更深的灰色底色，增强对比度 */
-  border-radius: 20px; /* 圆角气泡效果 */
+  transition: all 0.2s ease;
+  background: var(--tech-card);
+  border: 1px solid var(--tech-border);
+  border-radius: 10px;
   display: flex;
-  align-items: flex-start; /* 改为顶部对齐，适应多行文本 */
+  align-items: flex-start;
   gap: 8px;
-  min-height: 48px; /* 最小高度，确保单行时也有足够空间 */
+  min-height: 48px;
+  box-shadow: 0 2px 8px var(--tech-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+}
+
+.history-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, var(--tech-cyan), var(--tech-blue));
+  opacity: 0.5;
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
 }
 
 .history-item:hover {
-  background: #c0c4cc; /* 悬停时更深 */
+  background: rgba(64, 158, 255, 0.12);
+  border-color: var(--tech-border-hover);
+  box-shadow: 0 6px 20px rgba(64, 158, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.history-item:hover::before {
+  opacity: 1;
+  box-shadow: 0 0 10px var(--tech-cyan);
 }
 
 /* 激活状态（当前选中的对话） */
 .history-item.active {
-  background: #409eff; /* 蓝色气泡 */
-  color: white;
+  background: rgba(64, 158, 255, 0.18);
+  border-color: var(--tech-cyan);
+  color: var(--tech-text);
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.35), 0 0 20px rgba(64, 158, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.history-item.active::before {
+  opacity: 1;
+  background: linear-gradient(180deg, var(--tech-cyan), var(--tech-purple));
+  box-shadow: 0 0 14px var(--tech-cyan);
 }
 
 .history-item.active:hover {
-  background: #409eff;
+  background: rgba(64, 158, 255, 0.22);
 }
 
 /* 批量选择模式下的样式 */
 .history-item.selected {
-  background: #ffe0b2; /* 橙色气泡，更深一些 */
+  background: rgba(64, 158, 255, 0.22);
+  border-color: var(--tech-blue);
 }
 
 .history-item.selected:hover {
-  background: #ffcc80;
+  background: rgba(38, 70, 128, 0.95);
 }
 
 .item-title {
-  font-size: 14px;
+  font-size: 13px;
+  color: var(--tech-text);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 2; /* 最多显示2行 */
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   flex: 1;
   min-width: 0;
   line-height: 1.4;
   word-break: break-all;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.history-item:hover .item-title {
+  color: var(--tech-text);
 }
 
 .item-time {
-  font-size: 12px;
-  color: #4a4e57; /* 更深的灰色，与更深的背景形成更好对比 */
+  font-size: 11px;
+  color: var(--tech-text-dim);
   flex-shrink: 0;
 }
 
@@ -3325,37 +4006,43 @@ onUnmounted(() => {
 }
 
 .history-item.selected .item-time {
-  color: #e6a23c; /* 更深的橙色 */
+  color: #79bbff;
 }
 
-/* 删除按钮 - 只在悬停时显示 */
+/* 删除按钮 - 常显 */
 .delete-btn {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  padding: 4px;
+  opacity: 1;
+  transition: all 0.2s ease;
+  padding: 5px 8px;
   flex-shrink: 0;
-  color: #f56c6c !important;
+  color: #ff6b6b !important;
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 6px;
 }
 
 .history-item:hover .delete-btn {
-  opacity: 1;
+  color: #ff9e9e !important;
+  background: rgba(255, 107, 107, 0.18);
+  border-color: rgba(255, 107, 107, 0.5);
+  box-shadow: 0 0 10px rgba(255, 107, 107, 0.25);
 }
 
-/* 激活状态下的删除按钮使用白色背景增强对比度 */
+/* 激活状态下的删除按钮 */
 .history-item.active .delete-btn {
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 4px;
+  background: rgba(255, 107, 107, 0.18);
+  border-color: rgba(255, 107, 107, 0.5);
 }
 
 .history-item.active .delete-btn:hover {
-  background: #ffffff;
+  background: rgba(255, 107, 107, 0.28);
 }
 
 .delete-btn:hover {
-  background: #fef0f0 !important;
+  background: rgba(255, 107, 107, 0.25) !important;
 }
 
-/* 复选框样式 - 简洁设计 */
+/* 复选框样式 - 深色背景适配 */
 .item-checkbox {
   flex-shrink: 0;
   margin-right: 4px;
@@ -3364,18 +4051,19 @@ onUnmounted(() => {
 .history-item .el-checkbox__inner {
   width: 16px !important;
   height: 16px !important;
-  border-color: #909399 !important; /* 更深的边框颜色，与更深的背景形成更好对比 */
-  border-width: 2px !important;
+  border-color: var(--tech-border-hover) !important;
+  border-width: 1px !important;
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .history-item .el-checkbox__inner:hover {
-  border-color: #409eff !important;
+  border-color: var(--tech-cyan) !important;
 }
 
 .history-item.active .el-checkbox__inner,
 .history-item.selected .el-checkbox__inner {
-  background-color: #409eff !important;
-  border-color: #409eff !important;
+  background-color: var(--tech-blue) !important;
+  border-color: var(--tech-blue) !important;
 }
 
 .history-item .el-checkbox__input {
@@ -3387,15 +4075,29 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0; /* 防止flex子元素溢出 */
+  min-height: 0;
 }
 
 .message-list {
   flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
-  min-height: 0; /* 允许正确滚动 */
-  background: #fafafa;
+  min-height: 0;
+  background: transparent;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 6px;
+}
+.message-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.message-list::-webkit-scrollbar-thumb {
+  background: var(--tech-border);
+  border-radius: 3px;
+}
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(64, 158, 255, 0.5);
 }
 
 .welcome-message {
@@ -3403,7 +4105,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 200px; /* 确保有足够的高度 */
+  min-height: 200px;
 }
 
 /* 自定义欢迎内容样式 */
@@ -3423,36 +4125,37 @@ onUnmounted(() => {
   transition: all 0.3s ease;
 }
 
-/* 日常对话模式 - 蓝色渐变 */
+/* 日常对话模式 - 蓝紫渐变 */
 .welcome-icon.icon-chat {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+  background: linear-gradient(135deg, var(--tech-cyan) 0%, #667eea 50%, var(--tech-purple) 100%);
+  box-shadow: 0 0 32px rgba(64, 158, 255, 0.35), 0 8px 24px rgba(102, 126, 234, 0.3);
 }
 
 .welcome-icon.icon-chat .el-icon {
-  color: white;
+  color: var(--tech-text);
 }
 
-/* 知识库问答模式 - 绿色渐变 */
+/* 知识库问答模式 - 粉橙渐变 */
 .welcome-icon.icon-knowledge {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  box-shadow: 0 8px 24px rgba(245, 87, 108, 0.3);
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #ff8c42 100%);
+  box-shadow: 0 0 32px rgba(245, 87, 108, 0.3), 0 8px 24px rgba(245, 87, 108, 0.25);
 }
 
 .welcome-icon.icon-knowledge .el-icon {
-  color: white;
+  color: var(--tech-text);
 }
 
 .welcome-content h3 {
   font-size: 24px;
   font-weight: 600;
-  color: #303133;
+  color: var(--tech-text);
   margin-bottom: 12px;
+  text-shadow: 0 0 16px rgba(64, 158, 255, 0.25);
 }
 
 .welcome-content p {
   font-size: 14px;
-  color: #606266;
+  color: var(--tech-text-dim);
   line-height: 1.6;
   max-width: 500px;
   margin: 0 auto;
@@ -3478,40 +4181,40 @@ onUnmounted(() => {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--tech-cyan) 0%, #667eea 50%, var(--tech-purple) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 0 18px rgba(64, 158, 255, 0.35), 0 4px 12px rgba(102, 126, 234, 0.3);
   transition: all 0.3s ease;
 }
 
 .avatar-ai .el-icon {
-  color: white;
+  color: var(--tech-text);
 }
 
 .avatar-ai:hover {
   transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 0 28px rgba(64, 158, 255, 0.5), 0 6px 18px rgba(102, 126, 234, 0.4);
 }
 
-/* 用户头像 - 柴犬形象 */
+/* 用户头像 - 粉橙渐变 */
 .avatar-user {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #ff8c42 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
-  box-shadow: 0 2px 8px rgba(245, 87, 108, 0.3);
+  box-shadow: 0 0 18px rgba(245, 87, 108, 0.3), 0 4px 12px rgba(245, 87, 108, 0.25);
   transition: all 0.3s ease;
 }
 
 .avatar-user:hover {
   transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+  box-shadow: 0 0 28px rgba(245, 87, 108, 0.45), 0 6px 18px rgba(245, 87, 108, 0.35);
 }
 
 .message-content {
@@ -3526,11 +4229,32 @@ onUnmounted(() => {
 /* AI思考状态指示器 */
 .thinking-indicator {
   padding: 12px 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
+  background: var(--tech-card);
+  border: 1px solid var(--tech-border);
+  border-radius: 12px;
   display: flex;
   align-items: center;
   gap: 12px;
+  box-shadow: 0 2px 10px var(--tech-shadow);
+}
+
+/* 深度思考模式：答案占位提示 */
+.answer-placeholder {
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: var(--tech-card);
+  border: 1px dashed var(--tech-border);
+  border-radius: 12px;
+  color: var(--tech-text-dim);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 10px var(--tech-shadow);
+}
+
+.answer-placeholder .is-loading {
+  animation: rotating 1.5s linear infinite;
 }
 
 .thinking-dots {
@@ -3542,7 +4266,8 @@ onUnmounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #409eff;
+  background: var(--tech-cyan);
+  box-shadow: 0 0 8px var(--tech-cyan);
   animation: bounce 1.4s infinite ease-in-out both;
 }
 
@@ -3567,31 +4292,52 @@ onUnmounted(() => {
 
 .thinking-text {
   font-size: 14px;
-  color: #606266;
+  color: var(--tech-text);
   font-weight: 500;
 }
 
 /* 思考中的计时器 */
 .thinking-timer {
   font-size: 12px;
-  color: #909399;
+  color: var(--tech-text-dim);
   margin-left: 8px;
   font-variant-numeric: tabular-nums;
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
 }
 
-/* 思考过程步骤面板 —— 深度思考风格 */
+/* 思考过程步骤面板 —— 固定高度、内部滚动、终端风格 */
 .thinking-steps-panel {
   margin-top: 10px;
   padding: 12px 14px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  border-left: 3px solid #409eff;
-  max-height: 320px;
+  background: linear-gradient(180deg, rgba(13, 24, 41, 0.95), rgba(8, 15, 28, 0.98));
+  border-radius: 10px;
+  border: 1px solid rgba(64, 158, 255, 0.35);
+  border-left: 3px solid var(--tech-blue);
+  max-height: 180px;
   overflow-y: auto;
   font-size: 13px;
   line-height: 1.6;
-  color: #606266;
+  color: #a8c5ff;
+  box-shadow: inset 0 0 20px rgba(64, 158, 255, 0.08), 0 4px 16px var(--tech-shadow);
+}
+
+/* 思考步骤面板滚动条 */
+.thinking-steps-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.thinking-steps-panel::-webkit-scrollbar-track {
+  background: rgba(64, 158, 255, 0.08);
+  border-radius: 2px;
+}
+
+.thinking-steps-panel::-webkit-scrollbar-thumb {
+  background: rgba(64, 158, 255, 0.45);
+  border-radius: 2px;
+}
+
+.thinking-steps-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(64, 158, 255, 0.65);
 }
 
 .thinking-step-item {
@@ -3600,17 +4346,17 @@ onUnmounted(() => {
   gap: 8px;
   padding: 5px 0;
   font-size: 13px;
-  color: #909399;
+  color: var(--tech-text-dim);
   transition: color 0.3s;
 }
 
 .thinking-step-item.step-active {
-  color: #303133;
+  color: var(--tech-text);
   font-weight: 500;
 }
 
 .thinking-step-item.step-completed {
-  color: #67c23a;
+  color: #95d475;
 }
 
 .step-icon {
@@ -3625,17 +4371,18 @@ onUnmounted(() => {
 
 .step-check {
   font-size: 13px;
-  color: #67c23a;
+  color: #95d475;
   font-weight: bold;
 }
 
 .step-spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid #409eff;
+  border: 2px solid var(--tech-cyan);
   border-top-color: transparent;
   border-radius: 50%;
   animation: step-spin 0.8s linear infinite;
+  box-shadow: 0 0 6px var(--tech-cyan);
 }
 
 @keyframes step-spin {
@@ -3644,38 +4391,6 @@ onUnmounted(() => {
 
 .step-text {
   line-height: 1.5;
-}
-
-/* 暗色模式 */
-html.dark .thinking-steps-panel {
-  background: #1e1f23;
-  border-left-color: #5b9bd5;
-  color: #b0b3b8;
-}
-
-html.dark .thinking-step-item.step-active {
-  color: #e0e0e0;
-}
-
-html.dark .thinking-panel-header {
-  border-bottom-color: rgba(91, 155, 213, 0.2);
-}
-
-html.dark .thinking-panel-title {
-  color: #79c0ff;
-}
-
-html.dark .thinking-history-steps {
-  background: #1e1f23;
-  border-left-color: #5b9bd5;
-}
-
-html.dark .message-thinking-collapse .el-collapse-item__header {
-  color: #79c0ff;
-}
-
-html.dark .thinking-collapse-title {
-  color: #79c0ff;
 }
 
 /* 加载中：思考面板是主要内容，去掉顶部 margin */
@@ -3695,20 +4410,22 @@ html.dark .thinking-collapse-title {
   justify-content: space-between;
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(64, 158, 255, 0.12);
+  border-bottom: 1px solid var(--tech-border);
 }
 
 .thinking-panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #409eff;
-  letter-spacing: 0.3px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #66b1ff;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 10px rgba(64, 158, 255, 0.25);
 }
 
 .thinking-panel-timer {
-  font-size: 11px;
-  color: #909399;
+  font-size: 12px;
+  color: var(--tech-text-dim);
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  font-weight: 600;
 }
 
 /* 历史消息中思考过程可折叠区域 */
@@ -3727,7 +4444,7 @@ html.dark .thinking-collapse-title {
   background: transparent;
   padding-left: 0;
   font-size: 13px;
-  color: #409eff;
+  color: var(--tech-cyan);
 }
 
 .message-thinking-collapse .el-collapse-item__wrap {
@@ -3742,18 +4459,19 @@ html.dark .thinking-collapse-title {
 .thinking-collapse-title {
   display: flex;
   align-items: center;
-  font-size: 13px;
-  color: #409eff;
-  font-weight: 500;
+  font-size: 14px;
+  color: #66b1ff;
+  font-weight: 700;
 }
 
 .thinking-response-tag {
   margin-left: 8px;
+  font-weight: 600;
 }
 
 .thinking-history-steps {
   padding: 10px 14px;
-  background: #f5f7fa;
+  background: var(--tech-card);
   border-radius: 8px;
   border-left: 3px solid #409eff;
 }
@@ -3778,44 +4496,143 @@ html.dark .thinking-collapse-title {
   line-height: 1.5;
 }
 
-/* 真实推理文本区域 */
+/* 真实推理文本区域 —— 固定高度、内部滚动 */
 .reasoning-text-area {
+  position: relative;
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed rgba(64, 158, 255, 0.2);
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(64, 158, 255, 0.25);
+  background: rgba(64, 158, 255, 0.05);
+}
+
+.reasoning-text-area.reasoning-terminal {
+  background: linear-gradient(180deg, rgba(13, 24, 41, 0.95), rgba(8, 15, 28, 0.98));
+  border: 1px solid rgba(64, 158, 255, 0.35);
+  box-shadow: inset 0 0 20px rgba(64, 158, 255, 0.08), 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 顶部渐变遮罩，提示内容可滚动 */
+.reasoning-text-area.reasoning-terminal::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  height: 24px;
+  background: linear-gradient(180deg, rgba(13, 24, 41, 0.95), transparent);
+  border-radius: 6px 6px 0 0;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .reasoning-text-content {
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
   font-size: 13px;
-  line-height: 1.7;
-  color: #4a5568;
+  line-height: 1.75;
+  color: #a8c5ff;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 400px;
+  height: 180px;
+  max-height: 180px;
   overflow-y: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  scroll-behavior: smooth;
+}
+
+/* 滚动条样式：科技蓝细条 */
+.reasoning-text-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.reasoning-text-content::-webkit-scrollbar-track {
+  background: rgba(64, 158, 255, 0.08);
+  border-radius: 2px;
+}
+
+.reasoning-text-content::-webkit-scrollbar-thumb {
+  background: rgba(64, 158, 255, 0.45);
+  border-radius: 2px;
+}
+
+.reasoning-text-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(64, 158, 255, 0.65);
+}
+
+/* 终端光标 */
+.reasoning-cursor {
+  color: #409eff;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 13px;
+  animation: blink-cursor 1s step-end infinite;
 }
 
 .reasoning-text-content p {
-  margin: 4px 0;
+  margin: 6px 0;
 }
 
-.reasoning-text-content ul, .reasoning-text-content ol {
-  margin: 4px 0;
+/* 推理步骤：用卡片式有序列表，步骤号更醒目 */
+.reasoning-text-content ol {
+  margin: 10px 0;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: reasoning-step;
+}
+
+.reasoning-text-content ol li {
+  position: relative;
+  margin: 10px 0;
+  padding: 10px 12px 10px 42px;
+  border-radius: 8px;
+  background: rgba(64, 158, 255, 0.06);
+  border: 1px solid rgba(64, 158, 255, 0.15);
+  color: var(--tech-text);
+}
+
+.reasoning-text-content ol li::before {
+  counter-increment: reasoning-step;
+  content: counter(reasoning-step);
+  position: absolute;
+  left: 10px;
+  top: 9px;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 50%;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, #409eff, #66b1ff);
+  box-shadow: 0 0 8px rgba(64, 158, 255, 0.35);
+}
+
+.reasoning-text-content ul {
+  margin: 6px 0;
   padding-left: 18px;
 }
 
-.reasoning-text-content li {
-  margin: 2px 0;
+.reasoning-text-content ul li {
+  margin: 3px 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.reasoning-text-content ul li::before {
+  display: none;
 }
 
 .reasoning-text-content strong {
-  color: #303133;
+  color: var(--tech-cyan);
+  font-weight: 600;
 }
 
 /* 推理光标闪烁 */
 .reasoning-cursor {
   display: inline-block;
-  color: #409eff;
+  color: var(--tech-cyan);
   font-size: 14px;
   animation: blink 0.8s infinite;
   margin-left: 2px;
@@ -3824,19 +4641,6 @@ html.dark .thinking-collapse-title {
 /* 推理完成后的样式（不再有光标） */
 .reasoning-done {
   border-top-style: solid;
-}
-
-/* 暗色模式适配 */
-html.dark .reasoning-text-area {
-  border-top-color: rgba(91, 155, 213, 0.2);
-}
-
-html.dark .reasoning-text-content {
-  color: #b0b3b8;
-}
-
-html.dark .reasoning-text-content strong {
-  color: #e0e0e0;
 }
 
 /* 流式输出底部状态栏 */
@@ -3853,7 +4657,7 @@ html.dark .reasoning-text-content strong {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--tech-text-dim);
   font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -3863,6 +4667,7 @@ html.dark .reasoning-text-content strong {
   height: 6px;
   border-radius: 50%;
   background: #52c41a;
+  box-shadow: 0 0 8px #52c41a;
   animation: timer-pulse 2s infinite;
 }
 
@@ -3874,7 +4679,7 @@ html.dark .reasoning-text-content strong {
 /* 流式光标闪烁 */
 .streaming-cursor {
   font-size: 18px;
-  color: #409eff;
+  color: var(--tech-cyan);
   animation: blink-cursor 0.8s infinite;
   line-height: 1;
 }
@@ -3904,21 +4709,24 @@ html.dark .reasoning-text-content strong {
 .message-text {
   padding: 16px 20px;
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--tech-card);
+  color: var(--tech-text);
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
   word-break: break-word;
   overflow-x: auto;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.1);
-  border: 1px solid #f0f0f0;
+  box-shadow: 0 2px 10px var(--tech-shadow);
+  border: 1px solid var(--tech-border);
+  text-align: left;
 }
 
 .user-message .message-text {
-  background: #409eff;
-  color: white;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+  background: linear-gradient(135deg, var(--tech-cyan) 0%, var(--tech-blue) 100%);
+  color: var(--tech-user-msg-text);
+  box-shadow: 0 0 20px rgba(64, 158, 255, 0.25), 0 4px 12px rgba(64, 158, 255, 0.3);
   border: none;
+  font-weight: 500;
 }
 
 /* 用户消息操作栏：复制按钮 */
@@ -3933,12 +4741,17 @@ html.dark .reasoning-text-content strong {
   height: 24px;
   padding: 0 8px;
   font-size: 12px;
-  color: #909399;
-  transition: color 0.2s ease;
+  color: var(--tech-text-dim);
+  background: var(--tech-card);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  transition: all 0.2s ease;
 }
 
 .copy-msg-btn:hover {
-  color: #409eff;
+  color: var(--tech-cyan);
+  border-color: var(--tech-cyan);
+  background: var(--tech-card-deep);
 }
 
 .copy-msg-btn .el-icon {
@@ -3953,46 +4766,46 @@ html.dark .reasoning-text-content strong {
 /* ========== AI 消息 Markdown 渲染优化 ========== */
 .ai-message-bubble {
   font-size: 14.5px;
-  color: #1d1f23;
+  color: var(--tech-text);
   line-height: 1.72;
   overflow-wrap: break-word;
   word-break: break-word;
   letter-spacing: -0.005em;
-  overflow-x: auto; /* 表格溢出时支持横向滚动 */
+  overflow-x: auto;
 }
 
 /* 表格样式（必须用 :deep 穿透 v-html 渲染的 DOM） */
-:deep(.ai-message-bubble) table {
+::deep(.ai-message-bubble) table {
   table-layout: auto;
   width: 100%;
   border-collapse: collapse;
   margin: 14px 0;
   font-size: 14px;
-  border: 1px solid #e3e6ea;
+  border: 1px solid var(--tech-border);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 10px var(--tech-shadow);
   min-width: 600px;
 }
-:deep(.ai-message-bubble) td,
-:deep(.ai-message-bubble) th {
+::deep(.ai-message-bubble) td,
+::deep(.ai-message-bubble) th {
   word-break: break-word;
   overflow-wrap: break-word;
   vertical-align: middle;
   padding: 14px 16px;
   line-height: 1.6;
-  border-right: 1px solid #e3e6ea; /* 竖向分隔线 */
+  border-right: 1px solid var(--tech-border);
 }
-:deep(.ai-message-bubble) td:last-child,
-:deep(.ai-message-bubble) th:last-child {
-  border-right: none; /* 最后一列不需要右边框 */
+::deep(.ai-message-bubble) td:last-child,
+::deep(.ai-message-bubble) th:last-child {
+  border-right: none;
 }
-:deep(.ai-message-bubble) th {
-  background: #f5f7fa;
+::deep(.ai-message-bubble) th {
+  background: rgba(64, 158, 255, 0.18);
   text-align: left;
   font-weight: 700;
-  color: #1a1d23;
-  border-bottom: 1px solid #dcdfe6;
+  color: var(--tech-text);
+  border-bottom: 1px solid rgba(64, 158, 255, 0.3);
   font-size: 14px;
   white-space: nowrap;
   position: sticky;
@@ -4000,23 +4813,23 @@ html.dark .reasoning-text-content strong {
   z-index: 1;
   letter-spacing: 0.01em;
 }
-:deep(.ai-message-bubble) td {
-  color: #2c3038;
-  border-bottom: 1px solid #eff0f2; /* 横向分隔线 */
+::deep(.ai-message-bubble) td {
+  color: var(--tech-text);
+  border-bottom: 1px solid rgba(64, 158, 255, 0.12);
   max-width: 320px;
 }
-:deep(.ai-message-bubble) tr:last-child td {
-  border-bottom: none; /* 最后一行不需要底部边框，表格外边框已有 */
+::deep(.ai-message-bubble) tr:last-child td {
+  border-bottom: none;
 }
-:deep(.ai-message-bubble) tr:hover {
-  background: #f5f7fa;
+::deep(.ai-message-bubble) tr:hover {
+  background: rgba(64, 158, 255, 0.08);
 }
 
 /* 段落间距 */
 .ai-message-bubble p {
   margin: 0 0 12px 0;
   line-height: 1.72;
-  color: #2c3038;
+  color: var(--tech-text);
 }
 .ai-message-bubble p:last-child {
   margin-bottom: 0;
@@ -4029,59 +4842,58 @@ html.dark .reasoning-text-content strong {
 .ai-message-bubble h4 {
   margin: 26px 0 12px 0;
   font-weight: 650;
-  color: #0f1115;
+  color: var(--tech-text);
   line-height: 1.35;
   letter-spacing: -0.02em;
 }
 .ai-message-bubble h1 { font-size: 21px; font-weight: 700; }
 .ai-message-bubble h2 { font-size: 18px; }
 .ai-message-bubble h3 { font-size: 16px; }
-.ai-message-bubble h4 { font-size: 14.5px; text-transform: uppercase; letter-spacing: 0.04em; color: #5d626d; }
+.ai-message-bubble h4 { font-size: 14.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tech-text-dim); }
 
 /* 列表样式 */
 .ai-message-bubble ul,
 .ai-message-bubble ol { margin: 10px 0; padding-left: 24px; }
-.ai-message-bubble li { margin: 6px 0; line-height: 1.7; color: #2c3038; }
-.ai-message-bubble ul li::marker { color: #9199a6; }
-.ai-message-bubble ol li::marker { color: #9199a6; font-weight: 500; }
+.ai-message-bubble li { margin: 6px 0; line-height: 1.7; color: var(--tech-text); }
+.ai-message-bubble ul li::marker { color: var(--tech-cyan); }
+.ai-message-bubble ol li::marker { color: var(--tech-cyan); font-weight: 500; }
 
 /* 任务列表 */
 .ai-message-bubble ul li input[type="checkbox"] {
   margin-right: 8px; vertical-align: middle; width: 16px; height: 16px;
-  accent-color: #3b82f6;
+  accent-color: var(--tech-blue);
 }
 
 /* 引用块 */
 .ai-message-bubble blockquote {
   margin: 14px 0; padding: 13px 18px;
-  border-left: 2.5px solid #c8cdd4; background: #f6f7f9;
-  border-radius: 0 6px 6px 0; color: #595d66;
+  border-left: 2.5px solid var(--tech-blue); background: rgba(64, 158, 255, 0.08);
+  border-radius: 0 6px 6px 0; color: var(--tech-text-dim);
 }
-.ai-message-bubble blockquote p { margin: 0; color: #595d66; }
+.ai-message-bubble blockquote p { margin: 0; color: var(--tech-text-dim); }
 
 /* 代码块 */
-:deep(.ai-message-bubble pre) {
+::deep(.ai-message-bubble pre) {
   position: relative; margin: 14px 0; padding: 36px 14px 12px 14px;
-  background: #f4f5f7; border-radius: 8px; overflow-x: auto;
+  background: var(--tech-bg-deep); border-radius: 8px; overflow-x: auto;
   font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px; line-height: 1.65; border: 1px solid #e1e4e8;
+  font-size: 13px; line-height: 1.65; border: 1px solid var(--tech-border);
 }
-:deep(.ai-message-bubble pre code) {
+::deep(.ai-message-bubble pre code) {
   background: transparent; padding: 0; border-radius: 0;
-  color: #24292f; font-family: inherit; font-size: inherit; line-height: inherit;
+  color: var(--tech-text); font-family: inherit; font-size: inherit; line-height: inherit;
 }
 
 /* 行内代码 */
 .ai-message-bubble code {
-  background: #eef0f3; padding: 2px 7px; border-radius: 5px;
+  background: rgba(64, 158, 255, 0.12); padding: 2px 7px; border-radius: 5px;
   font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 12.5px; color: #cf3a4e; font-weight: 500;
+  font-size: 12.5px; color: #ff8c9a; font-weight: 500;
 }
 
-/* ========== 测试用例专用表格 ========== */
 .ai-message-bubble .tc-table-wrap {
-  margin: 18px 0; border: 1px solid #e3e6ea; border-radius: 12px;
-  overflow: hidden; background: #fff;
+  margin: 18px 0; border: 1px solid var(--tech-border); border-radius: 12px;
+  overflow: hidden; background: rgba(var(--tech-bg-rgb), 0.6);
 }
 .ai-message-bubble .tc-table-wrap table {
   display: table; width: 100%; border-collapse: collapse; border-spacing: 0;
@@ -4089,23 +4901,23 @@ html.dark .reasoning-text-content strong {
   overflow: visible; background: transparent;
 }
 .ai-message-bubble .tc-table-wrap thead th {
-  background: #f8f9fb; padding: 12px 16px; text-align: left;
-  font-weight: 650; font-size: 12px; color: #4a4f5a;
+  background: rgba(64, 158, 255, 0.18); padding: 12px 16px; text-align: left;
+  font-weight: 650; font-size: 12px; color: var(--tech-text);
   text-transform: uppercase; letter-spacing: 0.04em;
-  border-bottom: 2px solid #e3e6ea; white-space: nowrap;
+  border-bottom: 1px solid rgba(64, 158, 255, 0.3); white-space: nowrap;
 }
 .ai-message-bubble .tc-table-wrap tbody td {
-  padding: 11px 16px; color: #2c3038; line-height: 1.55;
+  padding: 11px 16px; color: var(--tech-text); line-height: 1.55;
   vertical-align: top; font-size: 13.5px;
 }
 .ai-message-bubble .tc-table-wrap tbody tr {
-  transition: background 0.12s ease; border-bottom: 1px solid #eff0f2;
+  transition: background 0.12s ease; border-bottom: 1px solid rgba(64, 158, 255, 0.12);
 }
 .ai-message-bubble .tc-table-wrap tbody tr:last-child { border-bottom: none; }
-.ai-message-bubble .tc-table-wrap tbody tr:hover { background: #f5f7fa; }
+.ai-message-bubble .tc-table-wrap tbody tr:hover { background: rgba(64, 158, 255, 0.08); }
 .ai-message-bubble .tc-table-wrap td:first-child {
   font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
-  font-size: 12.5px; color: #545a66; white-space: nowrap;
+  font-size: 12.5px; color: var(--tech-text-dim); white-space: nowrap;
 }
 
 /* 优先级徽章 */
@@ -4114,10 +4926,10 @@ html.dark .reasoning-text-content strong {
   font-size: 11.5px; font-weight: 650; text-transform: uppercase;
   letter-spacing: 0.03em; white-space: nowrap;
 }
-.ai-message-bubble .tc-priority.p0 { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.ai-message-bubble .tc-priority.p1 { background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
-.ai-message-bubble .tc-priority.p2 { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
-.ai-message-bubble .tc-priority.p3 { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.ai-message-bubble .tc-priority.p0 { background: rgba(255, 107, 107, 0.15); color: #ff6b6b; border: 1px solid rgba(255, 107, 107, 0.4); }
+.ai-message-bubble .tc-priority.p1 { background: rgba(255, 140, 66, 0.15); color: #ff8c42; border: 1px solid rgba(255, 140, 66, 0.4); }
+.ai-message-bubble .tc-priority.p2 { background: rgba(64, 158, 255, 0.15); color: #79bbff; border: 1px solid rgba(64, 158, 255, 0.4); }
+.ai-message-bubble .tc-priority.p3 { background: rgba(149, 212, 117, 0.15); color: #95d475; border: 1px solid rgba(149, 212, 117, 0.4); }
 
 /* 分隔线 */
 .ai-message-bubble hr { margin: 20px 0; border: none; border-top: 1px solid #e3e6ea; }
@@ -4144,7 +4956,7 @@ html.dark .reasoning-text-content strong {
 .message-download-bar {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px dashed #e0e0e0;
+  border-top: 1px dashed var(--tech-border);
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -4177,12 +4989,49 @@ html.dark .reasoning-text-content strong {
 }
 
 .context-item {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f8f9fb;
+  border-radius: 6px;
+  border-left: 3px solid #409eff;
 }
 
-.context-item p {
-  margin-top: 5px;
+.context-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.context-filename {
+  font-weight: 500;
+  color: #303133;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-meta {
+  font-size: 12px;
+  color: #606266;
+}
+
+.context-score {
+  font-size: 12px;
+  color: #67c23a;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.context-content {
+  margin: 0;
   font-size: 13px;
+  color: #4a4f5a;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
   color: #606266;
   line-height: 1.5;
 }
@@ -4194,14 +5043,15 @@ html.dark .reasoning-text-content strong {
 
 .input-area {
   padding: 16px 20px;
-  border-top: 1px solid #e4e7ed;
-  background: #fafafa;
-  flex-shrink: 0; /* 防止被压缩 */
+  border-top: 1px solid var(--tech-border);
+  background: rgba(var(--tech-bg-rgb), 0.55);
+  backdrop-filter: blur(10px);
+  flex-shrink: 0;
 }
 
 .input-toolbar {
   display: flex;
-  justify-content: space-between; /* 两端对齐 */
+  justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
 }
@@ -4252,6 +5102,9 @@ html.dark .reasoning-text-content strong {
   max-height: 450px;
   overflow-y: auto;
   padding: 0 !important;
+  background: rgba(var(--tech-bg-rgb), 0.95) !important;
+  border: 1px solid rgba(64, 158, 255, 0.25) !important;
+  box-shadow: 0 8px 24px var(--tech-shadow) !important;
 }
 
 .skill-dropdown-header {
@@ -4259,20 +5112,20 @@ html.dark .reasoning-text-content strong {
   justify-content: space-between;
   align-items: center;
   padding: 10px 16px;
-  border-bottom: 1px solid #e4e7ed;
-  background: #f5f7fa;
+  border-bottom: 1px solid var(--tech-border);
+  background: rgba(var(--tech-bg-rgb), 0.7);
 }
 
 .skill-dropdown-title {
   font-weight: 600;
   font-size: 14px;
-  color: #303133;
+  color: var(--tech-text);
 }
 
 .skill-dropdown-menu .el-dropdown-menu__item {
   padding: 12px 16px !important;
   line-height: 1.4 !important;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid rgba(64, 158, 255, 0.12);
 }
 
 .skill-dropdown-menu .el-dropdown-menu__item:last-child {
@@ -4280,12 +5133,12 @@ html.dark .reasoning-text-content strong {
 }
 
 .skill-dropdown-menu .el-dropdown-menu__item:hover {
-  background: #ecf5ff !important;
+  background: rgba(64, 158, 255, 0.15) !important;
 }
 
 .skill-dropdown-menu .el-dropdown-menu__item.is-active {
-  background: #ecf5ff !important;
-  color: #409eff !important;
+  background: rgba(64, 158, 255, 0.2) !important;
+  color: var(--tech-cyan) !important;
 }
 
 .skill-dropdown-item {
@@ -4295,7 +5148,7 @@ html.dark .reasoning-text-content strong {
 .skill-dropdown-name {
   font-weight: 600;
   font-size: 14px;
-  color: #303133;
+  color: var(--tech-text);
   margin-bottom: 4px;
   display: flex;
   align-items: center;
@@ -4310,7 +5163,7 @@ html.dark .reasoning-text-content strong {
 
 .skill-dropdown-desc {
   font-size: 12px;
-  color: #606266;
+  color: var(--tech-text-dim);
   line-height: 1.4;
   margin-bottom: 8px;
   display: -webkit-box;
@@ -4328,30 +5181,35 @@ html.dark .reasoning-text-content strong {
 .mode-switcher .el-button-group {
   border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 10px var(--tech-shadow);
 }
 
 .mode-switcher .el-button {
   padding: 8px 16px;
   font-size: 13px;
   transition: all 0.3s ease;
+  background: rgba(var(--tech-bg-rgb), 0.7);
+  color: var(--tech-text);
+  border-color: rgba(64, 158, 255, 0.25);
 }
 
 .mode-switcher .el-button--primary {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  background: linear-gradient(135deg, var(--tech-cyan) 0%, var(--tech-blue) 100%);
   border-color: transparent;
+  color: var(--tech-user-msg-text);
+  font-weight: 600;
 }
 
-/* 新对话按钮 - 精致渐变设计 */
+/* 新对话按钮 - 科技渐变 */
 .new-chat-btn-flat {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--tech-cyan) 0%, #667eea 50%, var(--tech-purple) 100%);
+  color: var(--tech-text);
   border: none;
   border-radius: 20px;
   padding: 8px 18px;
   font-size: 13px;
-  font-weight: 500;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
+  font-weight: 600;
+  box-shadow: 0 0 16px rgba(64, 158, 255, 0.25);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
@@ -4364,7 +5222,7 @@ html.dark .reasoning-text-content strong {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
   transition: left 0.5s ease;
 }
 
@@ -4374,12 +5232,12 @@ html.dark .reasoning-text-content strong {
 
 .new-chat-btn-flat:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+  box-shadow: 0 0 24px rgba(64, 158, 255, 0.4);
 }
 
 .new-chat-btn-flat:active {
   transform: translateY(0) scale(0.98);
-  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 0 12px rgba(64, 158, 255, 0.25);
 }
 
 .new-chat-btn-flat .el-icon {
@@ -4391,20 +5249,30 @@ html.dark .reasoning-text-content strong {
   border-radius: 20px;
   padding: 8px 14px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   transition: all 0.3s ease;
+  background: rgba(64, 158, 255, 0.16);
+  color: #66b1ff;
+  border-color: rgba(64, 158, 255, 0.6);
+}
+
+.reasoning-toggle-btn:hover {
+  background: rgba(64, 158, 255, 0.28);
+  color: #8cc5ff;
+  border-color: rgba(64, 158, 255, 0.85);
 }
 
 .reasoning-toggle-btn.is-reasoning {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #ff8c42 100%);
   border-color: transparent;
-  color: white;
-  box-shadow: 0 2px 8px rgba(245, 87, 108, 0.25);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 0 18px rgba(245, 87, 108, 0.4);
 }
 
 .reasoning-toggle-btn.is-reasoning:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(245, 87, 108, 0.35);
+  box-shadow: 0 0 24px rgba(245, 87, 108, 0.4);
 }
 
 .reasoning-toggle-btn .el-icon {
@@ -4429,11 +5297,11 @@ html.dark .reasoning-text-content strong {
 }
 
 .chat-input-wrapper {
-  background: #fff;
-  border: 1px solid #dcdfe6;
+  background: rgba(var(--tech-bg-rgb), 0.7);
+  border: 1px solid var(--tech-border);
   border-radius: 12px;
   padding: 12px 14px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 12px var(--tech-shadow);
 }
 
 .chat-input-wrapper .el-textarea__inner {
@@ -4444,6 +5312,11 @@ html.dark .reasoning-text-content strong {
   font-size: 14px;
   line-height: 1.6;
   background: transparent;
+  color: var(--tech-text);
+}
+
+.chat-input-wrapper .el-textarea__inner::placeholder {
+  color: var(--tech-text-dim);
 }
 
 /* 图片预览：在输入框内部上方，小标签形式 */
@@ -4453,17 +5326,17 @@ html.dark .reasoning-text-content strong {
   flex-wrap: wrap;
   margin-bottom: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--tech-border);
 }
 .image-preview-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: #f0f2f5;
+  background: rgba(64, 158, 255, 0.12);
   border-radius: 6px;
   font-size: 12px;
-  color: #606266;
+  color: var(--tech-text);
   cursor: default;
 }
 .image-preview-tag img {
@@ -4479,11 +5352,11 @@ html.dark .reasoning-text-content strong {
 .image-tag-close {
   cursor: pointer;
   font-size: 12px;
-  color: #909399;
+  color: var(--tech-text-dim);
   transition: color 0.15s;
 }
 .image-tag-close:hover {
-  color: #f56c6c;
+  color: #ff6b6b;
 }
 
 /* 旧的图片预览样式已废弃 */
@@ -4521,7 +5394,7 @@ html.dark .reasoning-text-content strong {
 }
 .image-preview-counter {
   font-size: 14px;
-  color: #606266;
+  color: var(--tech-text-dim);
   min-width: 60px;
   text-align: center;
 }
@@ -4539,12 +5412,11 @@ html.dark .reasoning-text-content strong {
   max-height: 200px;
   border-radius: 8px;
   object-fit: cover;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--tech-border);
 }
 
 /* 代码块工具栏样式（动态插入的DOM元素） */
-/* 代码块工具栏 - 豆包风格：极简小图标 */
-:deep(.ai-message-bubble pre .code-block-toolbar) {
+::deep(.ai-message-bubble pre .code-block-toolbar) {
   position: absolute;
   top: 0;
   left: 0;
@@ -4553,36 +5425,36 @@ html.dark .reasoning-text-content strong {
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background: #f5f5f5;
+  background: rgba(64, 158, 255, 0.12);
   border-radius: 8px 8px 0 0;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--tech-border);
   z-index: 10;
   box-sizing: border-box;
   height: 32px;
 }
 
-:deep(.ai-message-bubble .toolbar-lang) {
-  color: #8c8c8c;
+::deep(.ai-message-bubble .toolbar-lang) {
+  color: var(--tech-cyan);
   font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
   text-transform: uppercase;
   user-select: none;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.5px;
 }
 
 /* 按钮组容器 */
-:deep(.ai-message-bubble .toolbar-btn-group) {
+::deep(.ai-message-bubble .toolbar-btn-group) {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-/* 豆包风格：纯图标小按钮 */
-:deep(.ai-message-bubble .toolbar-btn) {
+/* 科技风代码块工具栏按钮 */
+::deep(.ai-message-bubble .toolbar-btn) {
   background: transparent;
   border: none;
-  color: #8c8c8c;
+  color: var(--tech-text-dim);
   cursor: pointer;
   padding: 4px;
   border-radius: 4px;
@@ -4594,23 +5466,23 @@ html.dark .reasoning-text-content strong {
   transition: all 0.2s ease;
 }
 
-:deep(.ai-message-bubble .toolbar-btn:hover) {
-  background: rgba(0, 0, 0, 0.06);
-  color: #595959;
+::deep(.ai-message-bubble .toolbar-btn:hover) {
+  background: rgba(64, 158, 255, 0.18);
+  color: var(--tech-cyan);
 }
 
-:deep(.ai-message-bubble .toolbar-btn:active) {
+::deep(.ai-message-bubble .toolbar-btn:active) {
   transform: scale(0.92);
 }
 
 /* 复制按钮 */
-:deep(.ai-message-bubble .toolbar-btn-copy:hover) {
-  color: #389e0d;
+::deep(.ai-message-bubble .toolbar-btn-copy:hover) {
+  color: #95d475;
 }
 
 /* 全屏按钮 */
-:deep(.ai-message-bubble .toolbar-btn-zoom:hover) {
-  color: #096dd9;
+::deep(.ai-message-bubble .toolbar-btn-zoom:hover) {
+  color: var(--tech-cyan);
 }
 
 /* ========== 多Agent工作流样式 ========== */
@@ -4627,17 +5499,17 @@ html.dark .reasoning-text-content strong {
   box-shadow: 0 8px 24px rgba(124, 77, 255, 0.3);
 }
 .welcome-icon.icon-workflow .el-icon {
-  color: white;
+  color: var(--tech-text);
 }
 
 /* 工作流进度面板 */
 .workflow-progress-panel {
-  background: #ffffff;
-  border: 1px solid #e4e7ed;
+  background: var(--tech-card);
+  border: 1px solid var(--tech-border);
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 12px var(--tech-shadow);
 }
 
 .workflow-panel-header {
@@ -4781,7 +5653,7 @@ html.dark .reasoning-text-content strong {
 
 .wf-step-duration {
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--tech-text-dim);
   font-family: 'SF Mono', 'Consolas', monospace;
 }
 
@@ -4794,11 +5666,11 @@ html.dark .reasoning-text-content strong {
 .wf-step-detail {
   margin-top: 8px;
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--tech-text-dim);
   line-height: 1.5;
   max-height: 120px;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(var(--tech-bg-rgb), 0.05);
   border-radius: 4px;
   padding: 8px;
 }
@@ -4811,330 +5683,222 @@ html.dark .reasoning-text-content strong {
 .workflow-result {
   margin-top: 16px;
   padding: 16px;
-  background: linear-gradient(135deg, #f0f5ff 0%, #e6f7ff 100%);
+  background: linear-gradient(135deg, var(--tech-card-deep) 0%, rgba(64, 158, 255, 0.08) 100%);
   border-radius: 8px;
-  border: 1px solid #91d5ff;
+  border: 1px solid var(--tech-border-hover);
 }
 
 .wf-result-text {
   font-size: 14px;
   line-height: 1.7;
-  color: #262626;
+  color: var(--tech-text);
 }
 </style>
 
 <style>
-/* ========== 暗色模式全局覆盖 ========== */
-html.dark .knowledge-chat-container {
-  background: #141414;
-  color: #e0e0e0;
+/* ================= 主题变量 ================= */
+:root {
+  --tech-bg: #f5f7fa;
+  --tech-bg-deep: #e4e7ed;
+  --tech-bg-rgb: 245, 247, 250;
+  --tech-card: #ffffff;
+  --tech-card-solid: #ffffff;
+  --tech-card-deep: #f5f7fa;
+  --tech-border: #dcdfe6;
+  --tech-border-hover: #409eff;
+  --tech-text: #303133;
+  --tech-text-dim: #606266;
+  --tech-cyan: #1677ff;
+  --tech-blue: #409eff;
+  --tech-purple: #a855f7;
+  --tech-user-msg-text: #ffffff;
+  --tech-shadow: rgba(0, 0, 0, 0.08);
 }
 
-html.dark .chat-header {
-  border-bottom-color: #333333;
+html.dark {
+  --tech-bg: #0b1220;
+  --tech-bg-deep: #070c16;
+  --tech-bg-rgb: 11, 18, 32;
+  --tech-card: rgba(24, 38, 62, 0.95);
+  --tech-card-solid: #16233a;
+  --tech-card-deep: #0d1525;
+  --tech-border: rgba(64, 158, 255, 0.45);
+  --tech-border-hover: rgba(64, 158, 255, 0.85);
+  --tech-text: #c9d8f0;
+  --tech-text-dim: #9fb3d8;
+  --tech-cyan: #00f2ff;
+  --tech-blue: #409eff;
+  --tech-purple: #a855f7;
+  --tech-user-msg-text: #0b1220;
+  --tech-shadow: rgba(0, 0, 0, 0.45);
 }
 
-html.dark .chat-header h3 {
-  color: #e0e0e0;
+html.dark .el-button--default {
+  --el-button-bg-color: rgba(18, 28, 48, 0.78);
+  --el-button-text-color: #c9d8f0;
+  --el-button-border-color: rgba(64, 158, 255, 0.35);
+}
+html.dark .el-button--default:hover {
+  --el-button-hover-bg-color: rgba(26, 42, 72, 0.88);
+  --el-button-hover-text-color: #00f2ff;
+  --el-button-hover-border-color: rgba(64, 158, 255, 0.5);
+}
+html.dark .el-button--primary {
+  --el-button-bg-color: #409eff;
+  --el-button-border-color: #409eff;
+  --el-button-text-color: #0b1220;
+}
+html.dark .el-button--primary:hover {
+  --el-button-hover-bg-color: #66b1ff;
+  --el-button-hover-border-color: #66b1ff;
+}
+html.dark .el-input__wrapper {
+  background-color: rgba(18, 28, 48, 0.78) !important;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.35) inset !important;
+}
+html.dark .el-input__inner {
+  color: #c9d8f0 !important;
+}
+html.dark .el-textarea__inner {
+  background-color: transparent !important;
+  color: #c9d8f0 !important;
+}
+html.dark .el-dropdown-menu {
+  background-color: #121c30 !important;
+  border-color: rgba(64, 158, 255, 0.35) !important;
+}
+html.dark .el-dropdown-menu__item {
+  color: #c9d8f0 !important;
+}
+html.dark .el-dropdown-menu__item:hover {
+  background-color: rgba(0, 242, 255, 0.1) !important;
+  color: #00f2ff !important;
+}
+html.dark .el-checkbox__label {
+  color: #e6f0ff !important;
+}
+html.dark .el-checkbox__inner {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(64, 158, 255, 0.9) !important;
+  border-width: 1.5px !important;
+}
+html.dark .el-checkbox__inner::after {
+  border-color: #0b1220 !important;
+}
+html.dark .el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #409eff !important;
+  border-color: #66b1ff !important;
+  box-shadow: 0 0 10px rgba(64, 158, 255, 0.6) !important;
+}
+html.dark .el-checkbox__input.is-checked .el-checkbox__inner::after {
+  border-color: #ffffff !important;
+}
+html.dark .el-checkbox__input:hover .el-checkbox__inner {
+  border-color: #00f2ff !important;
+}
+html.dark .el-tag {
+  background-color: rgba(64, 158, 255, 0.15) !important;
+  border-color: rgba(64, 158, 255, 0.35) !important;
+  color: #c9d8f0 !important;
+}
+html.dark .el-tag--success {
+  background-color: rgba(103, 194, 58, 0.15) !important;
+  border-color: rgba(103, 194, 58, 0.35) !important;
+  color: #95d475 !important;
+}
+html.dark .el-empty__description {
+  color: #7a8caf !important;
 }
 
-html.dark .history-panel-wrapper {
-  background: #1d1e1f;
-  border-right-color: #333333;
+/* 深色模式下增强思考区域和复制按钮可读性 */
+html.dark .message-thinking-collapse .el-collapse-item__header {
+  background: rgba(64, 158, 255, 0.12) !important;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #00f2ff !important;
 }
-
-html.dark .history-collapsed-bar {
-  color: #909399;
-  border-right-color: #333333;
+html.dark .message-thinking-collapse .el-collapse-item__header:hover {
+  background: rgba(64, 158, 255, 0.2) !important;
 }
-
-html.dark .history-collapsed-bar:hover {
-  background: #2c2c2c;
+html.dark .thinking-history-steps {
+  background: rgba(11, 18, 32, 0.85);
+  border-left-color: #00f2ff;
 }
-
-html.dark .history-panel-header-compact {
-  background: #1d1e1f;
-  border-bottom-color: #333333;
+html.dark .thinking-step-item {
+  color: #9fb3d8;
 }
-
-html.dark .history-panel-title {
-  color: #e0e0e0;
+html.dark .thinking-steps-panel {
+  background: linear-gradient(180deg, rgba(13, 24, 41, 0.95), rgba(8, 15, 28, 0.98));
+  border-color: rgba(64, 158, 255, 0.5);
 }
-
-html.dark .history-panel {
-  background: #1d1e1f;
-  border-right-color: #333333;
+html.dark .reasoning-text-content {
+  color: #a8c5ff;
 }
-
-html.dark .history-header {
-  background: #1d1e1f;
-  border-bottom-color: #333333;
-}
-
-html.dark .history-list {
-  background: transparent;
-}
-
-html.dark .empty-history {
-  color: #909399;
-}
-
-html.dark .empty-mode-text {
-  color: #e0e0e0;
-}
-
-html.dark .empty-mode-hint {
-  color: #909399;
-}
-
-html.dark .empty-mode-icon {
-  color: #909399;
-}
-
-html.dark .group-title {
-  color: #a0a0a0;
-}
-
-html.dark .history-item {
-  background: #2a2a2a;
-  color: #e0e0e0;
-}
-
-html.dark .history-item:hover {
-  background: #3a3a3a;
-}
-
-html.dark .history-item.active {
-  background: #409eff;
-  color: #ffffff;
-}
-
-html.dark .history-item.active:hover {
-  background: #409eff;
-}
-
-html.dark .item-time {
-  color: #a0a0a0;
-}
-
-html.dark .history-item.active .item-time {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-html.dark .skeleton-line {
-  background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
-}
-
-html.dark .chat-panel {
-  background: #0a0a0a;
-}
-
-html.dark .message-list {
-  background: #0a0a0a;
-}
-
-html.dark .welcome-content h3 {
-  color: #e0e0e0;
-}
-
-html.dark .welcome-content p {
-  color: #a0a0a0;
-}
-
-html.dark .thinking-indicator {
-  background: #1d1e1f;
-}
-
-html.dark .thinking-text {
-  color: #e0e0e0;
-}
-
-html.dark .thinking-timer,
-html.dark .streaming-timer {
-  color: #909399;
-}
-
-html.dark .message-text {
-  background: #1d1e1f;
-  color: #e0e0e0;
-  border-color: #333333;
-}
-
-html.dark .user-message .message-text {
-  background: #1677ff;
-  color: #ffffff;
-}
-
-html.dark .ai-message-bubble {
-  color: #e0e0e0;
-}
-
-html.dark .ai-message-bubble p,
-html.dark .ai-message-bubble li {
-  color: #d0d0d0;
-}
-
-html.dark .ai-message-bubble h1,
-html.dark .ai-message-bubble h2,
-html.dark .ai-message-bubble h3 {
-  color: #ffffff;
-}
-
-html.dark .ai-message-bubble h4 {
-  color: #a0a0a0;
-}
-
-html.dark .ai-message-bubble strong {
-  color: #ffffff;
-}
-
-html.dark .ai-message-bubble em {
-  color: #a0a0a0;
-}
-
-html.dark .ai-message-bubble blockquote {
-  background: #1d1e1f;
-  border-left-color: #555555;
-  color: #a0a0a0;
-}
-
-html.dark .ai-message-bubble blockquote p {
-  color: #a0a0a0;
-}
-
-html.dark .ai-message-bubble code {
-  background: #2a2a2a;
-  color: #ff6b81;
-}
-
-html.dark .ai-message-bubble pre {
-  background: #161b22;
-  border-color: #333333;
-}
-
-html.dark .ai-message-bubble pre code {
-  color: #d0d0d0;
-}
-
-html.dark .ai-message-bubble table,
-html.dark .ai-message-bubble th,
-html.dark .ai-message-bubble td {
-  border-color: #333333;
-}
-
-html.dark .ai-message-bubble th {
-  background: #1d1e1f;
-  color: #e0e0e0;
-}
-
-html.dark .ai-message-bubble tr:hover {
-  background: #2a2a2a;
-}
-
-html.dark .ai-message-bubble hr {
-  border-top-color: #333333;
-}
-
-html.dark .ai-message-bubble a {
-  color: #58a6ff;
-  border-bottom-color: #555555;
-}
-
-html.dark .ai-message-bubble a:hover {
-  color: #79c0ff;
-  border-bottom-color: #58a6ff;
-}
-
-html.dark .message-download-bar {
-  border-top-color: #333333;
-}
-
-html.dark .message-meta-time {
-  color: #909399;
-}
-
 html.dark .copy-msg-btn {
-  color: #a0a0a0;
+  color: #9fb3d8;
+  background: rgba(22, 35, 58, 0.8);
+  border-color: rgba(64, 158, 255, 0.4);
 }
-
 html.dark .copy-msg-btn:hover {
-  color: #79c0ff;
+  color: #00f2ff;
+  border-color: #00f2ff;
+  background: rgba(22, 35, 58, 1);
 }
 
-html.dark .context-item p {
-  color: #a0a0a0;
+/* ================= 记忆管理面板 ================= */
+.memory-manage { padding: 4px 0; }
+.memory-manage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
-
-html.dark .input-area {
-  background: #141414;
-  border-top-color: #333333;
+.memory-manage-count { color: var(--tech-text-dim); font-size: 13px; }
+.memory-loading { text-align: center; color: var(--tech-text-dim); padding: 40px 0; }
+.memory-loading .is-loading { animation: rotating 1.5s linear infinite; margin-right: 6px; }
+@keyframes rotating { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.memory-empty { padding: 20px 0; }
+.memory-groups { display: flex; flex-direction: column; gap: 20px; }
+.memory-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--tech-border);
 }
-
-html.dark .chat-input-wrapper {
-  background: #1d1e1f;
-  border-color: #333333;
+.memory-group-title { font-weight: 600; color: var(--tech-text); }
+.memory-group-count {
+  font-size: 12px;
+  color: var(--tech-text-dim);
+  background: var(--tech-card-deep);
+  border-radius: 10px;
+  padding: 1px 8px;
 }
-
-html.dark .chat-input-wrapper .el-textarea__inner {
-  color: #e0e0e0;
+.memory-group-header .el-button { margin-left: auto; }
+.memory-item {
+  background: var(--tech-card);
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  transition: border-color 0.2s ease;
 }
-
-html.dark .image-preview-area {
-  border-bottom-color: #333333;
+.memory-item:hover { border-color: var(--tech-border-hover); }
+.memory-item-content {
+  color: var(--tech-text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-
-html.dark .image-preview-tag {
-  background: #2a2a2a;
-  color: #a0a0a0;
+.memory-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
 }
-
-html.dark .image-tag-close {
-  color: #909399;
-}
-
-html.dark .skill-dropdown-header {
-  background: #1d1e1f;
-  border-bottom-color: #333333;
-}
-
-html.dark .skill-dropdown-title,
-html.dark .skill-dropdown-name {
-  color: #e0e0e0;
-}
-
-html.dark .skill-dropdown-desc {
-  color: #a0a0a0;
-}
-
-html.dark .skill-dropdown-menu .el-dropdown-menu__item:hover {
-  background: #2a2a2a !important;
-}
-
-html.dark .workflow-progress-panel {
-  background: #1d1e1f;
-  border-color: #333333;
-}
-
-html.dark .workflow-panel-title,
-html.dark .wf-step-agent {
-  color: #e0e0e0;
-}
-
-html.dark .wf-step-content {
-  background: #1d1e1f;
-}
-
-html.dark .wf-step-detail {
-  background: rgba(255, 255, 255, 0.05);
-  color: #a0a0a0;
-}
-
-html.dark .workflow-result {
-  background: linear-gradient(135deg, #162040 0%, #0e2a3a 100%);
-  border-color: #1f4e79;
-}
-
-html.dark .wf-result-text {
-  color: #d0d0d0;
-}
+.memory-item-time { font-size: 12px; color: var(--tech-text-dim); margin-left: auto; }
+.memory-item-meta .el-button { margin-left: auto; }
+.memory-item-meta .el-button + .el-button { margin-left: 4px; }
 </style>

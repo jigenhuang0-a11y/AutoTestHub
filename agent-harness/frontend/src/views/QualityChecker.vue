@@ -90,7 +90,7 @@
 
     <!-- ===== 工具栏 ===== -->
     <div class="toolbar">
-      <el-radio-group v-model="scenario" @change="handleScenarioChange">
+      <el-radio-group v-model="scenario" size="large" @change="handleScenarioChange">
         <el-radio-button value="general">
           <el-icon><Document /></el-icon> 功能测试
         </el-radio-button>
@@ -101,15 +101,15 @@
 
       <el-divider direction="vertical" />
 
-      <el-button type="primary" @click="showUploadDialog">
+      <el-button size="large" type="primary" @click="showUploadDialog">
         <el-icon><Upload /></el-icon> 上传用例
       </el-button>
 
-      <el-button @click="showManualInputDialog">
+      <el-button size="large" @click="showManualInputDialog">
         <el-icon><Edit /></el-icon> 手动录入
       </el-button>
 
-      <el-button @click="showConfigDialog">
+      <el-button size="large" @click="showConfigDialog">
         <el-icon><Setting /></el-icon> 质检配置
       </el-button>
 
@@ -1977,13 +1977,18 @@ initNpcWatch()
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 16px 20px;
   background: #fff;
   border-radius: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.06);
   flex-wrap: wrap;
+}
+
+.toolbar .el-button,
+.toolbar .el-radio-button__inner {
+  font-size: 15px;
 }
 
 .toolbar-right {

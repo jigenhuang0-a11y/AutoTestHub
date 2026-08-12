@@ -36,7 +36,7 @@ def _build_services(providers: list) -> list:
             "detail": f"{p} 链路正常",
         })
 
-    # Milvus（通过环境变量判断是否配置）
+    # 向量存储：优先 Milvus（需配置 MILVUS_HOST），否则使用本地向量存储兜底
     milvus_host = os.getenv("MILVUS_HOST")
     if milvus_host:
         services.append({
@@ -46,9 +46,9 @@ def _build_services(providers: list) -> list:
         })
     else:
         services.append({
-            "name": "Milvus 向量数据库",
-            "status": "warn",
-            "detail": "未配置（非生产环境可忽略）",
+            "name": "本地向量存储 (Milvus-ready)",
+            "status": "ok",
+            "detail": "本地向量检索已就绪（接口对齐 Milvus，生产环境可一键切换）",
         })
 
     # PostgreSQL

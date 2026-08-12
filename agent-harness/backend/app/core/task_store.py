@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import sqlite3
+import uuid
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
@@ -326,6 +327,81 @@ class EnvironmentRecord:
 
 
 # ============================================================
+# 数据工厂 (DataFactory) 记录
+# ============================================================
+
+@dataclass
+class DatasetRecord:
+    """数据工厂 - 数据集记录"""
+    id: Optional[int] = None
+    ds_id: str = ""
+    name: str = ""
+    description: str = ""
+    schema_def: list = field(default_factory=list)
+    records: list = field(default_factory=list)
+    row_count: int = 0
+    status: str = "completed"   # pending / running / completed / failed
+    error: str = ""
+    tags: list = field(default_factory=list)
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "ds_id": self.ds_id,
+            "name": self.name,
+            "description": self.description,
+            "schema_def": self.schema_def,
+            "records": self.records,
+            "row_count": self.row_count,
+            "record_count": self.row_count,
+            "status": self.status,
+            "error": self.error,
+            "tags": self.tags,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class TemplateRecord:
+    """数据工厂 - 模板记录"""
+    id: Optional[int] = None
+    tpl_id: str = ""
+    name: str = ""
+    description: str = ""
+    domain: str = ""
+    category: str = ""
+    scenario: str = ""
+    config: dict = field(default_factory=dict)
+    variables: list = field(default_factory=list)
+    tags: list = field(default_factory=list)
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "tpl_id": self.tpl_id,
+            "name": self.name,
+            "description": self.description,
+            "domain": self.domain,
+            "category": self.category,
+            "scenario": self.scenario,
+            "config": self.config,
+            "variables": self.variables,
+            "tags": self.tags,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+# ============================================================
 # TaskStore 实现
 # ============================================================
 
@@ -564,8 +640,59 @@ class TaskStore:
                     created_at TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_team_reviews_task ON team_reviews(task_id, created_at DESC);
+
+                -- 数据工厂：数据集表
+                CREATE TABLE IF NOT EXISTS datafactory_datasets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ds_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    schema_def TEXT NOT NULL DEFAULT '[]',
+                    records TEXT NOT NULL DEFAULT '[]',
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    error TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_datafactory_datasets_created ON datafactory_datasets(created_at DESC);
+
+                -- 数据工厂：模板表
+                CREATE TABLE IF NOT EXISTS datafactory_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tpl_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    domain TEXT NOT NULL DEFAULT '',
+                    category TEXT NOT NULL DEFAULT '',
+                    scenario TEXT NOT NULL DEFAULT '',
+                    config TEXT NOT NULL DEFAULT '{}',
+                    variables TEXT NOT NULL DEFAULT '[]',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_datafactory_templates_created ON datafactory_templates(created_at DESC);
             """)
             conn.commit()
+
+            # 迁移：为已存在的旧表补充 status / error 列（旧 schema 可能缺少）
+            self._migrate_datafactory_columns(conn)
+
+    def _migrate_datafactory_columns(self, conn):
+        """若 datafactory_datasets 表缺少 status/error 列，则 ALTER 补齐。"""
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(datafactory_datasets)").fetchall()}
+            if "status" not in cols:
+                conn.execute("ALTER TABLE datafactory_datasets ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
+            if "error" not in cols:
+                conn.execute("ALTER TABLE datafactory_datasets ADD COLUMN error TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[TaskStore] 迁移 datafactory_datasets 列失败: {e}")
 
     def _seed_defaults(self):
         """首次运行时写入默认 Prompt、模型配置和种子任务"""
@@ -1987,6 +2114,197 @@ class TaskStore:
                     ),
                 )
                 conn.commit()
+
+
+# ============================================================
+# 数据工厂 (DataFactory) 存储方法
+# ============================================================
+
+    def create_dataset(self, data: dict = None) -> DatasetRecord:
+        """创建数据集（数据工厂）"""
+        if data is None:
+            data = {}
+        ds_id = "ds-" + str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc).isoformat()
+
+        name = data.get("name", "")
+        description = data.get("description", "")
+        schema_def = data.get("schema_def", "")
+        records = data.get("records", False)
+        if records is False:
+            records = []
+        if isinstance(records, list):
+            records = json.dumps(records, ensure_ascii=False)
+        row_count = data.get("row_count", 0)
+        tags = data.get("tags", "")
+        if tags is False or tags is None:
+            tags = []
+        if isinstance(tags, list):
+            tags = json.dumps(tags, ensure_ascii=False)
+        status = data.get("status", "completed")
+        error = data.get("error", "")
+        created_by = data.get("created_by", "")
+
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO datafactory_datasets
+                    (ds_id, name, description, schema_def, records, row_count, status, error, tags,
+                     created_by, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        ds_id, name, description, schema_def, records, row_count, status, error, tags,
+                        created_by, now, now,
+                    ),
+                )
+                conn.commit()
+        return self.get_dataset(ds_id)
+
+    def get_dataset(self, ds_id: str) -> Optional[DatasetRecord]:
+        """获取单条数据集"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM datafactory_datasets WHERE ds_id = ?", (ds_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return DatasetRecord(**dict(row))
+
+    def update_dataset(self, ds_id: str, data: dict) -> Optional[DatasetRecord]:
+        """更新数据集字段（records / row_count / schema_def / tags / name / description）"""
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ["updated_at = ?"]
+        params = [now]
+        for key in ("records", "row_count", "schema_def", "tags", "name", "description", "status", "error"):
+            if key in data:
+                if key in ("records", "schema_def", "tags") and isinstance(data[key], list):
+                    sets.append(f"{key} = ?")
+                    params.append(json.dumps(data[key], ensure_ascii=False))
+                else:
+                    sets.append(f"{key} = ?")
+                    params.append(data[key])
+        params.append(ds_id)
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    f"UPDATE datafactory_datasets SET {', '.join(sets)} WHERE ds_id = ?",
+                    params,
+                )
+                conn.commit()
+        return self.get_dataset(ds_id)
+
+    def list_datasets(self, page: int = 1, page_size: int = 20, tag: str = None) -> dict:
+        """分页列出数据集，可选按 tag 模糊过滤"""
+        sql = "SELECT * FROM datafactory_datasets"
+        params = []
+        if tag:
+            sql += " WHERE tags LIKE ?"
+            params.append(f"%{tag}%")
+        sql += " ORDER BY created_at DESC"
+
+        count_sql = f"SELECT COUNT(*) FROM ({sql})"
+        with self._get_conn() as conn:
+            total = conn.execute(count_sql, params).fetchone()[0]
+            offset = (page - 1) * page_size
+            rows = conn.execute(
+                f"{sql} LIMIT ? OFFSET ?", params + [page_size, offset]
+            ).fetchall()
+        items = [DatasetRecord(**dict(r)) for r in rows]
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def delete_dataset(self, ds_id: str) -> bool:
+        """删除数据集，返回是否成功"""
+        with self._lock:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM datafactory_datasets WHERE ds_id = ?", (ds_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
+    def list_templates(self, page: int = 1, page_size: int = 20) -> dict:
+        """分页列出模板"""
+        offset = (page - 1) * page_size
+        with self._get_conn() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM datafactory_templates"
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT * FROM datafactory_templates ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (page_size, offset),
+            ).fetchall()
+        items = [TemplateRecord(**dict(r)) for r in rows]
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def create_template(self, data: dict) -> TemplateRecord:
+        """创建模板"""
+        tpl_id = "tpl-" + str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc).isoformat()
+
+        name = data.get("name", "")
+        description = data.get("description", "")
+        domain = data.get("domain", "")
+        category = data.get("category", "")
+        scenario = data.get("scenario", "")
+        config = data.get("config", {})
+        if isinstance(config, dict):
+            config = json.dumps(config, ensure_ascii=False)
+        variables = data.get("variables", [])
+        if isinstance(variables, list):
+            variables = json.dumps(variables, ensure_ascii=False)
+        tags = data.get("tags", [])
+        if isinstance(tags, list):
+            tags = json.dumps(tags, ensure_ascii=False)
+        created_by = data.get("created_by", "")
+
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO datafactory_templates
+                    (tpl_id, name, description, domain, category, scenario, config,
+                     variables, tags, created_by, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        tpl_id, name, description, domain, category, scenario, config,
+                        variables, tags, created_by, now, now,
+                    ),
+                )
+                conn.commit()
+        return self._get_template(tpl_id)
+
+    def _get_template(self, tpl_id: str) -> Optional[TemplateRecord]:
+        """获取单条模板"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM datafactory_templates WHERE tpl_id = ?", (tpl_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return TemplateRecord(**dict(row))
+
+    def delete_template(self, tpl_id: str) -> bool:
+        """删除模板，返回是否成功"""
+        with self._lock:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM datafactory_templates WHERE tpl_id = ?", (tpl_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
 
 
 # ============================================================

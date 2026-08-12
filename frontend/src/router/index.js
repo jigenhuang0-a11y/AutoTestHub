@@ -11,7 +11,13 @@ const routes = [
   {
     path: '/',
     name: 'Home',
-    redirect: '/dashboard',
+    redirect: '/workbench',
+  },
+  {
+    path: '/workbench',
+    name: 'Workbench',
+    component: () => import('@/views/Workbench.vue'),
+    meta: { requiresAuth: true, title: '工作台' },
   },
   {
     path: '/dashboard',
@@ -112,7 +118,7 @@ const routes = [
     path: '/quality-checker',
     name: 'QualityChecker',
     component: () => import('@/views/QualityChecker.vue'),
-    meta: { requiresAuth: true, title: '质量数字人' },
+    meta: { requiresAuth: true, title: '需求评审师' },
   },
   {
     path: '/ai-evaluator',

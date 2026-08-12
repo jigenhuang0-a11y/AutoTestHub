@@ -16,7 +16,8 @@ export default defineConfig({
       '/api/knowledge': {
         target: 'http://localhost:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/(?!v1\b)/, '/api/v1/').replace(/\/$/, ''),
+        // 保留末尾斜杠，避免 FastAPI 307 重定向导致 fetch 丢失 Authorization header
+        rewrite: (path) => path.replace(/^\/api\/(?!v1\b)/, '/api/v1/'),
       },
       '/api': {
         target: 'http://localhost:8001',

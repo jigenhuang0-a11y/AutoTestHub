@@ -304,6 +304,90 @@ def notify_workflow_complete(
         logger.error(f"[WebhookNotifier] 通知构建/发送异常: {e}")
 
 
+def _build_human_review_notification(
+    question: str,
+    best_answer: str,
+    score: float,
+    issues: list,
+    iterations: int,
+    mode: str = "unknown",
+    criteria: list = None,
+) -> dict:
+    """构建「人工协同复核」通知数据（评估循环耗尽仍不达标时触发）"""
+    title = "👀 需人工复核 · 评估未达标"
+    title_color = "orange"
+
+    issue_lines = "\n".join(f"- {i}" for i in (issues or [])[:8]) or "（无具体问题，评分偏低）"
+    answer_preview = best_answer[:300] + ("..." if len(best_answer) > 300 else "")
+    criteria_lines = "\n".join(f"- {c}" for c in (criteria or [])[:6]) or "（默认测试场景维度）"
+
+    notification_summary = (
+        f"**问题**：{question[:120]}{'...' if len(question) > 120 else ''}\n\n"
+        f"**评估得分**：{score * 100:.0f}%（低于通过阈值）\n"
+        f"**循环轮次**：{iterations} 次重生成仍未达标\n\n"
+        f"**评测维度**：\n{criteria_lines}\n\n"
+        f"**主要问题**：\n{issue_lines}\n\n"
+        f"**当前最优回答**：\n> {answer_preview}"
+    )
+
+    fields = [
+        {"label": "对话模式", "value": mode},
+        {"label": "评估得分", "value": f"{score * 100:.0f}%"},
+        {"label": "循环轮次", "value": str(iterations)},
+        {"label": "评测维度", "value": f"共 {len(criteria or [])} 项（测试场景）"},
+        {"label": "问题摘要", "value": question[:50] + ("..." if len(question) > 50 else "")},
+    ]
+
+    return {
+        "title": title,
+        "title_color": title_color,
+        "fields": fields,
+        "summary": notification_summary,
+    }
+
+
+def notify_human_review(
+    question: str,
+    best_answer: str,
+    score: float,
+    issues: list,
+    iterations: int,
+    ctx: dict = None,
+    criteria: list = None,
+):
+    """
+    评估循环耗尽仍不达标时，触发飞书/钉钉/企微人工协同卡片。
+    同步调用，内部异步发送，不阻塞主链路（fire-and-forget）。
+
+    Args:
+        question:     原始用户问题
+        best_answer:  当前最优（但未达标）的回答
+        score:        最终评估得分 0-1
+        issues:       评估问题列表
+        iterations:   循环轮次
+        ctx:          上下文（含 mode / user_id 等，仅用于展示）
+        criteria:     评测维度列表（用于卡片展示）
+    """
+    try:
+        mode = (ctx or {}).get("mode", "unknown")
+        data = _build_human_review_notification(
+            question=question,
+            best_answer=best_answer,
+            score=score,
+            issues=issues,
+            iterations=iterations,
+            mode=mode,
+            criteria=criteria,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_dispatch_notification(data))
+        except RuntimeError:
+            asyncio.run(_dispatch_notification(data))
+    except Exception as e:
+        logger.error(f"[WebhookNotifier] 人工协同通知异常: {e}")
+
+
 def notify_workflow_error(
     user_request: str,
     error: str,

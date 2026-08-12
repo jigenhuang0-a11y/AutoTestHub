@@ -312,6 +312,13 @@
                   </el-tag>
                 </el-form-item>
 
+                <el-form-item label="AI 模型">
+                  <el-select v-model="selectedModelId" placeholder="选择 AI 底座模型" style="width: 100%">
+                    <el-option v-for="m in aiModels" :key="m.id" :label="`${m.name}（${m.provider}）`" :value="String(m.id)" />
+                    <el-option v-if="!aiModels.length" label="未配置模型（将降级 mock）" value="" disabled />
+                  </el-select>
+                </el-form-item>
+
                 <el-form-item label="场景描述">
                   <el-input
                     v-model="llmForm.scenario"
@@ -590,12 +597,40 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+defineOptions({ name: 'DataFactory' })
+
+import { ref, computed, onMounted, onActivated, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, More, Delete, MagicStick, Document, Refresh, Check, ShoppingCart, Money } from '@element-plus/icons-vue'
+import { aiBaseAPI } from '@/api'
 
 // 状态
 const loading = ref(false)
+
+// AI 底座模型选择（供 LLM 造数走真实底座）
+const aiModels = ref([])
+const selectedModelId = ref('')
+async function loadAiModels() {
+  try {
+    const res = await aiBaseAPI.listModels()
+    aiModels.value = res.items || res.results || []
+    if (aiModels.value.length) {
+      const active = aiModels.value.find(m => m.is_enabled)
+      selectedModelId.value = String(active ? active.id : aiModels.value[0].id)
+    }
+  } catch (e) {
+    aiModels.value = []
+  }
+}
+onMounted(loadAiModels)
+// 从场景描述中提取标题，用于自动生成数据集名称
+const extractScenarioTitle = (scenario) => {
+  if (!scenario) return 'LLM评测数据集'
+  const firstLine = scenario.split(/\r?\n/)[0].trim()
+  const title = firstLine.replace(/^标题[：:]\s*/, '').trim()
+  return title.slice(0, 28) || 'LLM评测数据集'
+}
+
 const generating = ref(false)
 const templatesLoading = ref(false)
 const creatingVersion = ref(false)
@@ -698,22 +733,23 @@ const filteredDatasets = computed(() => {
   const resultWithDisplayNames = []
   
   // 从后往前处理（先处理旧的，再处理新的）
+  // 按 name + dataset_type 分组编号，不同类型不互斥
   for (let i = result.length - 1; i >= 0; i--) {
     const dataset = result[i]
-    const baseName = dataset.name
-    
-    // 如果这个名称之前出现过（在更旧的数据集中），添加编号
-    if (nameCountMap[baseName]) {
-      nameCountMap[baseName]++
+    const groupKey = `${dataset.name}::${dataset.dataset_type || 'unknown'}`
+
+    // 如果这个名称+类型之前出现过（在更旧的数据集中），添加编号
+    if (nameCountMap[groupKey]) {
+      nameCountMap[groupKey]++
       resultWithDisplayNames.unshift({
         ...dataset,
-        displayName: `${baseName} (${nameCountMap[baseName]})`
+        displayName: `${dataset.name} (${nameCountMap[groupKey]})`
       })
     } else {
-      nameCountMap[baseName] = 1
+      nameCountMap[groupKey] = 1
       resultWithDisplayNames.unshift({
         ...dataset,
-        displayName: baseName
+        displayName: dataset.name
       })
     }
   }
@@ -848,9 +884,9 @@ const loadDatasets = async () => {
       // 恢复之前选中的数据集
       const savedSelectedId = localStorage.getItem('data_factory_selected_dataset_id')
       if (savedSelectedId && datasets.value.length > 0) {
-        const selectedId = Number(savedSelectedId)
+        const selectedId = String(savedSelectedId)
         console.log('[DEBUG] Trying to restore saved ID:', selectedId)
-        const foundDataset = datasets.value.find(d => d.id === selectedId)
+        const foundDataset = datasets.value.find(d => String(d.id) === selectedId)
         if (foundDataset && foundDataset.id) {
           console.log('[DEBUG] Found matching dataset:', foundDataset.name, 'ID:', foundDataset.id)
           await selectDataset(foundDataset)
@@ -907,6 +943,33 @@ const handleDatasetNameChange = () => {
   }
 }
 
+// 每个数据集独立的预览状态缓存，避免不同数据集/类型共用 previewData
+const previewStateCache = new Map()
+
+const saveCurrentPreviewState = () => {
+  const ds = selectedDataset.value
+  if (!ds || !ds.id) return
+  previewStateCache.set(String(ds.id), {
+    previewData: previewData.value,
+    previewColumns: previewColumns.value,
+    previewPagination: { ...previewPagination.value }
+  })
+  console.log('[DEBUG] Cached preview state for dataset:', ds.id)
+}
+
+const restorePreviewState = (dataset) => {
+  const key = String(dataset.id)
+  if (previewStateCache.has(key)) {
+    const cached = previewStateCache.get(key)
+    previewData.value = cached.previewData || []
+    previewColumns.value = cached.previewColumns || []
+    previewPagination.value = { ...previewPagination.value, ...(cached.previewPagination || {}) }
+    console.log('[DEBUG] Restored preview state for dataset:', dataset.id, 'records:', previewData.value.length)
+    return true
+  }
+  return false
+}
+
 // 选择数据集
 const selectDataset = async (dataset) => {
   console.log('=== selectDataset called ===')
@@ -923,6 +986,9 @@ const selectDataset = async (dataset) => {
     return
   }
   
+  // 切换前保存当前数据集的预览状态，避免结构化/LLM 数据集共用 previewData
+  saveCurrentPreviewState()
+  
   selectedDataset.value = dataset
   
   // 保存选中的数据集ID到localStorage
@@ -932,6 +998,9 @@ const selectDataset = async (dataset) => {
   // 等待DOM更新，确保响应式系统同步
   await nextTick()
   console.log('[DEBUG] After assignment, selectedDataset.name:', selectedDataset.value?.name)
+  
+  // 优先恢复已缓存的预览状态，避免结构化/LLM 数据集共用 previewData
+  restorePreviewState(dataset)
   
   // 根据数据集的业务域切换到正确的Tab并加载配置
   if (dataset.dataset_type === 'structured') {
@@ -1171,8 +1240,12 @@ const selectDataset = async (dataset) => {
       previewColumns.value = []
     }
     
-    // 如果数据集有真实后端ID，加载真实数据；否则才用模拟数据
-    if (dataset.id && typeof dataset.id === 'number' && dataset.id < 10000000000) {
+    // 如果数据集有真实后端ID（后端 ds_id 是字符串 ds- 开头），加载真实数据；否则才用模拟数据
+    const isBackendId = dataset.id && (
+      (typeof dataset.id === 'string' && dataset.id.startsWith('ds-')) ||
+      (typeof dataset.id === 'number' && dataset.id < 10000000000)
+    )
+    if (isBackendId) {
       console.log('[DEBUG] Dataset has real backend ID, loading real records')
       await loadDatasetRecords(dataset)
     }
@@ -1222,15 +1295,20 @@ const selectDataset = async (dataset) => {
         name: dataset.name,
         type: dataset.dataset_type
       })
-      // 只有后端真实ID（小于10000000000）才请求后端
-      if (typeof dataset.id === 'number' && dataset.id < 10000000000) {
+      // 后端真实ID为字符串 ds- 开头或小于阈值的数字
+      const isBackendId = (typeof dataset.id === 'string' && dataset.id.startsWith('ds-')) ||
+        (typeof dataset.id === 'number' && dataset.id < 10000000000)
+      if (isBackendId) {
         await loadLLMDatasetRecords(dataset)
       } else {
         console.log('[DEBUG] Dataset has temporary frontend ID, skipping backend load')
-        previewData.value = []
-        previewColumns.value = []
+        // 不要覆盖可能已恢复的本地缓存；如果没有缓存再清空
+        if (!previewStateCache.has(String(dataset.id))) {
+          previewData.value = []
+          previewColumns.value = []
+        }
       }
-    } else {
+      } else {
       console.error('[ERROR] Cannot load LLM dataset records: dataset or dataset.id is undefined')
       console.error('[ERROR] Dataset object:', JSON.stringify(dataset, null, 2))
       ElMessage.warning('数据集信息不完整，无法加载记录')
@@ -1285,6 +1363,26 @@ const loadLLMDatasetRecords = async (dataset) => {
       }
       
       const dynamicColumns = []
+
+      // 通用列标题中文化映射（字段 key → 显示标题）
+      const columnLabelMap = {
+        'case_id': '用例ID',
+        'type': '类型',
+        'input': '输入',
+        'expected': '期望输出',
+        'note': '备注',
+        'category': '类型',
+        'return_reason': '退货原因',
+        'refund_amount': '退款金额',
+        'exchange_reason': '换货原因',
+        'new_product': '换货商品',
+        'damage_type': '破损类型',
+        'compensation_amount': '赔偿金额',
+        'missing_items': '漏发商品',
+        'claim_amount': '索赔金额',
+        'delivery_status': '收货状态',
+        'resend_items': '补发商品'
+      }
       
       // 固定显示的列：用例ID、类型
       if (firstCase.case_id) {
@@ -1359,7 +1457,7 @@ const loadLLMDatasetRecords = async (dataset) => {
           if (foundKey) {
             dynamicColumns.push({ 
               prop: foundKey, 
-              label: keyword,  // 直接使用用户指定的关键词作为列标题
+              label: columnLabelMap[keyword] || keyword,  // 优先中文化列标题
               width: 140,
               showOverflowTooltip: true
             })
@@ -1368,7 +1466,7 @@ const loadLLMDatasetRecords = async (dataset) => {
             console.log(`[WARN]  - No match found for "${keyword}", adding empty column`)
             dynamicColumns.push({ 
               prop: keyword, 
-              label: keyword, 
+              label: columnLabelMap[keyword] || keyword, 
               width: 140,
               showOverflowTooltip: true
             })
@@ -1380,22 +1478,9 @@ const loadLLMDatasetRecords = async (dataset) => {
           if (!excludeFields.includes(key) && !businessKeywords.includes(key)) {
             const alreadyAdded = dynamicColumns.some(col => col.prop === key)
             if (!alreadyAdded) {
-              const labelMap = {
-                'return_reason': '退货原因',
-                'refund_amount': '退款金额',
-                'exchange_reason': '换货原因',
-                'new_product': '换货商品',
-                'damage_type': '破损类型',
-                'compensation_amount': '赔偿金额',
-                'missing_items': '漏发商品',
-                'claim_amount': '索赔金额',
-                'delivery_status': '收货状态',
-                'resend_items': '补发商品'
-              }
-              
               let label
-              if (labelMap[key]) {
-                label = labelMap[key]
+              if (columnLabelMap[key]) {
+                label = columnLabelMap[key]
               } else if (/^[a-z_]+$/.test(key)) {
                 label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
               } else {
@@ -1415,22 +1500,10 @@ const loadLLMDatasetRecords = async (dataset) => {
         // 如果没有 business_keywords，正常处理所有字段
         Object.keys(firstCase).forEach(key => {
           if (!excludeFields.includes(key)) {
-            let label = key
+            let label = columnLabelMap[key] || key
             
-            if (/^[a-z_]+$/.test(key)) {
-              const labelMap = {
-                'return_reason': '退货原因',
-                'refund_amount': '退款金额',
-                'exchange_reason': '换货原因',
-                'new_product': '换货商品',
-                'damage_type': '破损类型',
-                'compensation_amount': '赔偿金额',
-                'missing_items': '漏发商品',
-                'claim_amount': '索赔金额',
-                'delivery_status': '收货状态',
-                'resend_items': '补发商品'
-              }
-              label = labelMap[key] || key
+            if (/^[a-z_]+$/.test(key) && !columnLabelMap[key]) {
+              label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
             }
             
             dynamicColumns.push({ 
@@ -1449,6 +1522,9 @@ const loadLLMDatasetRecords = async (dataset) => {
       previewPagination.value.total = result.results.length
       previewPagination.value.currentPage = 1
       previewPagination.value.pageSize = 20
+      
+      // 缓存LLM预览状态
+      saveCurrentPreviewState()
       
       console.log('[DEBUG] Preview data updated with', previewData.value.length, 'records')
     } else {
@@ -1492,6 +1568,8 @@ const loadDatasetRecords = async (dataset) => {
       previewData.value = records.map(r => r.data_content || r)
       previewPagination.value.total = previewData.value.length
       previewPagination.value.currentPage = 1
+      // 从后端加载后缓存，便于切换回来时快速恢复
+      saveCurrentPreviewState()
     } else {
       previewData.value = []
       previewPagination.value.total = 0
@@ -1670,6 +1748,9 @@ const generateStructuredData = async () => {
 
     // 加载真实数据预览
     await loadDatasetRecords(newDataset)
+
+    // 缓存刚生成的预览状态，方便切换后恢复
+    saveCurrentPreviewState()
 
     // 切换到数据集Tab
     leftPanelTab.value = 'datasets'
@@ -1910,7 +1991,16 @@ const generateLLMDataset = async () => {
     }
     
     // 关键修复：在生成数据前，先删除其他同名的旧数据集（保留当前选中的）
-    const datasetName = selectedDataset.value?.name || ''
+    // 如果数据集名称还是默认/空，自动根据场景标题命名
+    const defaultNames = new Set(['', '项目订单', '新建数据集', '未命名', '数据集', 'LLM评测数据集', '新数据集', '测试数据集'])
+    let datasetName = selectedDataset.value?.name?.trim() || ''
+    if (defaultNames.has(datasetName)) {
+      datasetName = extractScenarioTitle(llmForm.value.scenario)
+      if (selectedDataset.value) {
+        selectedDataset.value.name = datasetName
+      }
+    }
+
     if (datasetName && selectedDataset.value?.id) {
       // 删除其他同名的数据集（排除当前选中的）
       const oldDatasets = datasets.value.filter(d => d.name === datasetName && d.id !== selectedDataset.value.id)
@@ -1935,10 +2025,10 @@ const generateLLMDataset = async () => {
       negative_count: llmForm.value.negative_count,
       boundary_count: llmForm.value.boundary_count,
       languages: llmForm.value.languages,
-      dataset_name: datasetName  // 传递用户设置的数据集名称
-      
+      dataset_name: datasetName,  // 传递用户设置的数据集名称
+      model_id: selectedModelId.value || ''  // 选中的 AI 底座模型
     }
-    
+
     console.log('[DEBUG] Request body:', JSON.stringify(requestBody, null, 2))
     console.log('[DEBUG] Selected dataset before API call - ID:', selectedDataset.value?.id, 'Name:', selectedDataset.value?.name)
 
@@ -2046,6 +2136,26 @@ const generateLLMDataset = async () => {
       // 动态生成列定义
       const firstCase = result.test_cases[0]
       const dynamicColumns = []
+
+      // 通用列标题中文化映射（字段 key → 显示标题）
+      const columnLabelMap = {
+        'case_id': '用例ID',
+        'type': '类型',
+        'input': '输入',
+        'expected': '期望输出',
+        'note': '备注',
+        'category': '类型',
+        'return_reason': '退货原因',
+        'refund_amount': '退款金额',
+        'exchange_reason': '换货原因',
+        'new_product': '换货商品',
+        'damage_type': '破损类型',
+        'compensation_amount': '赔偿金额',
+        'missing_items': '漏发商品',
+        'claim_amount': '索赔金额',
+        'delivery_status': '收货状态',
+        'resend_items': '补发商品'
+      }
       
       // 固定显示的列：用例ID、类型
       if (firstCase.case_id) {
@@ -2124,7 +2234,7 @@ const generateLLMDataset = async () => {
           if (foundKey) {
             dynamicColumns.push({ 
               prop: foundKey, 
-              label: keyword,  // 直接使用用户指定的关键词作为列标题
+              label: columnLabelMap[keyword] || keyword,  // 优先中文化列标题
               minWidth: 150 
             })
           } else {
@@ -2132,7 +2242,7 @@ const generateLLMDataset = async () => {
             console.log(`[WARN]  - No match found for "${keyword}", adding empty column`)
             dynamicColumns.push({ 
               prop: keyword, 
-              label: keyword, 
+              label: columnLabelMap[keyword] || keyword, 
               minWidth: 150 
             })
           }
@@ -2144,24 +2254,10 @@ const generateLLMDataset = async () => {
             // 检查是否已经通过模糊匹配添加了
             const alreadyAdded = dynamicColumns.some(col => col.prop === key)
             if (!alreadyAdded) {
-              // 对额外的字段使用正常的标题转换
-              const labelMap = {
-                'return_reason': '退货原因',
-                'refund_amount': '退款金额',
-                'exchange_reason': '换货原因',
-                'new_product': '换货商品',
-                'damage_type': '破损类型',
-                'compensation_amount': '赔偿金额',
-                'missing_items': '漏发商品',
-                'claim_amount': '索赔金额'
-              }
-              
-              let label
-              if (labelMap[key]) {
-                label = labelMap[key]
-              } else if (/^[\u4e00-\u9fa5]+$/.test(key)) {
+              let label = columnLabelMap[key] || key
+              if (!columnLabelMap[key] && /^[\u4e00-\u9fa5]+$/.test(key)) {
                 label = key
-              } else {
+              } else if (!columnLabelMap[key]) {
                 label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
               }
               
@@ -2173,23 +2269,10 @@ const generateLLMDataset = async () => {
         // 如果没有 business_keywords，正常处理所有字段
         Object.keys(firstCase).forEach(key => {
           if (!excludeFields.includes(key)) {
-            const labelMap = {
-              'return_reason': '退货原因',
-              'refund_amount': '退款金额',
-              'exchange_reason': '换货原因',
-              'new_product': '换货商品',
-              'damage_type': '破损类型',
-              'compensation_amount': '赔偿金额',
-              'missing_items': '漏发商品',
-              'claim_amount': '索赔金额'
-            }
-            
-            let label
-            if (labelMap[key]) {
-              label = labelMap[key]
-            } else if (/^[\u4e00-\u9fa5]+$/.test(key)) {
+            let label = columnLabelMap[key] || key
+            if (!columnLabelMap[key] && /^[\u4e00-\u9fa5]+$/.test(key)) {
               label = key
-            } else {
+            } else if (!columnLabelMap[key]) {
               label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
             }
             
@@ -2205,6 +2288,9 @@ const generateLLMDataset = async () => {
       previewPagination.value.total = selectedDataset.value.record_count
       previewPagination.value.currentPage = 1
       previewPagination.value.pageSize = 20
+      
+      // 缓存刚生成的LLM预览状态
+      saveCurrentPreviewState()
     } else {
       console.log('[INFO] No test_cases in response, showing empty state')
       // 如果没有真实数据，显示空状态（不再生成占位符数据）
@@ -2705,13 +2791,24 @@ const handleVersionChange = (version) => {
   // 关键修复：更新当前版本（必须在过滤之前）
   currentVersion.value = version
   
-  // 清空当前选中的数据集和预览数据
+  // 保留上一个选中的数据集，如果它仍属于当前版本则恢复选中
+  const previousDataset = selectedDataset.value
+  
+  // 先清空当前选中的数据集和预览数据
   selectedDataset.value = null
   previewData.value = []
   previewColumns.value = []
   
   // 重置业务域选择
   structuredForm.value.business_domain = ''
+  
+  // 如果上一个选中的数据集仍属于当前版本，重新选中并加载真实数据
+  if (previousDataset) {
+    const dsVersion = previousDataset.version || 'ecommerce'
+    if (dsVersion === version) {
+      selectDataset(previousDataset)
+    }
+  }
   
   // 显示提示
   const versionName = version === 'ecommerce' ? '跨境电商版' : '金融科技版'
@@ -3379,6 +3476,12 @@ watch(
 )
 
 onMounted(() => {
+  loadDatasets()
+  loadPresetTemplates()
+})
+
+//  keep-alive 激活时刷新数据集和预览（解决切走再回来时状态丢失）
+onActivated(() => {
   loadDatasets()
   loadPresetTemplates()
 })

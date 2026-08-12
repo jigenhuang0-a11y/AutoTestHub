@@ -208,10 +208,10 @@
                 </el-tag>
               </template>
               <div v-else class="result-badges">
-                <el-tag size="small" effect="plain">总 {{ row.total_count || 0 }}</el-tag>
-                <el-tag size="small" type="success" effect="plain">{{ row.passed_count || 0 }}</el-tag>
-                <el-tag size="small" type="danger" effect="plain">{{ row.failed_count || 0 }}</el-tag>
-                <el-tag size="small" type="warning" effect="plain">{{ row.skipped_count || 0 }}</el-tag>
+                <el-tag size="small" effect="plain">总 {{ row.total_cases || 0 }}</el-tag>
+                <el-tag size="small" type="success" effect="plain">{{ row.passed_cases || 0 }}</el-tag>
+                <el-tag size="small" type="danger" effect="plain">{{ row.failed_cases || 0 }}</el-tag>
+                <el-tag size="small" type="warning" effect="plain">{{ row.skipped_cases || 0 }}</el-tag>
               </div>
             </template>
           </template>
@@ -518,7 +518,8 @@ const rerunExecution = async (row) => {
     await ElMessageBox.confirm('确认重新执行此测试？', '重跑确认', { type: 'warning' })
     ElMessage.info('正在重新执行...')
     const response = await executionAPI.rerun(row.id)
-    ElMessage.success(`重新执行完成: ${response.passed_count || 0} 通过, ${response.failed_count || 0} 失败`)
+    const exec = response.execution || response || {}
+    ElMessage.success(`重新执行完成: ${exec.passed_cases || 0} 通过, ${exec.failed_cases || 0} 失败`)
     loadExecutions()
   } catch (error) {
     if (error !== 'cancel') {
@@ -582,8 +583,9 @@ const handleRerun = async (row) => {
     }
     // API 测试
     const response = await executionAPI.rerun(row.id)
+    const exec = response.execution || response || {}
     rerunningIds.value.delete(row.id)
-    ElMessage.success(`重跑完成: ${response.passed_count || 0} 通过, ${response.failed_count || 0} 失败`)
+    ElMessage.success(`重跑完成: ${exec.passed_cases || 0} 通过, ${exec.failed_cases || 0} 失败`)
     loadExecutions()
   } catch (error) {
     rerunningIds.value.delete(row.id)
@@ -708,7 +710,7 @@ const deleteExecution = async (row) => {
 const getStatusType = (status) => {
   const types = {
     pending: 'info',
-    running: '',
+    running: 'info',
     completed: 'success',
     partial: 'warning',
     failed: 'danger',
@@ -716,7 +718,7 @@ const getStatusType = (status) => {
     error: 'warning',
     stopped: 'warning',
   }
-  return types[status] || ''
+  return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
