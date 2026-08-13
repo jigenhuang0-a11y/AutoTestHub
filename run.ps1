@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # AI Test Platform One-Click Runner (Windows PowerShell)
 # Double-click run.bat to start; run.ps1 itself can also be used.
 # Usage:
@@ -14,8 +14,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LOG_DIR = Join-Path $ROOT "tmp\logs"
-$BACKEND_DIR = Join-Path $ROOT "agent-harness" "backend"
-$FRONTEND_DIR = Join-Path $ROOT "agent-harness" "frontend"
+$BACKEND_DIR = Join-Path (Join-Path $ROOT "agent-harness") "backend"
+$FRONTEND_DIR = Join-Path (Join-Path $ROOT "agent-harness") "frontend"
 $BACK_PORT = 8001
 $FRONT_PORT = 5174
 $ENV_FILE = Join-Path $ROOT ".env"
