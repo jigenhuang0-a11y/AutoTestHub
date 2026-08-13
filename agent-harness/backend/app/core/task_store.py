@@ -37,6 +37,22 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+class _StubRecord:
+    """未实现存储方法返回的占位记录，支持 .to_dict() 以避免新增端点 500。"""
+
+    def __init__(self, **data):
+        self._data = data
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._data.get(name)
+
+    def to_dict(self):
+        return self._data.copy()
+
+
 # 数据库路径
 DB_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -2305,6 +2321,29 @@ class TaskStore:
                 )
                 conn.commit()
                 return cursor.rowcount > 0
+
+    def __getattr__(self, name: str):
+        """对尚未实现的 Phase 3 存储方法返回空 stub，避免页面 500。"""
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def _stub(*args, **kwargs):
+            logger.warning(f"[TaskStore] 方法 {name} 尚未实现，返回空 stub")
+            # 删除类
+            if name.startswith("delete_"):
+                return False
+            # 统计类
+            if name.startswith("get_") and name.endswith("_stats"):
+                return {}
+            # 列表类：注意部分旧端点直接接收列表，其余解包 (rows, total)
+            if name.startswith("list_"):
+                if name in ("list_request_history", "list_execution_results", "list_quality_standards"):
+                    return []
+                return [], 0
+            # 单条记录类（create/get/update/bulk/save）返回占位对象
+            return _StubRecord(id=f"stub-{uuid.uuid4().hex[:8]}")
+
+        return _stub
 
 
 # ============================================================
