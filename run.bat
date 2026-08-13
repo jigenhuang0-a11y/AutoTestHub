@@ -1,8 +1,5 @@
 @echo off
-REM ============================================================
-REM  AI 测试平台 — 双击启动器（双击 run.bat 即可，无需改 PowerShell 策略）
-REM  停止: 双击 run.bat 一次（会先清理旧进程）；或命令行 run.bat stop
-REM ============================================================
+chcp 65001 >nul 2>&1
 setlocal
 set "ROOT=%~dp0"
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
