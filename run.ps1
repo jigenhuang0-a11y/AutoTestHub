@@ -1,5 +1,7 @@
 # ============================================================
 # AI 测试平台 — 一键启动 / 停止（Windows PowerShell）
+# 双击可直接运行；若系统限制，请在 PowerShell 中先执行：
+#   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
 # 用法:
 #   启动:  .\run.ps1
 #   停止:  .\run.ps1 -Stop
@@ -9,6 +11,15 @@ param(
     [switch]$Stop,
     [switch]$RestartBackend
 )
+
+# 尝试自动绕过当前会话执行策略限制（双击运行时常见）
+try {
+    if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
+        Write-Host "[错误] PowerShell 语言模式受限，无法运行脚本" -ForegroundColor Red
+        Read-Host "按 Enter 退出"
+        exit 1
+    }
+} catch { }
 
 $ErrorActionPreference = "Stop"
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
