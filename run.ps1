@@ -117,7 +117,7 @@ Write-Host "  Backend starting at http://localhost:$BACK_PORT" -ForegroundColor 
 
 Start-Sleep -Seconds 2
 
-Start-Process -FilePath "npm" -ArgumentList "run","dev" `
+Start-Process -FilePath "cmd" -ArgumentList "/c","npm","run","dev" `
     -WorkingDirectory $FRONTEND_DIR -WindowStyle Normal
 Write-Host "  Frontend starting at http://localhost:$FRONT_PORT" -ForegroundColor Green
 
