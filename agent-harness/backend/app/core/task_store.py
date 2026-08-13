@@ -2327,18 +2327,49 @@ class TaskStore:
         if name.startswith("_"):
             raise AttributeError(name)
 
+        # 明确需要返回 list 的方法（端点直接遍历 / len()）
+        _list_methods = {
+            "list_knowledge_bases",
+            "list_documents",
+            "list_models",
+            "list_mcp_tools",
+            "list_sandboxes",
+            "get_chat_sessions",
+            "get_chat_messages",
+            "list_request_history",
+            "list_execution_results",
+            "list_quality_standards",
+            "get_trace_steps",
+            "get_recent_events",
+            "get_safety_trend",
+            "get_risk_distribution",
+        }
+        # 需要解包 (rows, total) 的列表方法
+        _tuple_list_methods = {
+            "list_testcases",
+            "list_web_testcases",
+            "list_perf_plans",
+            "list_executions",
+            "list_testsuites",
+            "list_templates",
+            "list_tasks",
+        }
+        # 返回 dict 的统计类方法
+        _dict_methods = {
+            "get_stats",
+        }
+
         def _stub(*args, **kwargs):
             logger.warning(f"[TaskStore] 方法 {name} 尚未实现，返回空 stub")
-            # 删除类
             if name.startswith("delete_"):
                 return False
-            # 统计类
             if name.startswith("get_") and name.endswith("_stats"):
                 return {}
-            # 列表类：注意部分旧端点直接接收列表，其余解包 (rows, total)
-            if name.startswith("list_"):
-                if name in ("list_request_history", "list_execution_results", "list_quality_standards"):
-                    return []
+            if name in _dict_methods:
+                return {}
+            if name in _list_methods:
+                return []
+            if name in _tuple_list_methods or name.startswith("list_"):
                 return [], 0
             # 单条记录类（create/get/update/bulk/save）返回占位对象
             return _StubRecord(id=f"stub-{uuid.uuid4().hex[:8]}")
