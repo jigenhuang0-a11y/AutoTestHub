@@ -7,12 +7,15 @@
 #   停止:  .\run.ps1 -Stop
 #   仅重启后端: .\run.ps1 -RestartBackend
 # ============================================================
-param(
-    [switch]$Stop,
-    [switch]$RestartBackend
-)
+# 若用 powershell.exe -File 调用，参数通过 $args 传入（双击默认无命名参数）
+$Stop = $false
+$RestartBackend = $false
+foreach ($a in $args) {
+    if ($a -match "^-?-?[Ss]top") { $Stop = $true }
+    if ($a -match "^-?-?[Rr]estart[Bb]ackend") { $RestartBackend = $true }
+}
 
-# 尝试自动绕过当前会话执行策略限制（双击运行时常见）
+# 尝试自动绕过执行策略（双击运行时常见）
 try {
     if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
         Write-Host "[错误] PowerShell 语言模式受限，无法运行脚本" -ForegroundColor Red
