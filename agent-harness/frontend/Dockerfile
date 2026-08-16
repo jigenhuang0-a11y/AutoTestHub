@@ -5,7 +5,7 @@ WORKDIR /app
 
 # 安装依赖（把 lockfile 里的 resolved URL 换成国内镜像，避免容器内 npm 超时）
 COPY package.json package-lock.json ./
-RUN npm install --no-audit --no-fund --platform=linux --arch=x64
+RUN npm install --no-audit --no-fund --platform=linux --arch=x64 --registry=https://registry.npmmirror.com
 
 # 构建
 COPY . .

@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (audit, auth, health, llm, mcp, memory, sandbox,
     tasks, team, templates, tenants, tool_registry, webhooks, workflow, supervisor,
     environments, knowledge, testcases, execution, quality_checker, testsuites,
-    data_factory, web_testcases, performance, reports, ai_base)
+    data_factory, web_testcases, performance, reports, ai_base, eval_center)
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -37,3 +37,6 @@ api_router.include_router(reports.router, tags=["reports"])
 
 # AI 底座 / 模型配置（供测试模块选择模型、走真实 LLM）
 api_router.include_router(ai_base.router, tags=["ai-base"])
+
+# 全链路评测中心：Langfuse 监控 + Judge LLM 幻觉率评分
+api_router.include_router(eval_center.router, prefix="/eval-center", tags=["eval-center"])

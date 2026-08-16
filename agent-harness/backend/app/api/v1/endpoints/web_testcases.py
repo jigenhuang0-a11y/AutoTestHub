@@ -82,8 +82,29 @@ async def batch_create(payload: dict = {}, _: None = Depends(require_auth)):
 # 注意：所有静态 /executions/ 路由必须放在 /{wtc_id}/ 之前，
 # 否则 /executions 会被当成路径参数。
 @router.get("/executions/")
-async def list_web_executions(_: None = Depends(require_auth)):
-    return {"items": [], "total": 0}
+async def list_web_executions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    test_case: Optional[str] = Query(None),
+    _: None = Depends(require_auth),
+):
+    """获取 Web 测试执行历史（分页）。数据来自 TaskStore 的 web_executions 表。"""
+    try:
+        store = get_task_store()
+        rows, total = store.list_web_executions(
+            status=status, keyword=keyword, test_case=test_case, page=page, page_size=page_size
+        )
+        return {
+            "results": [r.to_dict() for r in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    except Exception as e:
+        logger.error(f"获取 Web 执行记录失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取执行记录失败: {str(e)}")
 
 
 @router.post("/executions/")

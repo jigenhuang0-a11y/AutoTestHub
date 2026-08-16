@@ -26,19 +26,28 @@ class LLMRouter:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         team_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        **extra_kwargs,
     ) -> str:
         provider, used_model = self._resolve_provider(
             task_type=task_type, model=model, temperature=temperature,
             max_tokens=max_tokens, team_id=team_id,
         )
         logger.info(f"[LLMRouter] {task_type} -> {used_model}")
+        trace_kwargs = {
+            "__langfuse_name": f"{task_type}",
+            "__langfuse_session_id": session_id,
+            "__langfuse_user_id": user_id,
+            "__langfuse_meta": {"feature": task_type, "model": used_model},
+        }
         try:
-            return provider.chat(messages)
+            return provider.chat(messages, **trace_kwargs, **extra_kwargs)
         except Exception as e:
             logger.error(f"[LLMRouter] {used_model} 失败: {e}")
             fallback = self._pool.get("dashscope", model="qwen-turbo")
             logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
-            return fallback.chat(messages)
+            return fallback.chat(messages, **trace_kwargs, **extra_kwargs)
 
     def chat_stream(
         self,
@@ -47,6 +56,8 @@ class LLMRouter:
         model: Optional[str] = None,
         team_id: Optional[str] = None,
         enable_reasoning: bool = False,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         **kwargs,
     ) -> Generator[dict, None, None]:
         """
@@ -64,12 +75,18 @@ class LLMRouter:
             task_type=task_type, model=model, team_id=team_id, **kwargs
         )
         logger.info(f"[LLMRouter] stream {task_type} -> {used_model} (reasoning={enable_reasoning})")
+        trace_kwargs = {
+            "__langfuse_name": f"{task_type}_stream",
+            "__langfuse_session_id": session_id,
+            "__langfuse_user_id": user_id,
+            "__langfuse_meta": {"feature": task_type, "model": used_model, "stream": True},
+        }
         try:
-            yield from provider.chat_stream(messages, enable_reasoning=enable_reasoning, **kwargs)
+            yield from provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
         except Exception as e:
             logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
             fallback = self._pool.get("dashscope", model="qwen-turbo")
-            yield from fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **kwargs)
+            yield from fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
 
     def chat_with_tools(
         self,

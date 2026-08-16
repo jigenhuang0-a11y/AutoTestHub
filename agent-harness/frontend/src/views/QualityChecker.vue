@@ -81,7 +81,7 @@
         <div class="dash-divider"></div>
         <div class="dash-item">
           <div class="dash-value" :class="latestTask.level">
-            {{ levelEmoji(latestTask.overall_score) }}
+            {{ scoreRatingText(latestTask.overall_score) }}
           </div>
           <div class="dash-label">评级</div>
         </div>
@@ -220,8 +220,8 @@
             </tbody>
           </table>
 
-          <!-- 分页（居中显示在表格下方） -->
-          <div class="table-pagination-bar" v-if="filteredTasks.length > pageSize">
+          <!-- 分页（只要有数据就始终显示，方便面试演示） -->
+          <div class="table-pagination-bar" v-if="filteredTasks.length > 0">
             <div class="native-pager">
               <span class="pager-total">共 {{ filteredTasks.length }} 条</span>
               <button class="pager-btn" :disabled="currentPage <= 1" @click="currentPage--">上一页</button>
@@ -857,11 +857,11 @@ function randomQuote(mood, score, passRate) {
   return list[Math.floor(Math.random() * list.length)]
 }
 
-function levelEmoji(score) {
-  if (score >= 85) return '🌟'
-  if (score >= 60) return '👍'
-  if (score >= 40) return '⚠️'
-  return '💢'
+function scoreRatingText(score) {
+  if (score >= 85) return '优秀'
+  if (score >= 60) return '良好'
+  if (score >= 40) return '警告'
+  return '不合格'
 }
 
 function npcClick() {
@@ -888,7 +888,103 @@ function npcClick() {
 const scenario = ref('general')
 const loading = ref(false)
 const running = ref(false)
-const tasks = ref([])
+const tasks = ref([
+  {
+    id: 'demo-1',
+    name: '用户下单流程 - 主路径覆盖',
+    scenario: 'general',
+    total_cases: 5,
+    pass_rate: 80,
+    overall_score: 82,
+    level: 'warning',
+    status: 'completed',
+    created_at: '2026-08-16 10:30',
+    passed_cases: 4,
+    warning_cases: 0,
+    failed_cases: 1,
+    details: {
+      passed: 4,
+      failed: 1,
+      warnings: 0
+    }
+  },
+  {
+    id: 'demo-2',
+    name: '订单取消流程 - 异常与边界',
+    scenario: 'general',
+    total_cases: 5,
+    pass_rate: 100,
+    overall_score: 95,
+    level: 'excellent',
+    status: 'completed',
+    created_at: '2026-08-16 11:15',
+    passed_cases: 5,
+    warning_cases: 0,
+    failed_cases: 0,
+    details: {
+      passed: 5,
+      failed: 0,
+      warnings: 0
+    }
+  },
+  {
+    id: 'demo-3',
+    name: '商品搜索与筛选 - 功能验证',
+    scenario: 'general',
+    total_cases: 5,
+    pass_rate: 60,
+    overall_score: 65,
+    level: 'fail',
+    status: 'completed',
+    created_at: '2026-08-16 14:22',
+    passed_cases: 3,
+    warning_cases: 0,
+    failed_cases: 2,
+    details: {
+      passed: 3,
+      failed: 2,
+      warnings: 0
+    }
+  },
+  {
+    id: 'demo-4',
+    name: '用户登录接口 - 参数校验',
+    scenario: 'api',
+    total_cases: 6,
+    pass_rate: 83,
+    overall_score: 85,
+    level: 'good',
+    status: 'completed',
+    created_at: '2026-08-16 09:10',
+    passed_cases: 5,
+    warning_cases: 0,
+    failed_cases: 1,
+    details: {
+      passed: 5,
+      failed: 1,
+      warnings: 0
+    }
+  },
+  {
+    id: 'demo-5',
+    name: '创建订单接口 - 幂等性与库存',
+    scenario: 'api',
+    total_cases: 4,
+    pass_rate: 50,
+    overall_score: 58,
+    level: 'fail',
+    status: 'completed',
+    created_at: '2026-08-16 16:05',
+    passed_cases: 2,
+    warning_cases: 0,
+    failed_cases: 2,
+    details: {
+      passed: 2,
+      failed: 2,
+      warnings: 0
+    }
+  }
+])
 const configDialogVisible = ref(false)
 
 // 搜索
@@ -925,7 +1021,7 @@ function toggleAllTasks(e) {
 
 // 分页
 const currentPage = ref(1)
-const pageSize = ref(6)
+const pageSize = ref(10)
 const jumpPage = ref(1)
 const pagedTasks = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
@@ -942,6 +1038,12 @@ function goToPage() {
 
 // 搜索或数据变化时重置到第一页
 watch([taskSearchKeyword, () => tasks.value.length], () => {
+  currentPage.value = 1
+})
+
+// 切换当前场景时，已选任务可能不在新场景列表中
+watch(scenario, () => {
+  selectedTask.value = null
   currentPage.value = 1
 })
 
@@ -1072,7 +1174,6 @@ function saveConfig() {
 
 // 初始化默认规则（功能测试模板）
 onMounted(() => {
-  loadTasks()
   if (!checkRules.value.length) {
     loadRuleTemplate('general')
   }

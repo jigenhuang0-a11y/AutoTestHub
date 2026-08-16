@@ -12,6 +12,13 @@ import SystemSettings from '@/views/SystemSettings.vue'
 import TeamModelSettings from '@/views/TeamModelSettings.vue'
 import Login from '@/views/Login.vue'
 import Workbench from '@/views/Workbench.vue'
+import KnowledgeChat from '@/views/KnowledgeChat.vue'
+import TestCaseList from '@/views/TestCaseList.vue'
+import WebTestCaseList from '@/views/WebTestCaseList.vue'
+import PerfTestCaseList from '@/views/PerfTestCaseList.vue'
+import TestSuiteList from '@/views/TestSuiteList.vue'
+import ExecutionHistory from '@/views/ExecutionHistory.vue'
+import ReportView from '@/views/ReportView.vue'
 
 const routes = [
   {
@@ -53,14 +60,14 @@ const routes = [
   {
     path: '/knowledge/chat',
     name: 'KnowledgeChat',
-    component: () => import('@/views/KnowledgeChat.vue'),
-    meta: { requiresAuth: true, title: '知识中枢', group: 'test' },
+    component: KnowledgeChat,
+    meta: { requiresAuth: true, title: '测试知识库', group: 'test' },
   },
   {
     path: '/knowledge/:id',
     name: 'KnowledgeChatDetail',
-    component: () => import('@/views/KnowledgeChat.vue'),
-    meta: { requiresAuth: true, title: '知识中枢', group: 'test' },
+    component: KnowledgeChat,
+    meta: { requiresAuth: true, title: '测试知识库', group: 'test' },
   },
   {
     path: '/eval-center',
@@ -109,37 +116,55 @@ const routes = [
   {
     path: '/testcases',
     name: 'TestCaseList',
-    component: () => import('@/views/TestCaseList.vue'),
+    component: TestCaseList,
     meta: { requiresAuth: true, title: '接口测试', group: 'test' },
   },
   {
     path: '/web-testcases',
     name: 'WebTestCaseList',
-    component: () => import('@/views/WebTestCaseList.vue'),
+    component: WebTestCaseList,
     meta: { requiresAuth: true, title: 'UI 自动化', group: 'test' },
   },
   {
     path: '/perf-testcases',
     name: 'PerfTestCaseList',
-    component: () => import('@/views/PerfTestCaseList.vue'),
+    component: PerfTestCaseList,
     meta: { requiresAuth: true, title: '性能测试', group: 'test' },
   },
   {
     path: '/testsuites',
     name: 'TestSuiteList',
-    component: () => import('@/views/TestSuiteList.vue'),
+    component: TestSuiteList,
     meta: { requiresAuth: true, title: '测试套件', group: 'test' },
   },
   {
     path: '/history',
     name: 'ExecutionHistory',
-    component: () => import('@/views/ExecutionHistory.vue'),
+    component: ExecutionHistory,
     meta: { requiresAuth: true, title: '执行历史', group: 'test' },
+  },
+  {
+    path: '/executions/:id',
+    name: 'ExecutionDetail',
+    component: () => import('@/views/ExecutionDetail.vue'),
+    meta: { requiresAuth: true, title: '执行详情', group: 'test' },
+  },
+  {
+    path: '/web-execution/:id',
+    name: 'WebExecutionDetail',
+    component: () => import('@/views/WebExecutionDetail.vue'),
+    meta: { requiresAuth: true, title: 'Web 执行详情', group: 'test' },
+  },
+  {
+    path: '/perf-execution/:id',
+    name: 'PerfExecutionDetail',
+    component: () => import('@/views/PerfExecutionDetail.vue'),
+    meta: { requiresAuth: true, title: '性能执行详情', group: 'test' },
   },
   {
     path: '/reports',
     name: 'ReportView',
-    component: () => import('@/views/ReportView.vue'),
+    component: ReportView,
     meta: { requiresAuth: true, title: '测试报告', group: 'test' },
   },
 

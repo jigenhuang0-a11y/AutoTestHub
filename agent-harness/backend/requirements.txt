@@ -28,6 +28,7 @@ sentence-transformers==2.7.0
 # 可观测性（W2：全链路观测）
 # ============================================================
 prometheus-client==0.21.0
+langfuse>=2.0.0,<3.0.0            # LLM 可观测性与幻觉率评分
 opentelemetry-api==1.28.0
 opentelemetry-sdk==1.28.0
 opentelemetry-instrumentation-fastapi==0.49b0

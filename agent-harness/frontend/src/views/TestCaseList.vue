@@ -1,149 +1,190 @@
 <template>
   <div class="testcase-container">
-    <el-card>
+    <el-card class="glass-card" shadow="never" :body-style="{ padding: '0' }">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>测试用例列表</span>
-          <el-button type="primary" @click="showCreateDialog">
-            <el-icon>
-              <Plus />
-            </el-icon>
-            新建用例
-          </el-button>
+        <div class="page-hero">
+          <div class="hero-main">
+            <div class="hero-title">
+              <div class="hero-icon-wrap">
+                <el-icon :size="22"><Connection /></el-icon>
+              </div>
+              <div class="hero-title-text">
+                <h1>接口测试</h1>
+                <p>创建、管理并执行 API 接口测试用例</p>
+              </div>
+            </div>
+            <div class="hero-actions">
+              <el-button type="primary" size="large" class="hero-btn" @click="showCreateDialog">
+                <el-icon><Plus /></el-icon> 新建用例
+              </el-button>
+              <el-button size="large" class="hero-btn-secondary" @click="$router.push('/testcases/ai-generate')">
+                <el-icon><MagicStick /></el-icon> AI 生成
+              </el-button>
+            </div>
+          </div>
+          <div class="hero-stats" v-if="testCases.length">
+            <div class="stat-item">
+              <div class="stat-value">{{ pagination.total }}</div>
+              <div class="stat-label">用例总数</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <div class="stat-value passed">{{ testCases.filter(t => t.last_execution_status === 'passed').length }}</div>
+              <div class="stat-label">最近通过</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <div class="stat-value failed">{{ testCases.filter(t => t.last_execution_status === 'failed').length }}</div>
+              <div class="stat-label">最近失败</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <div class="stat-value p0">{{ testCases.filter(t => t.priority === 'P0').length }}</div>
+              <div class="stat-label">P0 级</div>
+            </div>
+          </div>
         </div>
       </template>
 
-      <!-- 批量操作栏 -->
-      <div class="batch-actions">
-        <el-alert :title="selectedRows.length > 0 ? `已选择 ${selectedRows.length} 项` : '未选择任何项'"
-          :type="selectedRows.length > 0 ? 'info' : 'warning'" :closable="false"
-          style="display: inline-block; margin-right: 10px" />
-        <el-button size="small" type="primary" :disabled="selectedRows.length === 0" @click="showBatchAddToSuiteDialog">
-          <el-icon>
-            <FolderAdd />
-          </el-icon>
-          批量加入测试套件
-        </el-button>
-        <el-button size="small" type="success" :disabled="selectedRows.length === 0" @click="batchExecute">
-          <el-icon>
-            <VideoPlay />
-          </el-icon>
-          批量执行
-        </el-button>
-        <el-button size="small" type="danger" :disabled="selectedRows.length === 0" @click="batchDelete">
-          <el-icon>
-            <Delete />
-          </el-icon>
-          批量删除
-        </el-button>
+      <div class="page-toolbar">
+        <!-- 批量操作栏 -->
+        <div class="batch-bar" v-if="selectedRows.length > 0">
+          <div class="batch-info">
+            <el-icon><Check /></el-icon>
+            <span>已选择 <strong>{{ selectedRows.length }}</strong> 项</span>
+          </div>
+          <div class="batch-actions">
+            <el-button size="small" type="primary" plain @click="showBatchAddToSuiteDialog">
+              <el-icon><FolderAdd /></el-icon> 加入套件
+            </el-button>
+            <el-button size="small" type="success" plain @click="batchExecute">
+              <el-icon><VideoPlay /></el-icon> 批量执行
+            </el-button>
+            <el-button size="small" type="danger" plain @click="batchDelete">
+              <el-icon><Delete /></el-icon> 批量删除
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 搜索栏 -->
+        <el-form :inline="true" :model="searchForm" class="toolbar-form">
+          <el-form-item>
+            <el-input v-model="searchForm.search" placeholder="搜索标题/描述/接口地址" clearable prefix-icon="Search" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="searchForm.status" placeholder="全部" clearable style="width: 110px">
+              <el-option label="草稿" value="draft"><span class="option-dot option-dot--draft"></span>草稿</el-option>
+              <el-option label="激活" value="active"><span class="option-dot option-dot--active"></span>激活</el-option>
+              <el-option label="停用" value="inactive"><span class="option-dot option-dot--inactive"></span>停用</el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="优先级">
+            <el-select v-model="searchForm.priority" placeholder="全部" clearable style="width: 110px">
+              <el-option label="P0" value="P0"><span class="option-dot option-dot--p0"></span>P0</el-option>
+              <el-option label="P1" value="P1"><span class="option-dot option-dot--p1"></span>P1</el-option>
+              <el-option label="P2" value="P2"><span class="option-dot option-dot--p2"></span>P2</el-option>
+              <el-option label="P3" value="P3"><span class="option-dot option-dot--p3"></span>P3</el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="方法">
+            <el-select v-model="searchForm.method" placeholder="全部" clearable style="width: 110px">
+              <el-option label="GET" value="GET" />
+              <el-option label="POST" value="POST" />
+              <el-option label="PUT" value="PUT" />
+              <el-option label="DELETE" value="DELETE" />
+              <el-option label="PATCH" value="PATCH" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="loadTestCases" class="toolbar-btn-primary">查询</el-button>
+            <el-button @click="resetSearch" class="toolbar-btn-default">重置</el-button>
+          </el-form-item>
+        </el-form>
       </div>
 
-      <!-- 搜索栏 -->
-      <el-form :inline="true" :model="searchForm" class="search-form">
-        <el-form-item label="搜索">
-          <el-input v-model="searchForm.search" placeholder="标题/描述/接口地址" clearable />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="searchForm.status" placeholder="全部" clearable style="width: 120px">
-            <el-option label="草稿" value="draft"><span class="option-dot option-dot--draft"></span>草稿</el-option>
-            <el-option label="激活" value="active"><span class="option-dot option-dot--active"></span>激活</el-option>
-            <el-option label="停用" value="inactive"><span class="option-dot option-dot--inactive"></span>停用</el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="优先级">
-          <el-select v-model="searchForm.priority" placeholder="全部" clearable style="width: 120px">
-            <el-option label="P0" value="P0"><span class="option-dot option-dot--p0"></span>P0</el-option>
-            <el-option label="P1" value="P1"><span class="option-dot option-dot--p1"></span>P1</el-option>
-            <el-option label="P2" value="P2"><span class="option-dot option-dot--p2"></span>P2</el-option>
-            <el-option label="P3" value="P3"><span class="option-dot option-dot--p3"></span>P3</el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="请求方法">
-          <el-select v-model="searchForm.method" placeholder="全部" clearable style="width: 120px">
-            <el-option label="GET" value="GET" />
-            <el-option label="POST" value="POST" />
-            <el-option label="PUT" value="PUT" />
-            <el-option label="DELETE" value="DELETE" />
-            <el-option label="PATCH" value="PATCH" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="loadTestCases">查询</el-button>
-          <el-button @click="resetSearch">重置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <!-- 空状态 -->
-      <EmptyState v-if="!loading && !testCases.length" title="暂无测试用例" description="点击新建用例按钮创建第一个测试用例，或使用AI生成功能批量生成">
-        <template #action>
-          <el-button type="primary" @click="showCreateDialog">新建用例</el-button>
-          <el-button @click="$router.push('/testcases/ai-generate')">AI生成</el-button>
-        </template>
-      </EmptyState>
-
-      <!-- 表格 -->
-      <el-table v-else :data="testCases" border stripe v-loading="loading" @selection-change="handleSelectionChange"
-        style="width: 100%">
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="60" sortable />
-        <el-table-column prop="title" label="标题" min-width="150" sortable />
-        <el-table-column prop="api_endpoint" label="接口地址" min-width="200" show-overflow-tooltip sortable>
-          <template #default="{ row }">
-            <el-tooltip :content="row.api_endpoint" placement="top" effect="dark">
-              <span class="api-endpoint-text">{{ truncateApiEndpoint(row.api_endpoint) }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column prop="method" label="请求方法" width="90" sortable>
-          <template #default="{ row }">
-            <el-tag :type="getMethodType(row.method)" size="small">{{ row.method }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_execution_status" label="上次执行状态" width="100" sortable>
-          <template #default="{ row }">
-            <el-tag v-if="row.last_execution_status" :type="getExecutionStatusType(row.last_execution_status)"
-              size="small">
-              {{ getExecutionStatusText(row.last_execution_status) }}
-            </el-tag>
-            <span v-else class="no-execution-text">未执行</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="80" sortable>
-          <template #default="{ row }">
-            <el-tag :type="getPriorityType(row.priority)" size="small">{{ row.priority }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="80" sortable>
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusText(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160" sortable>
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="success" @click="executeTestCase(row)">
-              <el-icon>
-                <VideoPlay />
-              </el-icon>
-              执行
+      <div class="page-content" v-loading="loading" element-loading-text="加载中..." element-loading-background="rgba(255,255,255,0.85)">
+        <!-- 空状态 -->
+        <div v-if="!loading && !testCases.length" class="empty-state-glass">
+          <div class="empty-icon-wrap">
+            <el-icon :size="64"><Connection /></el-icon>
+          </div>
+          <div class="empty-title">暂无接口测试用例</div>
+          <div class="empty-description">创建第一个用例，或使用 AI 一键批量生成接口测试</div>
+          <div class="empty-actions">
+            <el-button type="primary" size="large" @click="showCreateDialog">
+              <el-icon><Plus /></el-icon> 新建用例
             </el-button>
-            <el-button size="small" @click="showViewDialog(row)">查看</el-button>
-            <el-button size="small" type="primary" @click="copyTestCase(row)">复制</el-button>
-            <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="deleteTestCase(row.id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            <el-button size="large" class="empty-btn-secondary" @click="$router.push('/testcases/ai-generate')">
+              <el-icon><MagicStick /></el-icon> AI 生成
+            </el-button>
+          </div>
+        </div>
 
-      <!-- 分页 -->
-      <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize"
-        :total="pagination.total" :page-sizes="[10, 20, 50, 100]" layout="total, sizes, prev, pager, next, jumper"
-        style="margin-top: 20px; justify-content: flex-end" @size-change="loadTestCases"
-        @current-change="loadTestCases" />
+        <!-- 表格 -->
+        <template v-if="testCases.length">
+          <div class="table-wrapper">
+            <el-table :data="testCases" @selection-change="handleSelectionChange" class="data-table" height="100%">
+              <el-table-column type="selection" width="55" />
+              <el-table-column prop="id" label="ID" width="60" sortable />
+              <el-table-column prop="title" label="标题" min-width="150" sortable />
+              <el-table-column prop="api_endpoint" label="接口地址" min-width="200" show-overflow-tooltip sortable>
+                <template #default="{ row }">
+                  <el-tooltip :content="row.api_endpoint" placement="top" effect="dark">
+                    <span class="api-endpoint-text">{{ truncateApiEndpoint(row.api_endpoint) }}</span>
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+              <el-table-column prop="method" label="方法" width="90" sortable>
+                <template #default="{ row }">
+                  <el-tag :type="getMethodType(row.method)" size="small" effect="plain">{{ row.method }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="last_execution_status" label="上次执行" width="100" sortable>
+                <template #default="{ row }">
+                  <el-tag v-if="row.last_execution_status" :type="getExecutionStatusType(row.last_execution_status)"
+                    size="small" effect="plain">
+                    {{ getExecutionStatusText(row.last_execution_status) }}
+                  </el-tag>
+                  <span v-else class="no-execution-text">未执行</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="priority" label="优先级" width="80" sortable>
+                <template #default="{ row }">
+                  <el-tag :type="getPriorityType(row.priority)" size="small" effect="plain">{{ row.priority }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="80" sortable>
+                <template #default="{ row }">
+                  <el-tag :type="getStatusType(row.status)" size="small" effect="plain">{{ getStatusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="创建时间" width="160" sortable>
+                <template #default="{ row }">
+                  {{ formatDate(row.created_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="340" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" type="success" @click="executeTestCase(row)">
+                    <el-icon><VideoPlay /></el-icon> 执行
+                  </el-button>
+                  <el-button size="small" @click="showViewDialog(row)">查看</el-button>
+                  <el-button size="small" type="primary" @click="copyTestCase(row)">复制</el-button>
+                  <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
+                  <el-button size="small" type="danger" @click="deleteTestCase(row.id)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <!-- 分页 -->
+          <div class="page-pagination">
+            <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize"
+              :total="pagination.total" :page-sizes="[10, 20, 50, 100]" layout="total, sizes, prev, pager, next, jumper"
+              @size-change="loadTestCases" @current-change="loadTestCases" />
+          </div>
+        </template>
+      </div>
     </el-card>
 
     <!-- 创建/编辑对话框 -->
@@ -1897,7 +1938,7 @@ const loadTestCases = async () => {
     }
     const response = await testcaseAPI.list(params)
     testCases.value = response.results || response
-    pagination.total = response.count || response.length
+    pagination.total = response.total
   } catch (error) {
     console.error('Load test cases error:', error)
   } finally {
@@ -3522,5 +3563,402 @@ onMounted(() => {
   overflow-wrap: break-word;
 }
 .result-failed .result-item-name { color: #f56c6c; }
+
+/* ================= 明亮清爽列表页 UI ================= */
+.testcase-container {
+  padding: 20px;
+  height: calc(100vh - 84px);
+  box-sizing: border-box;
+  background: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+}
+
+.glass-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff !important;
+  border: 1px solid #e4e7ed !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+  overflow: hidden;
+  color: #303133;
+}
+
+.glass-card :deep(.el-card__header) {
+  padding: 0 !important;
+  border-bottom: 1px solid #ebeef5 !important;
+  background: linear-gradient(135deg, #f0f7ff, #ffffff);
+  flex-shrink: 0;
+}
+
+.glass-card :deep(.el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.page-hero {
+  padding: 22px 26px;
+}
+
+.hero-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-icon-wrap {
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #e6f2ff, #d9ecff);
+  border: 1px solid #c6e2ff;
+  color: #409eff;
+}
+
+.hero-title-text h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+  letter-spacing: 0.3px;
+}
+
+.hero-title-text p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #606266;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hero-btn {
+  background: #409eff !important;
+  border: none !important;
+  font-weight: 500;
+  padding: 0 20px;
+  height: 40px;
+}
+
+.hero-btn:hover {
+  background: #66b1ff !important;
+}
+
+.hero-btn-secondary {
+  background: #ffffff !important;
+  border: 1px solid #dcdfe6 !important;
+  color: #606266 !important;
+  padding: 0 20px;
+  height: 40px;
+}
+
+.hero-btn-secondary:hover {
+  color: #409eff !important;
+  border-color: #c6e2ff !important;
+  background: #f5f7fa !important;
+}
+
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #ebeef5;
+}
+
+.hero-stats .stat-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 90px;
+}
+
+.hero-stats .stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.hero-stats .stat-value.passed { color: #67c23a; }
+.hero-stats .stat-value.failed { color: #f56c6c; }
+.hero-stats .stat-value.p0 { color: #e6a23c; }
+
+.hero-stats .stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.hero-stats .stat-divider {
+  width: 1px;
+  height: 36px;
+  background: #e4e7ed;
+  margin: 0 16px;
+}
+
+.page-toolbar {
+  padding: 16px 26px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafbfc;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 10px;
+}
+
+.batch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #409eff;
+  font-size: 13px;
+}
+
+.batch-info strong {
+  color: #303133;
+  font-weight: 600;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-form :deep(.el-form-item) {
+  margin-bottom: 0;
+  margin-right: 14px;
+}
+
+.toolbar-form :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 500;
+  padding-right: 8px;
+}
+
+.toolbar-form :deep(.el-input__wrapper),
+.toolbar-form :deep(.el-select .el-input__wrapper) {
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px #dcdfe6 inset !important;
+  color: #303133;
+}
+
+.toolbar-form :deep(.el-input__inner) {
+  color: #303133;
+}
+
+.toolbar-form :deep(.el-input__inner::placeholder) {
+  color: #a8abb2;
+}
+
+.toolbar-btn-primary {
+  background: #409eff !important;
+  border: none !important;
+}
+
+.toolbar-btn-primary:hover {
+  background: #66b1ff !important;
+}
+
+.toolbar-btn-default {
+  background: #ffffff !important;
+  border: 1px solid #dcdfe6 !important;
+  color: #606266 !important;
+}
+
+.toolbar-btn-default:hover {
+  color: #409eff !important;
+  border-color: #c6e2ff !important;
+  background: #f5f7fa !important;
+}
+
+.page-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px 26px;
+  background: #ffffff;
+}
+
+.table-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.data-table {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  background: #ffffff !important;
+}
+
+.data-table :deep(.el-table__header-wrapper th.el-table__cell) {
+  background: #f5f7fa !important;
+  color: #606266 !important;
+  font-weight: 600;
+  border-bottom: 1px solid #ebeef5 !important;
+  padding: 12px 0;
+}
+
+.data-table :deep(.el-table__body-wrapper td.el-table__cell) {
+  background: #ffffff !important;
+  color: #303133;
+  border-bottom: 1px solid #ebeef5 !important;
+  padding: 14px 0;
+}
+
+.data-table :deep(.el-table__row:hover td.el-table__cell) {
+  background: #f5f7fa !important;
+}
+
+.data-table :deep(.el-table__empty-block) {
+  background: #ffffff;
+}
+
+/* 解决切换时白色加载闪烁 */
+.data-table :deep(.el-loading-mask) {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(2px);
+}
+
+.data-table :deep(.el-loading-spinner .circular) {
+  width: 28px;
+  height: 28px;
+}
+
+.page-pagination {
+  flex-shrink: 0;
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  background: #ffffff;
+}
+
+.page-pagination :deep(.el-pagination__total),
+.page-pagination :deep(.el-pagination__jump) {
+  color: #606266;
+}
+
+.page-pagination :deep(.el-pager li) {
+  background: #ffffff;
+  border: 1px solid #e4e7ed;
+  color: #606266;
+}
+
+.page-pagination :deep(.el-pager li.is-active) {
+  background: #409eff;
+  border-color: #409eff;
+  color: #fff;
+}
+
+.page-pagination :deep(.el-pagination button) {
+  background: #ffffff;
+  border: 1px solid #e4e7ed;
+  color: #606266;
+}
+
+.empty-state-glass {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 20px;
+  text-align: center;
+  background: #fafbfc;
+  border-radius: 12px;
+  border: 1px dashed #dcdfe6;
+}
+
+.empty-icon-wrap {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  color: #409eff;
+  margin-bottom: 20px;
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+.empty-description {
+  font-size: 14px;
+  color: #606266;
+  margin-bottom: 24px;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.empty-actions .el-button--primary {
+  background: #409eff !important;
+  border: none !important;
+}
+
+.empty-btn-secondary {
+  background: #ffffff !important;
+  border: 1px solid #dcdfe6 !important;
+  color: #606266 !important;
+}
+
+.empty-btn-secondary:hover {
+  color: #409eff !important;
+  border-color: #c6e2ff !important;
+  background: #f5f7fa !important;
+}
+
+/* 修正接口地址文字颜色 */
+.api-endpoint-text {
+  color: #303133;
+}
+
+.no-execution-text {
+  color: #909399;
+}
 
 </style>

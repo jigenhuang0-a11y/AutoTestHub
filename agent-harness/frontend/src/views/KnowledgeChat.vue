@@ -2783,10 +2783,9 @@ const sendMessage = async () => {
 
     // 使用流式 SSE API（带 AbortController）
     // 日常对话不依赖知识库，使用独立接口
-    // 注意：streamUrl 使用 /api/knowledge/... 前缀，让 Vite proxy 的 /api/knowledge 规则正确重写为 /api/v1/...
     const streamUrl = qaMode.value === 'chat'
-      ? `/api/knowledge/chat/stream/`
-      : `/api/knowledge/knowledge-bases/${kbId.value}/ask_stream/`
+      ? `/api/v1/knowledge/chat/stream/`
+      : `/api/v1/knowledge/knowledge-bases/${kbId.value}/ask_stream/`
     const token = localStorage.getItem('access_token')
     const response = await fetch(
       streamUrl,

@@ -1,97 +1,150 @@
 <template>
   <div class="execution-history-container">
-    <!-- 搜索筛选区域 -->
-    <el-card class="filter-card" shadow="never">
-      <el-form :model="filters" inline>
-        <el-form-item label="套件名称">
-          <el-input
-            v-model="filters.search"
-            placeholder="搜索套件名称或日志"
-            clearable
-            style="width: 200px"
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          >
-            <template #suffix>
-              <el-icon @click="handleSearch" style="cursor:pointer"><Search /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
-        <el-form-item label="类型">
-          <el-select v-model="filters.execType" placeholder="全部" style="width: 130px" clearable @change="handleSearch">
-            <el-option label="全部" value="" />
-            <el-option label="API 测试" value="api">
-              <span style="display:flex;align-items:center;gap:4px"><el-icon color="#409EFF"><Link /></el-icon> API 测试</span>
-            </el-option>
-            <el-option label="Web 自动化" value="web">
-              <span style="display:flex;align-items:center;gap:4px"><el-icon color="#67C23A"><Monitor /></el-icon> Web 自动化</span>
-            </el-option>
-            <el-option label="性能测试" value="perf">
-              <span style="display:flex;align-items:center;gap:4px"><el-icon color="#E6A23C"><Odometer /></el-icon> 性能测试</span>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="执行时间">
-          <el-select v-model="filters.timeRange" style="width: 130px" @change="handleSearch">
-            <el-option label="今天" value="today" />
-            <el-option label="近7天" value="7days" />
-            <el-option label="近30天" value="30days" />
-            <el-option label="自定义" value="custom" />
-          </el-select>
-          <el-date-picker
-            v-if="filters.timeRange === 'custom'"
-            v-model="filters.dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            style="width: 240px; margin-left: 8px"
-            @change="handleSearch"
-          />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="filters.status" placeholder="全部" style="width: 120px" clearable @change="handleSearch">
-            <el-option label="已完成" value="completed" />
-            <el-option label="执行中" value="running" />
-            <el-option label="部分通过" value="partial" />
-            <el-option label="失败" value="failed" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="执行人">
-          <el-select v-model="filters.started_by" placeholder="全部" style="width: 120px" clearable @change="handleSearch">
-            <el-option v-for="user in users" :key="user.id" :label="user.username" :value="user.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+    <el-card class="glass-card" shadow="never">
+      <template #header>
+        <div class="page-hero">
+          <div class="hero-main">
+            <div class="hero-title">
+              <div class="hero-icon-wrap">
+                <el-icon :size="26"><Histogram /></el-icon>
+              </div>
+              <div>
+                <h2 class="page-title">执行历史</h2>
+                <p class="page-desc">查看 API、Web、性能测试的执行记录与结果</p>
+              </div>
+            </div>
+          </div>
+          <div class="hero-stats" v-if="executions.length">
+            <div class="stat-item">
+              <span class="stat-value">{{ stats.total }}</span>
+              <span class="stat-label">总记录</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value running">{{ stats.running }}</span>
+              <span class="stat-label">执行中</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value passed">{{ stats.passed }}</span>
+              <span class="stat-label">已通过</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value failed">{{ stats.failed }}</span>
+              <span class="stat-label">已失败</span>
+            </div>
+          </div>
+        </div>
+      </template>
 
-    <!-- 执行历史列表 -->
-    <el-card shadow="never">
-      <!-- 工具栏：批量操作 -->
-      <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px">
-        <el-button
-          type="danger" size="small"
-          :disabled="selectedRows.length === 0"
-          @click="batchDeleteExecutions"
-        >
-          批量删除 ({{ selectedRows.length }})
-        </el-button>
-        <span v-if="selectedRows.length > 0" style="color: #909399; font-size: 12px">
-          已选择 {{ selectedRows.length }} 条记录
-        </span>
+      <!-- 搜索筛选区域 -->
+      <div class="page-toolbar">
+        <el-form :model="filters" inline>
+          <el-form-item label="套件名称">
+            <el-input
+              v-model="filters.search"
+              placeholder="搜索套件名称或日志"
+              clearable
+              style="width: 200px"
+              @clear="handleSearch"
+              @keyup.enter="handleSearch"
+            >
+              <template #suffix>
+                <el-icon @click="handleSearch" style="cursor:pointer"><Search /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
+          <el-form-item label="类型">
+            <el-select v-model="filters.execType" placeholder="全部" style="width: 130px" clearable @change="handleSearch">
+              <el-option label="全部" value="" />
+              <el-option label="API 测试" value="api">
+                <span style="display:flex;align-items:center;gap:4px"><el-icon color="#409EFF"><Link /></el-icon> API 测试</span>
+              </el-option>
+              <el-option label="Web 自动化" value="web">
+                <span style="display:flex;align-items:center;gap:4px"><el-icon color="#67C23A"><Monitor /></el-icon> Web 自动化</span>
+              </el-option>
+              <el-option label="性能测试" value="perf">
+                <span style="display:flex;align-items:center;gap:4px"><el-icon color="#E6A23C"><Odometer /></el-icon> 性能测试</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="执行时间">
+            <el-select v-model="filters.timeRange" style="width: 130px" @change="handleSearch">
+              <el-option label="今天" value="today" />
+              <el-option label="近7天" value="7days" />
+              <el-option label="近30天" value="30days" />
+              <el-option label="自定义" value="custom" />
+            </el-select>
+            <el-date-picker
+              v-if="filters.timeRange === 'custom'"
+              v-model="filters.dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              style="width: 240px; margin-left: 8px"
+              @change="handleSearch"
+            />
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="filters.status" placeholder="全部" style="width: 120px" clearable @change="handleSearch">
+              <el-option label="已完成" value="completed" />
+              <el-option label="执行中" value="running" />
+              <el-option label="部分通过" value="partial" />
+              <el-option label="失败" value="failed" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="执行人">
+            <el-select v-model="filters.started_by" placeholder="全部" style="width: 120px" clearable @change="handleSearch">
+              <el-option v-for="user in users" :key="user.id" :label="user.username" :value="user.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleSearch">查询</el-button>
+            <el-button @click="resetFilters">重置</el-button>
+          </el-form-item>
+        </el-form>
       </div>
-      <el-table
-        :data="executions"
-        v-loading="loading"
-        stripe
-        border
-        style="width: 100%"
-        @row-click="handleRowClick"
-        @selection-change="handleSelectionChange"
-      >
+
+      <!-- 执行历史列表 -->
+      <div class="page-content" v-loading="loading" element-loading-text="加载中..." element-loading-background="rgba(255,255,255,0.85)">
+        <!-- 工具栏：批量操作 -->
+        <div v-if="selectedRows.length > 0" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px">
+          <el-button
+            type="danger" size="small"
+            :disabled="selectedRows.length === 0"
+            @click="batchDeleteExecutions"
+          >
+            批量删除 ({{ selectedRows.length }})
+          </el-button>
+          <span style="color: #909399; font-size: 12px">
+            已选择 {{ selectedRows.length }} 条记录
+          </span>
+        </div>
+
+        <!-- 空状态 -->
+        <div v-if="!loading && !executions.length" class="empty-state-glass">
+          <div class="empty-icon-wrap">
+            <el-icon :size="42"><Histogram /></el-icon>
+          </div>
+          <h3 class="empty-title">暂无执行记录</h3>
+          <p class="empty-desc">执行接口测试、Web 自动化或性能测试后，结果将展示在这里</p>
+        </div>
+
+        <!-- 表格 -->
+        <template v-if="executions.length">
+          <div class="table-wrapper">
+            <el-table
+              :data="executions"
+              stripe
+              border
+              table-layout="auto"
+              class="data-table"
+              style="min-width: 1400px"
+              @row-click="handleRowClick"
+              @selection-change="handleSelectionChange"
+            >
         <el-table-column type="selection" width="45" />
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="类型" width="100">
@@ -107,14 +160,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="执行名称" min-width="200">
+        <el-table-column label="执行名称" min-width="160">
           <template #default="{ row }">
             <el-link type="primary" @click.stop="viewDetail(row.id)">
               {{ row.name || `执行 #${row.id}` }}
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column label="关联用例/套件" min-width="160">
+        <el-table-column label="关联用例/套件" min-width="110">
           <template #default="{ row }">
             <template v-if="row.__type === 'web'">
               <el-link v-if="row.test_case_title" type="primary" @click.stop="goToWebTestCase(row)">
@@ -160,7 +213,7 @@
             {{ row.__type === 'web' ? (row.executed_by_username || '-') : (row.started_by_name || '-') }}
           </template>
         </el-table-column>
-        <el-table-column label="结果" min-width="240">
+        <el-table-column label="结果" min-width="190">
           <template #default="{ row }">
             <!-- Web 自动化结果 -->
             <template v-if="row.__type === 'web'">
@@ -216,20 +269,20 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
               {{ row.status_display || getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="执行时间" width="160">
+        <el-table-column label="执行时间" width="150">
           <template #default="{ row }">{{ formatDate(row.__type === 'web' ? row.executed_at : row.started_at) }}</template>
         </el-table-column>
-        <el-table-column label="耗时" width="80">
+        <el-table-column label="耗时" width="90">
           <template #default="{ row }">{{ row.duration ? row.duration + 's' : '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button size="small" link type="primary" @click.stop="viewDetail(row)">
               {{ row.__type === 'web' ? '详情' : '详情' }}
@@ -238,27 +291,32 @@
             <el-button size="small" link type="danger" @click.stop="deleteExecution(row)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+            </el-table>
+          </div>
 
-      <!-- 分页 -->
-      <el-pagination
-        v-model:current-page="pagination.page"
-        :total="pagination.total"
-        :page-size="pagination.pageSize"
-        layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadExecutions"
-      />
+          <!-- 分页 -->
+          <el-pagination
+            v-model:current-page="pagination.page"
+            v-model:page-size="pagination.pageSize"
+            :total="pagination.total"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next, jumper"
+            class="page-pagination"
+            @current-change="loadExecutions"
+            @size-change="onSizeChange"
+          />
+        </template>
+      </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onActivated, onUnmounted, onDeactivated } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onUnmounted, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { executionAPI, webTestcaseAPI, perfAPI } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Monitor, Link, Loading, Odometer } from '@element-plus/icons-vue'
+import { Search, Monitor, Link, Loading, Odometer, Histogram } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
@@ -268,6 +326,15 @@ const rerunningIds = ref(new Set())  // 正在重跑中的记录 ID 集合（含
 const executions = ref([])
 const users = ref([])
 const selectedRows = ref([])
+
+// 页面统计指标
+const stats = computed(() => {
+  const total = executions.value.length
+  const running = executions.value.filter(e => e.status === 'running' || e.status === 'pending').length
+  const passed = executions.value.filter(e => e.status === 'passed' || e.status === 'completed').length
+  const failed = executions.value.filter(e => e.status === 'failed' || e.status === 'error').length
+  return { total, running, passed, failed }
+})
 
 let pollingTimer = null  // 自动轮询 timer，用于刷新 running 状态
 
@@ -294,6 +361,37 @@ const loadExecutions = async (silent = false) => {
   try {
     const execType = filters.execType
 
+    // 全部：并行加载三种执行记录，避免串行等待
+    if (!execType) {
+      const params = {
+        page: pagination.page,
+        page_size: pagination.pageSize,
+        ordering: '-started_at',
+      }
+      if (filters.search) params.search = filters.search
+      if (filters.status) params.status = filters.status
+      if (filters.started_by) params.started_by = filters.started_by
+
+      console.log('[ExecutionHistory] 并行加载全部执行记录，参数:', params)
+      const [apiRes, webItems, perfItems] = await Promise.all([
+        executionAPI.list(params),
+        _loadWebExecutions(params.page, params.page_size),
+        _loadPerfExecutions(params.page, params.page_size),
+      ])
+      console.log('[ExecutionHistory] API 返回:', apiRes)
+      const apiItems = (apiRes.results || []).map(item => ({ ...item, __type: 'api' }))
+      console.log('[ExecutionHistory] API items 数量:', apiItems.length)
+
+      const allItems = [...apiItems, ...webItems, ...perfItems].sort((a, b) => {
+        const ta = new Date(a.__type === 'web' ? a.executed_at : a.started_at).getTime()
+        const tb = new Date(b.__type === 'web' ? b.executed_at : b.started_at).getTime()
+        return tb - ta
+      })
+      executions.value = allItems.slice(0, pagination.pageSize)
+      pagination.total = (apiRes.count || 0) + webItems.length + perfItems.length
+      return
+    }
+
     // 只查性能测试执行记录
     if (execType === 'perf') {
       const perfItems = await _loadPerfExecutions()
@@ -303,7 +401,7 @@ const loadExecutions = async (silent = false) => {
     }
 
     // 只查 API 测试执行记录
-    if (execType === 'api' || !execType) {
+    if (execType === 'api') {
       const params = {
         page: pagination.page,
         page_size: pagination.pageSize,
@@ -319,21 +417,8 @@ const loadExecutions = async (silent = false) => {
       const apiItems = (apiRes.results || []).map(item => ({ ...item, __type: 'api' }))
       console.log('[ExecutionHistory] API items 数量:', apiItems.length)
 
-      if (!execType) {
-        // 全部：合并 Web + Perf 执行记录
-        const webItems = await _loadWebExecutions()
-        const perfItems = await _loadPerfExecutions()
-        const allItems = [...apiItems, ...webItems, ...perfItems].sort((a, b) => {
-          const ta = new Date(a.__type === 'web' ? a.executed_at : a.started_at).getTime()
-          const tb = new Date(b.__type === 'web' ? b.executed_at : b.started_at).getTime()
-          return tb - ta
-        })
-        executions.value = allItems.slice(0, pagination.pageSize)
-        pagination.total = (apiRes.count || 0) + webItems.length + perfItems.length
-      } else {
-        executions.value = apiItems
-        pagination.total = apiRes.count || apiItems.length
-      }
+      executions.value = apiItems
+      pagination.total = apiRes.count || apiItems.length
       return
     }
 
@@ -361,9 +446,9 @@ const loadExecutions = async (silent = false) => {
 }
 
 // 加载性能测试执行记录
-const _loadPerfExecutions = async () => {
+const _loadPerfExecutions = async (page = 1, pageSize = 10) => {
   try {
-    const params = { page: 1, page_size: 100, exclude_suite: true }
+    const params = { page, page_size: pageSize, exclude_suite: true }
     if (filters.status) params.status = filters.status
     if (filters.started_by) params.started_by = filters.started_by
     const res = await perfAPI.getExecutions(params)
@@ -398,11 +483,11 @@ const _loadPerfExecutions = async () => {
 }
 
 // 加载 Web 执行记录
-const _loadWebExecutions = async () => {
+const _loadWebExecutions = async (page = 1, pageSize = 10) => {
   try {
     const params = {
-      page: 1,
-      page_size: 100, // 先拉最近一批
+      page,
+      page_size: pageSize,
     }
     console.log('[ExecutionHistory] 正在加载 Web 执行记录...')
     const res = await webTestcaseAPI.allExecutions(params)
@@ -426,6 +511,11 @@ const _loadWebExecutions = async () => {
     console.error('[ExecutionHistory] Load web executions error:', e)
     return []
   }
+}
+
+const onSizeChange = () => {
+  pagination.page = 1
+  loadExecutions()
 }
 
 // 搜索
@@ -509,7 +599,7 @@ const batchDeleteExecutions = async () => {
 
 // 行点击
 const handleRowClick = (row) => {
-  viewDetail(row.id)
+  viewDetail(row)
 }
 
 // 重新执行
@@ -782,15 +872,348 @@ onUnmounted(() => {
 
 <style scoped>
 .execution-history-container {
+  padding: 20px;
+  flex: 1;
+  min-height: 0;
+  background: #f5f7fa;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.glass-card {
+  background: #ffffff !important;
+  border: 1px solid #e4e7ed !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+  color: #303133;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.glass-card :deep(.el-card__header) {
+  padding: 0 !important;
+  border-bottom: 1px solid #e4e7ed !important;
+  background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 100%);
+}
+
+.glass-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.page-hero {
+  padding: 24px 28px;
+}
+
+.hero-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #409eff 0%, #67b1ff 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.25);
+}
+
+.page-hero .page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 6px 0;
+  line-height: 1.3;
+}
+
+.page-hero .page-desc {
+  font-size: 14px;
+  color: #606266;
+  margin: 0;
+}
+
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-stats .stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 18px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #ebeef5;
+  min-width: 88px;
+}
+
+.hero-stats .stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #409eff;
+  line-height: 1.1;
+}
+
+.hero-stats .stat-value.running {
+  color: #909399;
+}
+
+.hero-stats .stat-value.passed {
+  color: #67c23a;
+}
+
+.hero-stats .stat-value.failed {
+  color: #f56c6c;
+}
+
+.hero-stats .stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.hero-stats .stat-divider {
+  width: 1px;
+  height: 32px;
+  background: #e4e7ed;
+}
+
+.page-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 20px;
+  background: #fafbfc;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.page-toolbar :deep(.el-form-item) {
+  margin-bottom: 12px;
+  margin-right: 16px;
+}
+
+.page-toolbar :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 500;
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+.table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.table-wrapper::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 4px;
+}
+
+.data-table {
+  width: auto;
+  min-width: 1400px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.data-table :deep(.el-table__header-wrapper th.el-table__cell) {
+  background-color: #fafbfc !important;
+  color: #606266;
+  font-weight: 600;
+  border-bottom: 1px solid #d9dce0;
+  white-space: nowrap;
+}
+
+.data-table :deep(.el-table__body-wrapper td.el-table__cell) {
+  border-bottom: 1px solid #eef0f4;
+  white-space: nowrap;
+}
+
+.data-table :deep(.el-table__body-wrapper tr.el-table__row:hover td.el-table__cell) {
+  background-color: #f5f7fa;
+}
+
+.data-table :deep(.el-loading-mask) {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(2px);
+}
+
+/* 隐藏 el-table 内部可能产生的滚动条 */
+.data-table :deep(.el-table__body-wrapper) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.data-table :deep(.el-table__body-wrapper::-webkit-scrollbar) {
+  display: none;
+}
+.data-table :deep(.el-table__header-wrapper) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.data-table :deep(.el-table__header-wrapper::-webkit-scrollbar) {
+  display: none;
+}
+
+.page-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 20px;
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: #606266;
+  font-size: 14px;
+}
+
+/* 每页条数选择框 */
+.page-pagination :deep(.el-pagination__sizes) {
+  margin: 0 12px;
+}
+
+.page-pagination :deep(.el-pagination__sizes .el-select .el-input__wrapper) {
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+  border-radius: 4px;
+  height: 30px;
+  padding: 0 8px;
+  line-height: 30px;
+}
+
+/* 翻页按钮和页码 */
+.page-pagination :deep(.btn-prev),
+.page-pagination :deep(.btn-next),
+.page-pagination :deep(.number) {
+  min-width: 30px;
+  height: 30px;
+  background: transparent;
+  color: #606266;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.page-pagination :deep(.number.active) {
+  color: #409eff;
+  background: transparent;
+  font-weight: 600;
+}
+
+.page-pagination :deep(.btn-prev.is-disabled),
+.page-pagination :deep(.btn-next.is-disabled) {
+  color: #c0c4cc;
+}
+
+/* 前往 X 页 */
+.page-pagination :deep(.el-pagination__jump) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  color: #606266;
+}
+
+.page-pagination :deep(.el-pagination__jump .el-input) {
+  width: 44px;
+  margin: 0;
+}
+
+.page-pagination :deep(.el-pagination__jump .el-input__wrapper) {
+  box-shadow: none;
+  border: none;
+  background: transparent;
   padding: 0;
 }
 
-.filter-card {
+.page-pagination :deep(.el-pagination__jump .el-input__inner) {
+  width: 44px;
+  height: 28px;
+  line-height: 28px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 0 4px;
+  text-align: center;
+  background: #fff;
+}
+
+.page-pagination :deep(.el-pagination__jump .el-input__inner:focus) {
+  border-color: #409eff;
+}
+
+.empty-state-glass {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 20px;
+  text-align: center;
+  background: #ffffff;
+  border: 1px dashed #dcdfe6;
+  border-radius: 12px;
+}
+
+.empty-state-glass .empty-icon-wrap {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #f0f7ff;
+  color: #409eff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 16px;
 }
 
-.filter-card :deep(.el-card__body) {
-  padding-bottom: 8px;
+.empty-state-glass .empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 8px 0;
+}
+
+.empty-state-glass .empty-desc {
+  font-size: 14px;
+  color: #909399;
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.6;
 }
 
 .result-badges {

@@ -16,7 +16,7 @@ $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LOG_DIR = Join-Path $ROOT "tmp\logs"
 $BACKEND_DIR = Join-Path (Join-Path $ROOT "agent-harness") "backend"
 $FRONTEND_DIR = Join-Path (Join-Path $ROOT "agent-harness") "frontend"
-$BACK_PORT = 8001
+$BACK_PORT = 8002
 $FRONT_PORT = 5174
 $ENV_FILE = Join-Path $ROOT ".env"
 
@@ -35,7 +35,7 @@ function Import-Env {
 
 function Stop-AllServices {
     $stopped = 0
-    foreach ($port in @($BACK_PORT, $FRONT_PORT)) {
+    foreach ($port in @(8001, $BACK_PORT, $FRONT_PORT)) {
         Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object {
             try {
                 $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
@@ -105,6 +105,12 @@ if (-not (Test-Path (Join-Path $FRONTEND_DIR "node_modules"))) {
     Push-Location $FRONTEND_DIR; & npm install; Pop-Location
 } else {
     Write-Host "  Frontend dependencies: OK"
+}
+
+$VITE_CACHE = Join-Path $FRONTEND_DIR "node_modules\.vite"
+if (Test-Path $VITE_CACHE) {
+    Write-Host "  Clearing Vite cache..." -ForegroundColor Gray
+    Remove-Item -Recurse -Force $VITE_CACHE -ErrorAction SilentlyContinue
 }
 
 Write-Host "[3/4] Starting services..." -ForegroundColor Yellow

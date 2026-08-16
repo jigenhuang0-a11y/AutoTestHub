@@ -106,6 +106,17 @@ export const testcaseAPI = {
   patch: (id, data) => api.patch(`/testcases/${id}/`, data),
   delete: (id) => api.delete(`/testcases/${id}/`),
   aiGenerate: (data) => api.post('/testcases/ai-generate/', data),
+  aiGenerateConversation: (data) => {
+    const token = localStorage.getItem('access_token')
+    return fetch(`${api.defaults.baseURL}/testcases/ai-generate-conversation/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    })
+  },
   aiParseInterface: (data) => api.post('/testcases/ai-parse-interface/', data),
   debug: (id, data) => api.post(`/testcases/${id}/debug/`, data),
   debugTemp: (data) => api.post('/testcases/debug-temp/', data),
@@ -134,6 +145,8 @@ export const executionAPI = {
 export const reportAPI = {
   list: async (params) => normalizeList(await api.get('/reports/', { params })),
   get: (id) => api.get(`/reports/${id}/`),
+  summary: () => api.get('/reports/summary/'),
+  health: (data) => api.post('/reports/health/', data),
 }
 
 // 测试套件API
@@ -381,6 +394,14 @@ export const environmentAPI = {
   create: (data) => api.post('/agent/environments/', data),
   update: (id, data) => api.put(`/agent/environments/${id}/`, data),
   delete: (id) => api.delete(`/agent/environments/${id}/`),
+}
+
+// 全链路评测中心 API（Langfuse 监控 + Judge LLM 幻觉率评分）
+export const evalCenterAPI = {
+  dashboard: (hours = 24) => api.get('/eval-center/dashboard', { params: { hours } }),
+  records: (params) => api.get('/eval-center/records', { params }),
+  judge: (data) => api.post('/eval-center/judge', data),
+  langfuseConfig: () => api.get('/eval-center/langfuse-config'),
 }
 
 // 多 Agent 团队编排 API（对接后端 /api/v1/team/team/tasks 任务生命周期）

@@ -39,14 +39,10 @@
             <div
               class="nav-group-title"
               :class="{ active: currentGroup === group.key }"
-              @click="toggleGroup(group.key)"
             >
               {{ group.title }}
-              <el-icon class="group-arrow" :class="{ 'is-expanded': isExpanded(group.key) }">
-                <ArrowDown />
-              </el-icon>
             </div>
-            <div v-show="isExpanded(group.key)" class="nav-group-items">
+            <div class="nav-group-items">
               <router-link
                 v-for="item in group.items"
                 :key="item.to"
@@ -85,11 +81,7 @@
           </div>
         </header>
         <main class="main-content">
-          <router-view v-slot="{ Component }">
-            <keep-alive include="DataFactory">
-              <component :is="Component" />
-            </keep-alive>
-          </router-view>
+          <router-view />
         </main>
       </div>
     </div>
@@ -104,7 +96,7 @@ import {
   HomeFilled, Setting, Collection, DataAnalysis, User, Coin,
   MagicStick, Connection, Monitor, Lightning, Briefcase, Timer, TrendCharts,
   Odometer, PieChart, Link,
-  Platform, Box, UserFilled, SetUp, SwitchButton, ArrowDown
+  Platform, Box, UserFilled, SetUp, SwitchButton
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -119,7 +111,7 @@ const iconMap = {
   HomeFilled, Setting, Collection, DataAnalysis, User, Coin,
   MagicStick, Connection, Monitor, Lightning, Briefcase, Timer, TrendCharts,
   Odometer, PieChart, Link,
-  Platform, Box, UserFilled, SetUp, SwitchButton, ArrowDown
+  Platform, Box, UserFilled, SetUp, SwitchButton
 }
 
 const menuGroups = [
@@ -139,7 +131,7 @@ const menuGroups = [
     key: 'test',
     title: 'AI 测试平台',
     items: [
-      { to: '/knowledge/chat', icon: 'Collection', label: '知识中枢' },
+      { to: '/knowledge/chat', icon: 'Collection', label: '测试知识库' },
       { to: '/eval-center', icon: 'DataAnalysis', label: '全链路评测中心' },
       { to: '/quality-checker', icon: 'User', label: '需求评审师' },
       { to: '/data-factory', icon: 'Coin', label: '数据工厂' },
@@ -180,20 +172,7 @@ const visibleGroups = computed(() => {
 })
 
 const currentGroup = computed(() => route.params?.group || route.meta?.group || null)
-const expandedGroups = ref(new Set())
 
-watch(currentGroup, (group) => {
-  if (group) expandedGroups.value.add(group)
-}, { immediate: true })
-
-const isExpanded = (key) => expandedGroups.value.has(key)
-const toggleGroup = (key) => {
-  if (expandedGroups.value.has(key)) {
-    expandedGroups.value.delete(key)
-  } else {
-    expandedGroups.value.add(key)
-  }
-}
 
 const isActive = (to) => {
   if (to === '/workbench') return route.path === '/workbench'
@@ -478,5 +457,7 @@ html, body, #app {
   min-height: 0;
   overflow: hidden;
   background: #1a2d45;
+  display: flex;
+  flex-direction: column;
 }
 </style>

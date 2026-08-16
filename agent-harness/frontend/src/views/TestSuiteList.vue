@@ -1,124 +1,152 @@
 <template>
   <div class="testsuite-container">
-    <!-- 页面标题区 -->
-    <div class="page-header">
-      <div class="header-left">
-        <div class="header-icon">
-          <el-icon><Connection /></el-icon>
-        </div>
-        <div class="header-content">
-          <h2 class="page-title">测试套件管理</h2>
-          <p class="page-desc">管理测试套件，批量组织和执行测试用例</p>
-        </div>
-      </div>
-      <div class="header-right">
-        <el-button type="primary" size="large" @click="showCreateDialog" class="create-btn">
-          <el-icon><Plus /></el-icon>
-          新建套件
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 内容卡片 -->
-    <el-card class="content-card" shadow="hover">
-
-      <!-- 搜索栏 -->
-      <el-form :inline="true" :model="searchForm" class="search-form">
-        <el-form-item label="搜索">
-          <el-input v-model="searchForm.search" placeholder="套件名称/描述" clearable />
-        </el-form-item>
-        <el-form-item label="用例数">
-          <el-select v-model="searchForm.casesCount" placeholder="全部" clearable style="width: 140px">
-            <el-option label="1-5个" value="1-5" />
-            <el-option label="6-10个" value="6-10" />
-            <el-option label="11-20个" value="11-20" />
-            <el-option label="20个以上" value="20+" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="创建时间">
-          <el-date-picker v-model="searchForm.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
-            end-placeholder="结束日期" style="width: 240px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="loadSuites">查询</el-button>
-          <el-button @click="resetSearch">重置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <!-- 空状态 -->
-      <EmptyState v-if="!loading && !suites.length" title="暂无测试套件" description="点击新建套件按钮创建第一个测试套件,将多个测试用例组合成集合批量执行">
-        <template #action>
-          <el-button type="primary" @click="showCreateDialog">新建套件</el-button>
-        </template>
-      </EmptyState>
-
-      <!-- 表格 -->
-      <el-table v-else-if="suites.length > 0" :data="suites" border stripe v-loading="loading" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="60" sortable />
-        <el-table-column prop="name" label="套件名称" min-width="200" sortable />
-        <el-table-column prop="description" label="描述" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="cases_count" label="用例数" width="90" align="center" sortable>
-          <template #default="{ row }">
-            <el-tag size="small" :type="getCasesCountType(row.cases_count)">{{ row.cases_count || 0 }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_execution_status" label="上次执行结果" width="110" sortable>
-          <template #default="{ row }">
-            <el-tag v-if="row.last_execution_status" :type="getExecutionStatusType(row.last_execution_status)"
-              size="small">
-              {{ getExecutionStatusText(row.last_execution_status) }}
-            </el-tag>
-            <span v-else class="no-execution-text">未执行</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="execution_count" label="执行次数" width="100" align="center" sortable>
-          <template #default="{ row }">
-            <span>{{ row.execution_count || 0 }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_by_username" label="创建者" width="100" />
-        <el-table-column label="定时状态" width="160" align="center">
-          <template #default="{ row }">
-            <!-- 有待执行的定时任务 -->
-            <div v-if="row.pending_schedule" class="schedule-status-cell">
-              <el-tag :type="row.pending_schedule.locked ? 'danger' : 'warning'" size="small"
-                effect="dark" class="schedule-tag">
-                <el-icon v-if="row.pending_schedule.locked" style="margin-right:2px;vertical-align:middle"><Lock /></el-icon>
-                {{ row.pending_schedule.locked ? '已锁定' : '未锁定' }}
-              </el-tag>
-              <div class="schedule-time-text">{{ formatScheduleTime(row.pending_schedule.scheduled_at) }}</div>
-              <div v-if="row.pending_schedule.started_by_username" class="schedule-owner">
-                设定人: {{ row.pending_schedule.started_by_username }}
+    <el-card class="glass-card" shadow="never">
+      <template #header>
+        <div class="page-hero">
+          <div class="hero-main">
+            <div class="hero-title">
+              <div class="hero-icon-wrap">
+                <el-icon :size="26"><Briefcase /></el-icon>
+              </div>
+              <div>
+                <h2 class="page-title">测试套件管理</h2>
+                <p class="page-desc">管理测试套件，批量组织和执行测试用例</p>
               </div>
             </div>
-            <span v-else class="no-schedule-text">未设定</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160" sortable>
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" :width="calcOpWidth()" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="success" style="min-width:62px" @click="executeSuite(row)" :loading="executingSuiteId === row.id" :disabled="hasPendingSchedule(row)">
-              {{ executingSuiteId === row.id ? '' : '执行' }}
+            <el-button type="primary" size="large" @click="showCreateDialog" class="create-btn">
+              <el-icon><Plus /></el-icon>
+              新建套件
             </el-button>
-            <el-button size="small" type="warning" @click="showScheduleDialog(row)">
-              <el-icon><AlarmClock /></el-icon>
-              定时执行
-            </el-button>
-            <el-button size="small" type="primary" @click="copySuite(row)">复制套件</el-button>
-            <el-button size="small" @click="editSuite(row)" :disabled="isLockedByOther(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="deleteSuite(row.id)" :disabled="isLockedByOther(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+          <div class="hero-stats" v-if="suites.length">
+            <div class="stat-item">
+              <span class="stat-value">{{ stats.total }}</span>
+              <span class="stat-label">套件总数</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value passed">{{ stats.passed }}</span>
+              <span class="stat-label">最近通过</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value failed">{{ stats.failed }}</span>
+              <span class="stat-label">最近失败</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value">{{ stats.scheduled }}</span>
+              <span class="stat-label">定时任务</span>
+            </div>
+          </div>
+        </div>
+      </template>
 
-      <!-- 分页 -->
-      <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize"
-        :total="pagination.total" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next, jumper"
-        style="margin-top: 20px; justify-content: flex-end" @size-change="loadSuites" @current-change="loadSuites" />
+      <div class="page-toolbar">
+        <el-form :inline="true" :model="searchForm" class="search-form">
+          <el-form-item label="搜索">
+            <el-input v-model="searchForm.search" placeholder="套件名称/描述" clearable />
+          </el-form-item>
+          <el-form-item label="用例数">
+            <el-select v-model="searchForm.casesCount" placeholder="全部" clearable style="width: 140px">
+              <el-option label="1-5个" value="1-5" />
+              <el-option label="6-10个" value="6-10" />
+              <el-option label="11-20个" value="11-20" />
+              <el-option label="20个以上" value="20+" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="创建时间">
+            <el-date-picker v-model="searchForm.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
+              end-placeholder="结束日期" style="width: 240px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="loadSuites">查询</el-button>
+            <el-button @click="resetSearch">重置</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="page-content" v-loading="loading" element-loading-text="加载中..." element-loading-background="rgba(255,255,255,0.85)">
+        <!-- 空状态 -->
+        <div v-if="!loading && !suites.length" class="empty-state-glass">
+          <div class="empty-icon-wrap">
+            <el-icon :size="42"><Briefcase /></el-icon>
+          </div>
+          <h3 class="empty-title">暂无测试套件</h3>
+          <p class="empty-desc">点击新建套件按钮创建第一个测试套件，将多个测试用例组合成集合批量执行</p>
+          <el-button type="primary" @click="showCreateDialog">新建套件</el-button>
+        </div>
+
+        <!-- 表格 -->
+        <template v-if="suites.length">
+          <el-table :data="suites" border stripe class="data-table" style="width: 100%">
+            <el-table-column prop="id" label="ID" width="60" sortable />
+            <el-table-column prop="name" label="套件名称" min-width="200" sortable />
+            <el-table-column prop="description" label="描述" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="cases_count" label="用例数" width="90" align="center" sortable>
+              <template #default="{ row }">
+                <el-tag size="small" :type="getCasesCountType(row.cases_count)">{{ row.cases_count || 0 }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_execution_status" label="上次执行结果" width="110" sortable>
+              <template #default="{ row }">
+                <el-tag v-if="row.last_execution_status" :type="getExecutionStatusType(row.last_execution_status)"
+                  size="small">
+                  {{ getExecutionStatusText(row.last_execution_status) }}
+                </el-tag>
+                <span v-else class="no-execution-text">未执行</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="execution_count" label="执行次数" width="100" align="center" sortable>
+              <template #default="{ row }">
+                <span>{{ row.execution_count || 0 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_by_username" label="创建者" width="100" />
+            <el-table-column label="定时状态" width="160" align="center">
+              <template #default="{ row }">
+                <!-- 有待执行的定时任务 -->
+                <div v-if="row.pending_schedule" class="schedule-status-cell">
+                  <el-tag :type="row.pending_schedule.locked ? 'danger' : 'warning'" size="small"
+                    effect="dark" class="schedule-tag">
+                    <el-icon v-if="row.pending_schedule.locked" style="margin-right:2px;vertical-align:middle"><Lock /></el-icon>
+                    {{ row.pending_schedule.locked ? '已锁定' : '未锁定' }}
+                  </el-tag>
+                  <div class="schedule-time-text">{{ formatScheduleTime(row.pending_schedule.scheduled_at) }}</div>
+                  <div v-if="row.pending_schedule.started_by_username" class="schedule-owner">
+                    设定人: {{ row.pending_schedule.started_by_username }}
+                  </div>
+                </div>
+                <span v-else class="no-schedule-text">未设定</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" width="160" sortable>
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" :width="calcOpWidth()" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="success" style="min-width:62px" @click="executeSuite(row)" :loading="executingSuiteId === row.id" :disabled="hasPendingSchedule(row)">
+                  {{ executingSuiteId === row.id ? '' : '执行' }}
+                </el-button>
+                <el-button size="small" type="warning" @click="showScheduleDialog(row)">
+                  <el-icon><AlarmClock /></el-icon>
+                  定时执行
+                </el-button>
+                <el-button size="small" type="primary" @click="copySuite(row)">复制套件</el-button>
+                <el-button size="small" @click="editSuite(row)" :disabled="isLockedByOther(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteSuite(row.id)" :disabled="isLockedByOther(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <!-- 分页 -->
+          <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize"
+            :total="pagination.total" :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next, jumper"
+            class="page-pagination" @size-change="loadSuites" @current-change="loadSuites" />
+        </template>
+      </div>
     </el-card>
 
     <!-- 创建/编辑对话框 - 三栏布局 -->
@@ -685,9 +713,8 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useRouter } from 'vue-router'
 import { testsuiteAPI, testcaseAPI, webTestcaseAPI, perfAPI, authAPI, executionAPI } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import EmptyState from '@/components/EmptyState.vue'
 import { showDeleteConfirm, showSuccess } from '@/utils/helpers'
-import { Plus, Delete, VideoPlay, Search, Rank, MagicStick, Close, ArrowDown, DArrowRight, Refresh, Check, CaretRight, Connection, CopyDocument, Edit, DataAnalysis, CircleCheck, CircleClose, AlarmClock, InfoFilled, Lock } from '@element-plus/icons-vue'
+import { Plus, Delete, VideoPlay, Search, Rank, MagicStick, Close, ArrowDown, DArrowRight, Refresh, Check, CaretRight, Connection, CopyDocument, Edit, DataAnalysis, CircleCheck, CircleClose, AlarmClock, InfoFilled, Lock, Briefcase } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 
 const router = useRouter()
@@ -695,7 +722,16 @@ const loading = ref(false)
 const executingSuiteId = ref(null)  // 正在执行的套件ID，用于loading状态
 const suites = ref([])
 
-// 自动刷新定时器
+// 页面统计指标
+const stats = computed(() => {
+  const total = suites.value.length
+  const passed = suites.value.filter(s => s.last_execution_status === 'passed' || s.last_execution_status === 'completed').length
+  const failed = suites.value.filter(s => s.last_execution_status === 'failed').length
+  const scheduled = suites.value.filter(s => s.pending_schedule).length
+  return { total, passed, failed, scheduled }
+})
+
+// 自动刷新定时器（仅在有进行中/待执行套件时轮询，避免无意义刷新闪烁）
 let refreshTimer = null
 const AUTO_REFRESH_INTERVAL = 30  // 秒
 
@@ -899,33 +935,35 @@ const formRules = {
 }
 
 // 加载套件数据
-const loadSuites = async () => {
+const loadSuites = async (silent = false) => {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
     const params = {
       search: searchForm.search || undefined,
       page: pagination.page,
       page_size: pagination.pageSize,
     }
-    
+
     // 处理用例数筛选
     if (searchForm.casesCount) {
       params.cases_count = searchForm.casesCount
     }
-    
+
     // 处理日期范围筛选
     if (searchForm.dateRange && searchForm.dateRange.length === 2) {
       params.start_date = searchForm.dateRange[0]
       params.end_date = searchForm.dateRange[1]
     }
-    
+
     const res = await testsuiteAPI.list(params)
     suites.value = res.results || res
-    pagination.total = res.count || suites.value.length
+    pagination.total = res.total
   } catch (error) {
     console.error('Load suites error:', error)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
+    // 根据是否有运行中间态决定是否持续轮询
+    startAutoRefreshIfNeeded()
   }
 }
 
@@ -2020,12 +2058,21 @@ onMounted(async () => {
     currentUserId.value = profile.id
   } catch (e) { /* ignore */ }
   loadSuites()
-
-  // 启动自动刷新定时器（每30秒刷新一次列表，用于更新定时任务状态等）
-  refreshTimer = setInterval(() => {
-    loadSuites()
-  }, AUTO_REFRESH_INTERVAL * 1000)
+  startAutoRefreshIfNeeded()
 })
+
+// 仅当存在 running/pending 套件时才启动轮询，避免空列表无谓刷新
+const startAutoRefreshIfNeeded = () => {
+  const hasRunning = suites.value.some(s => s.last_execution_status === 'running' || s.last_execution_status === 'pending')
+  if (hasRunning && !refreshTimer) {
+    refreshTimer = setInterval(() => {
+      loadSuites(true)  // silent：不触发 loading 闪烁
+    }, AUTO_REFRESH_INTERVAL * 1000)
+  } else if (!hasRunning && refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
 
 onUnmounted(() => {
   if (refreshTimer) {
@@ -2037,11 +2084,14 @@ onUnmounted(() => {
 
 <style scoped>
 .testsuite-container {
-  padding: 0;
+  padding: 20px;
+  min-height: calc(100vh - 84px);
+  background: #f5f7fa;
+  box-sizing: border-box;
 }
 
 .search-form {
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 /* 描述文本 */
@@ -2957,6 +3007,204 @@ onUnmounted(() => {
   color: #303133;
   font-weight: 500;
   font-size: 12px;
+}
+
+/* ========== 明亮风格页面样式 ========== */
+.glass-card {
+  background: #ffffff !important;
+  border: 1px solid #e4e7ed !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+  color: #303133;
+}
+
+.glass-card :deep(.el-card__header) {
+  padding: 0 !important;
+  border-bottom: 1px solid #e4e7ed !important;
+  background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 100%);
+}
+
+.page-hero {
+  padding: 24px 28px;
+}
+
+.hero-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #409eff 0%, #67b1ff 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.25);
+}
+
+.page-hero .page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 6px 0;
+  line-height: 1.3;
+}
+
+.page-hero .page-desc {
+  font-size: 14px;
+  color: #606266;
+  margin: 0;
+}
+
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-stats .stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 18px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #ebeef5;
+  min-width: 88px;
+}
+
+.hero-stats .stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #409eff;
+  line-height: 1.1;
+}
+
+.hero-stats .stat-value.passed {
+  color: #67c23a;
+}
+
+.hero-stats .stat-value.failed {
+  color: #f56c6c;
+}
+
+.hero-stats .stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.hero-stats .stat-divider {
+  width: 1px;
+  height: 32px;
+  background: #e4e7ed;
+}
+
+.page-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 20px;
+  background: #fafbfc;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.page-toolbar :deep(.el-form-item) {
+  margin-bottom: 0;
+  margin-right: 16px;
+}
+
+.page-toolbar :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 500;
+}
+
+.page-content {
+  min-height: 320px;
+}
+
+.data-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.data-table :deep(.el-loading-mask) {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(2px);
+}
+
+.page-pagination {
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
+.empty-state-glass {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 20px;
+  text-align: center;
+  background: #ffffff;
+  border: 1px dashed #dcdfe6;
+  border-radius: 12px;
+}
+
+.empty-state-glass .empty-icon-wrap {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #f0f7ff;
+  color: #409eff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.empty-state-glass .empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 8px 0;
+}
+
+.empty-state-glass .empty-desc {
+  font-size: 14px;
+  color: #909399;
+  margin: 0 0 20px 0;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.hero-main .create-btn {
+  background: #409eff;
+  color: #fff;
+  border: none;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 0 20px;
+}
+
+.hero-main .create-btn:hover {
+  background: #66b1ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.25);
 }
 
 </style>

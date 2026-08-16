@@ -82,7 +82,7 @@ async def list_executions(
     store = get_task_store()
     rows, total = store.list_executions(
         page=page, page_size=page_size, status=status or None)
-    return {"items": [r.to_dict() for r in rows], "total": total,
+    return {"items": rows, "total": total,
             "page": page, "page_size": page_size}
 
 

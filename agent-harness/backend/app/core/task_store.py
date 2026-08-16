@@ -383,6 +383,205 @@ class DatasetRecord:
 
 
 @dataclass
+class TestSuiteRecord:
+    """测试套件记录"""
+    id: Optional[int] = None
+    suite_id: str = ""
+    name: str = ""
+    description: str = ""
+    project: str = ""
+    module: str = ""
+    case_count: int = 0
+    last_execution_status: str = ""   # passed / failed / running / pending / ""
+    last_execution_at: str = ""
+    schedule_enabled: bool = False
+    schedule_cron: str = ""
+    tags: list = field(default_factory=list)
+    creator: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "suite_id": self.suite_id,
+            "name": self.name,
+            "description": self.description,
+            "project": self.project,
+            "module": self.module,
+            "case_count": self.case_count,
+            "last_execution_status": self.last_execution_status,
+            "last_execution_at": self.last_execution_at,
+            "schedule_enabled": self.schedule_enabled,
+            "schedule_cron": self.schedule_cron,
+            "tags": self.tags,
+            "creator": self.creator,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class TestcaseRecord:
+    """接口测试用例记录"""
+    id: Optional[int] = None
+    case_id: str = ""
+    project: str = ""
+    module: str = ""
+    title: str = ""
+    description: str = ""
+    method: str = "GET"
+    api_endpoint: str = ""
+    priority: str = "P2"
+    status: str = "draft"            # draft / active / disabled
+    tags: list = field(default_factory=list)
+    creator: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "case_id": self.case_id,
+            "project": self.project,
+            "module": self.module,
+            "title": self.title,
+            "description": self.description,
+            "method": self.method,
+            "api_endpoint": self.api_endpoint,
+            "priority": self.priority,
+            "status": self.status,
+            "tags": self.tags,
+            "creator": self.creator,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class PerfPlanRecord:
+    """性能测试计划记录"""
+    id: Optional[int] = None
+    plan_id: str = ""
+    name: str = ""
+    description: str = ""
+    target_url: str = ""
+    engine: str = "locust"           # locust / jmeter / k6
+    concurrency: int = 0
+    duration: int = 0
+    ramp_up: int = 0
+    status: str = "draft"            # draft / active / running / completed / failed
+    created_by: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "plan_id": self.plan_id,
+            "name": self.name,
+            "description": self.description,
+            "target_url": self.target_url,
+            "engine": self.engine,
+            "concurrency": self.concurrency,
+            "duration": self.duration,
+            "ramp_up": self.ramp_up,
+            "status": self.status,
+            "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class WebExecutionRecord:
+    """Web/UI 自动化执行记录"""
+    id: Optional[int] = None
+    exec_id: str = ""
+    test_case: str = ""
+    test_case_title: str = ""
+    status: str = "passed"        # passed / failed / error / running / pending
+    executed_at: str = ""
+    executed_by: str = ""
+    executed_by_username: str = ""
+    duration_ms: int = 0
+    screenshot: str = ""
+    error_message: str = ""
+    steps_total: int = 0
+    steps_passed: int = 0
+    created_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "exec_id": self.exec_id,
+            "test_case": self.test_case,
+            "test_case_title": self.test_case_title,
+            "status": self.status,
+            "executed_at": self.executed_at,
+            "executed_by": self.executed_by,
+            "executed_by_username": self.executed_by_username,
+            "duration_ms": self.duration_ms,
+            "screenshot": self.screenshot,
+            "error_message": self.error_message,
+            "steps_total": self.steps_total,
+            "steps_passed": self.steps_passed,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
+class PerfExecutionRecord:
+    """性能测试执行记录"""
+    id: Optional[int] = None
+    exec_id: str = ""
+    test_case: str = ""
+    test_case_name: str = ""
+    status: str = "completed"     # completed / running / failed / stopped / pending
+    started_at: str = ""
+    started_by: str = ""
+    started_by_name: str = ""
+    duration: int = 0
+    total_requests: int = 0
+    failures: int = 0
+    requests_per_second: float = 0.0
+    avg_response_time: float = 0.0
+    p95_response_time: float = 0.0
+    error_rate: float = 0.0
+    engine: str = "locust"
+    exec_summary: str = ""
+    created_at: str = ""
+
+    def to_dict(self):
+        summary = {}
+        if self.exec_summary:
+            try:
+                summary = json.loads(self.exec_summary)
+            except (json.JSONDecodeError, TypeError):
+                summary = {}
+        return {
+            "id": self.id,
+            "exec_id": self.exec_id,
+            "test_case": self.test_case,
+            "test_case_name": self.test_case_name,
+            "status": self.status,
+            "started_at": self.started_at,
+            "started_by": self.started_by,
+            "started_by_name": self.started_by_name,
+            "duration": self.duration,
+            "total_requests": self.total_requests,
+            "failures": self.failures,
+            "requests_per_second": self.requests_per_second,
+            "avg_response_time": self.avg_response_time,
+            "p95_response_time": self.p95_response_time,
+            "error_rate": self.error_rate,
+            "engine": self.engine,
+            "exec_summary": summary,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class TemplateRecord:
     """数据工厂 - 模板记录"""
     id: Optional[int] = None
@@ -530,6 +729,41 @@ class TaskStore:
                     input_schema TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT ''
                 );
+
+                -- 测试执行记录表（报告页数据源）
+                CREATE TABLE IF NOT EXISTS executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    exec_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    total_cases INTEGER NOT NULL DEFAULT 0,
+                    passed_cases INTEGER NOT NULL DEFAULT 0,
+                    failed_cases INTEGER NOT NULL DEFAULT 0,
+                    skipped_cases INTEGER NOT NULL DEFAULT 0,
+                    duration REAL NOT NULL DEFAULT 0,
+                    trigger_type TEXT NOT NULL DEFAULT 'manual',
+                    summary TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_executions_exec_id ON executions(exec_id);
+                CREATE INDEX IF NOT EXISTS idx_executions_created ON executions(created_at DESC);
+
+                -- 测试执行明细表
+                CREATE TABLE IF NOT EXISTS execution_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    exec_id TEXT NOT NULL,
+                    case_id TEXT NOT NULL DEFAULT '',
+                    case_title TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    response_body TEXT NOT NULL DEFAULT '',
+                    assertions TEXT NOT NULL DEFAULT '[]',
+                    extracted_vars TEXT NOT NULL DEFAULT '{}',
+                    error_message TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_execution_results_exec_id ON execution_results(exec_id);
 
                 -- 索引
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -692,11 +926,146 @@ class TaskStore:
                     updated_at TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_datafactory_templates_created ON datafactory_templates(created_at DESC);
+
+                -- 测试套件表
+                CREATE TABLE IF NOT EXISTS testsuites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    suite_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    project TEXT NOT NULL DEFAULT '',
+                    module TEXT NOT NULL DEFAULT '',
+                    case_count INTEGER NOT NULL DEFAULT 0,
+                    last_execution_status TEXT NOT NULL DEFAULT '',
+                    last_execution_at TEXT NOT NULL DEFAULT '',
+                    schedule_enabled INTEGER NOT NULL DEFAULT 0,
+                    schedule_cron TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    creator TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                -- 接口测试用例表
+                CREATE TABLE IF NOT EXISTS testcases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id TEXT NOT NULL UNIQUE,
+                    project TEXT NOT NULL DEFAULT '',
+                    module TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    method TEXT NOT NULL DEFAULT 'GET',
+                    api_endpoint TEXT NOT NULL DEFAULT '',
+                    priority TEXT NOT NULL DEFAULT 'P2',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    creator TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+
+                -- 性能测试计划表
+                CREATE TABLE IF NOT EXISTS perf_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plan_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    target_url TEXT NOT NULL DEFAULT '',
+                    engine TEXT NOT NULL DEFAULT 'locust',
+                    concurrency INTEGER NOT NULL DEFAULT 0,
+                    duration INTEGER NOT NULL DEFAULT 0,
+                    ramp_up INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+
+                -- Web/UI 自动化执行记录表
+                CREATE TABLE IF NOT EXISTS web_executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    exec_id TEXT NOT NULL UNIQUE,
+                    test_case TEXT NOT NULL DEFAULT '',
+                    test_case_title TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'passed',
+                    executed_at TEXT NOT NULL DEFAULT '',
+                    executed_by TEXT NOT NULL DEFAULT '',
+                    executed_by_username TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    screenshot TEXT NOT NULL DEFAULT '',
+                    error_message TEXT NOT NULL DEFAULT '',
+                    steps_total INTEGER NOT NULL DEFAULT 0,
+                    steps_passed INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT ''
+                );
+
+                -- 性能测试执行记录表
+                CREATE TABLE IF NOT EXISTS perf_executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    exec_id TEXT NOT NULL UNIQUE,
+                    test_case TEXT NOT NULL DEFAULT '',
+                    test_case_name TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    started_at TEXT NOT NULL DEFAULT '',
+                    started_by TEXT NOT NULL DEFAULT '',
+                    started_by_name TEXT NOT NULL DEFAULT '',
+                    duration INTEGER NOT NULL DEFAULT 0,
+                    total_requests INTEGER NOT NULL DEFAULT 0,
+                    failures INTEGER NOT NULL DEFAULT 0,
+                    requests_per_second REAL NOT NULL DEFAULT 0,
+                    avg_response_time REAL NOT NULL DEFAULT 0,
+                    p95_response_time REAL NOT NULL DEFAULT 0,
+                    error_rate REAL NOT NULL DEFAULT 0,
+                    engine TEXT NOT NULL DEFAULT 'locust',
+                    exec_summary TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT ''
+                );
             """)
             conn.commit()
 
             # 迁移：为已存在的旧表补充 status / error 列（旧 schema 可能缺少）
             self._migrate_datafactory_columns(conn)
+            # 迁移：测试管理三表补充新列（演示库可能用旧 schema）
+            self._migrate_test_mgmt_columns(conn)
+
+    def _migrate_test_mgmt_columns(self, conn):
+        """兼容旧 schema：为 testsuites / testcases / perf_plans 补齐新列。"""
+        try:
+            # testsuites：旧表有 suite_id/created_by，缺 module/case_count/状态/调度列
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(testsuites)").fetchall()}
+            for col, ddl in [
+                ("module", "TEXT NOT NULL DEFAULT ''"),
+                ("case_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("last_execution_status", "TEXT NOT NULL DEFAULT ''"),
+                ("last_execution_at", "TEXT NOT NULL DEFAULT ''"),
+                ("schedule_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("schedule_cron", "TEXT NOT NULL DEFAULT ''"),
+                ("creator", "TEXT NOT NULL DEFAULT ''"),
+            ]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE testsuites ADD COLUMN {col} {ddl}")
+            if "creator" not in cols and "created_by" in cols:
+                conn.execute("UPDATE testsuites SET creator = created_by WHERE creator = ''")
+
+            # testcases：旧表用 tc_id，新代码用 case_id
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(testcases)").fetchall()}
+            if "case_id" not in cols and "tc_id" in cols:
+                conn.execute("ALTER TABLE testcases ADD COLUMN case_id TEXT NOT NULL DEFAULT ''")
+                conn.execute("UPDATE testcases SET case_id = tc_id WHERE case_id = ''")
+
+            # perf_plans：旧表用 pp_id/scenario/creator，新代码用 plan_id/engine/created_by
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(perf_plans)").fetchall()}
+            if "plan_id" not in cols and "pp_id" in cols:
+                conn.execute("ALTER TABLE perf_plans ADD COLUMN plan_id TEXT NOT NULL DEFAULT ''")
+                conn.execute("UPDATE perf_plans SET plan_id = pp_id WHERE plan_id = ''")
+            for col, ddl in [("engine", "TEXT NOT NULL DEFAULT 'locust'"),
+                             ("created_by", "TEXT NOT NULL DEFAULT ''")]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE perf_plans ADD COLUMN {col} {ddl}")
+            if "created_by" not in cols and "creator" in cols:
+                conn.execute("UPDATE perf_plans SET created_by = creator WHERE created_by = ''")
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[TaskStore] 迁移测试管理表列失败: {e}")
 
     def _migrate_datafactory_columns(self, conn):
         """若 datafactory_datasets 表缺少 status/error 列，则 ALTER 补齐。"""
@@ -887,6 +1256,171 @@ class TaskStore:
                 )
                 conn.commit()
                 logger.info("[TaskStore] 已写入 3 条种子 Webhook 配置")
+
+            # 种子测试套件 / 接口用例 / 性能计划
+            self._seed_test_mgmt(conn, now)
+
+    def _seed_test_mgmt(self, conn, now: str):
+        """为测试管理三页写入演示数据（首次启动、表为空时）"""
+        # 测试套件
+        if conn.execute("SELECT COUNT(*) FROM testsuites").fetchone()[0] == 0:
+            suite_rows = [
+                ("suite-1001", "用户中心回归套件", "覆盖登录/注册/个人中心的回归用例集", "用户中心", "account",
+                 28, "passed", "2026-08-12 09:30", 1, "0 9 * * 1", '["回归","P1"]', "张三", now, now),
+                ("suite-1002", "支付链路冒烟套件", "支付下单到回调的核心冒烟", "支付", "pay",
+                 15, "failed", "2026-08-12 14:05", 0, "", '["冒烟","P0"]', "李四", now, now),
+                ("suite-1003", "商品搜索性能套件", "搜索接口稳定性与性能", "商品", "search",
+                 12, "running", "2026-08-13 08:50", 1, "0 */2 * * *", '["性能"]', "王五", now, now),
+                ("suite-1004", "订单履约 E2E", "下单→履约→发货全链路", "订单", "order",
+                 34, "passed", "2026-08-11 19:20", 0, "", '["E2E","P1"]', "张三", now, now),
+                ("suite-1005", "风控规则回归", "风控拦截与放行规则", "风控", "risk",
+                 9, "", "", 0, "", '["回归"]', "赵六", now, now),
+                ("suite-1006", "消息推送套件", "站内信/短信/推送通道", "消息", "notify",
+                 7, "passed", "2026-08-10 16:40", 1, "30 1 * * *", '["P2"]', "李四", now, now),
+            ]
+            conn.executemany(
+                """INSERT INTO testsuites
+                (suite_id, name, description, project, module, case_count, last_execution_status,
+                 last_execution_at, schedule_enabled, schedule_cron, tags, creator, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                suite_rows,
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(suite_rows)} 条种子测试套件")
+
+        # 接口测试用例
+        if conn.execute("SELECT COUNT(*) FROM testcases").fetchone()[0] == 0:
+            methods = ["GET", "POST", "PUT", "DELETE", "POST", "GET"]
+            projects = ["用户中心", "支付", "商品", "订单", "风控", "消息"]
+            modules = ["account", "pay", "search", "order", "risk", "notify"]
+            titles = [
+                "获取用户基本信息", "创建支付订单", "更新商品库存", "删除过期订单",
+                "提交风控审核", "查询推送记录",
+            ]
+            eps = [
+                "/api/v1/user/info", "/api/v1/pay/order", "/api/v1/product/stock",
+                "/api/v1/order/expire", "/api/v1/risk/review", "/api/v1/notify/log",
+            ]
+            statuses = ["active", "active", "draft", "active", "disabled", "active"]
+            priorities = ["P1", "P0", "P2", "P1", "P1", "P2"]
+            case_rows = [
+                (f"case-200{i + 1}", projects[i], modules[i], titles[i], "演示接口用例",
+                 methods[i], eps[i], priorities[i], statuses[i], '["demo"]', "张三", now, now)
+                for i in range(6)
+            ]
+            # 兼容旧表（可能用 tc_id 而非 case_id）
+            tc_cols = {r[1] for r in conn.execute("PRAGMA table_info(testcases)").fetchall()}
+            if "tc_id" in tc_cols:
+                # 旧表同时存在 tc_id（NOT NULL）与新增 case_id，两者都填
+                conn.executemany(
+                    """INSERT INTO testcases
+                    (tc_id, case_id, project, module, title, description, method, api_endpoint, priority, status, tags, creator, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    [(r[0], r[0], *r[1:]) for r in case_rows],
+                )
+            else:
+                conn.executemany(
+                    """INSERT INTO testcases
+                    (case_id, project, module, title, description, method, api_endpoint, priority, status, tags, creator, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    case_rows,
+                )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(case_rows)} 条种子接口用例")
+
+        # 性能测试计划
+        if conn.execute("SELECT COUNT(*) FROM perf_plans").fetchone()[0] == 0:
+            plan_rows = [
+                ("plan-3001", "登录接口基准压测", "模拟峰值登录 QPS", "https://api.example.com/api/v1/user/login",
+                 "locust", 200, 300, 30, "completed", "张三", now, now),
+                ("plan-3002", "下单链路容量测试", "阶梯加压到上限", "https://api.example.com/api/v1/order/create",
+                 "jmeter", 500, 600, 60, "running", "李四", now, now),
+                ("plan-3003", "搜索接口稳定性", "长时间稳定性压测", "https://api.example.com/api/v1/search",
+                 "k6", 100, 1800, 10, "draft", "王五", now, now),
+            ]
+            # 兼容旧表（可能用 pp_id 而非 plan_id）
+            pp_cols = {r[1] for r in conn.execute("PRAGMA table_info(perf_plans)").fetchall()}
+            if "pp_id" in pp_cols:
+                # 旧表同时存在 pp_id（NOT NULL）与新增 plan_id，两者都填
+                conn.executemany(
+                    """INSERT INTO perf_plans
+                    (pp_id, plan_id, name, description, target_url, engine, concurrency, duration, ramp_up, status, created_by, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    [(r[0], r[0], *r[1:]) for r in plan_rows],
+                )
+            else:
+                conn.executemany(
+                    """INSERT INTO perf_plans
+                    (plan_id, name, description, target_url, engine, concurrency, duration, ramp_up, status, created_by, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    plan_rows,
+                )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(plan_rows)} 条种子性能计划")
+
+        # 种子 Web/UI 自动化执行记录（独立于套件/用例/计划，表空即补）
+        if conn.execute("SELECT COUNT(*) FROM web_executions").fetchone()[0] == 0:
+            base = datetime.now(timezone.utc)
+            web_rows = [
+                ("web-exec-0001", "1001", "登录页_正确账号登录",
+                 "passed", (base - timedelta(hours=2)).isoformat(),
+                 "admin", "张伟", 4200, "login_pass.png", "", 5, 5),
+                ("web-exec-0002", "1002", "购物车_添加商品",
+                 "failed", (base - timedelta(hours=5)).isoformat(),
+                 "admin", "张伟", 6800, "cart_fail.png", "元素定位超时: .add-to-cart-btn", 6, 4),
+                ("web-exec-0003", "1003", "订单结算_优惠券抵扣",
+                 "passed", (base - timedelta(days=1, hours=3)).isoformat(),
+                 "tester01", "李娜", 5100, "checkout_pass.png", "", 7, 7),
+                ("web-exec-0004", "1004", "个人中心_修改头像",
+                 "error", (base - timedelta(days=1, hours=8)).isoformat(),
+                 "tester01", "李娜", 2300, "", "上传接口 500 错误", 4, 2),
+                ("web-exec-0005", "1005", "搜索_关键词联想",
+                 "passed", (base - timedelta(days=2, hours=1)).isoformat(),
+                 "admin", "张伟", 3900, "search_pass.png", "", 5, 5),
+            ]
+            conn.executemany(
+                """INSERT INTO web_executions
+                (exec_id, test_case, test_case_title, status, executed_at,
+                 executed_by, executed_by_username, duration_ms, screenshot,
+                 error_message, steps_total, steps_passed, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [(r + (base.isoformat(),)) for r in web_rows],
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(web_rows)} 条种子 Web 执行记录")
+
+        # 种子性能测试执行记录
+        if conn.execute("SELECT COUNT(*) FROM perf_executions").fetchone()[0] == 0:
+            base = datetime.now(timezone.utc)
+            perf_rows = [
+                ("perf-exec-0001", "perf-1", "登录接口基准测试",
+                 "completed", (base - timedelta(hours=1)).isoformat(),
+                 "admin", "张伟", 300, 15000, 45, 498.3, 212.5, 380.0, 0.003, "locust",
+                 '{"score": 92, "summary": "登录接口在 300 并发下平均响应 212ms，满足 SLA。"}'),
+                ("perf-exec-0002", "perf-2", "商品列表查询压测",
+                 "completed", (base - timedelta(hours=4)).isoformat(),
+                 "tester01", "李娜", 600, 42000, 320, 690.1, 540.8, 1180.0, 0.0076, "locust",
+                 '{"score": 81, "summary": "商品列表在 600 并发下 P95 达 1.18s，需优化索引。"}'),
+                ("perf-exec-0003", "perf-3", "下单链路全链路压测",
+                 "failed", (base - timedelta(days=1, hours=2)).isoformat(),
+                 "admin", "张伟", 300, 8800, 1240, 112.4, 1850.0, 3200.0, 0.141, "locust",
+                 '{"score": 35, "summary": "下单链路口碑熔断，错误率 14%，数据库成为瓶颈。"}'),
+                ("perf-exec-0004", "perf-4", "首页静态资源加载",
+                 "completed", (base - timedelta(days=2, hours=6)).isoformat(),
+                 "tester01", "李娜", 120, 96000, 60, 800.0, 95.2, 210.0, 0.0006, "locust",
+                 '{"score": 95, "summary": "首页 CDN 命中率高，120 并发下响应极快。"}'),
+            ]
+            conn.executemany(
+                """INSERT INTO perf_executions
+                (exec_id, test_case, test_case_name, status, started_at,
+                 started_by, started_by_name, duration, total_requests, failures,
+                 requests_per_second, avg_response_time, p95_response_time, error_rate,
+                 engine, exec_summary, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [(r + (base.isoformat(),)) for r in perf_rows],
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(perf_rows)} 条种子性能执行记录")
 
     @staticmethod
     def _build_sample_tasks() -> dict:
@@ -2322,6 +2856,207 @@ class TaskStore:
                 conn.commit()
                 return cursor.rowcount > 0
 
+    # ============================================================
+    # 测试管理列表：真实 SQLite 分页查询
+    # ============================================================
+    def _paginate(self, rows: list, page: int, page_size: int):
+        total = len(rows)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return rows[start:end], total
+
+    @staticmethod
+    def _row_to_record(row, record_cls):
+        """把 sqlite Row 按 dataclass 字段过滤后构造记录，忽略多余列。"""
+        fields = {f for f in record_cls.__dataclass_fields__}
+        return record_cls(**{k: v for k, v in dict(row).items() if k in fields})
+
+    def list_testsuites(self, keyword=None, project=None, module=None, status=None,
+                        page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM testsuites WHERE 1=1"
+                params = []
+                if project:
+                    sql += " AND project = ?"; params.append(project)
+                if module:
+                    sql += " AND module = ?"; params.append(module)
+                if status:
+                    sql += " AND last_execution_status = ?"; params.append(status)
+                if keyword:
+                    sql += " AND (name LIKE ? OR description LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY created_at DESC"
+                rows = [self._row_to_record(r, TestSuiteRecord) for r in conn.execute(sql, params).fetchall()]
+                page_rows, total = self._paginate(rows, page, page_size)
+                return page_rows, total
+
+    def list_testcases(self, project=None, module=None, status=None, priority=None,
+                       keyword=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM testcases WHERE 1=1"
+                params = []
+                if project:
+                    sql += " AND project = ?"; params.append(project)
+                if module:
+                    sql += " AND module = ?"; params.append(module)
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if priority:
+                    sql += " AND priority = ?"; params.append(priority)
+                if keyword:
+                    sql += " AND (title LIKE ? OR api_endpoint LIKE ? OR description LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY created_at DESC"
+                rows = [self._row_to_record(r, TestcaseRecord) for r in conn.execute(sql, params).fetchall()]
+                page_rows, total = self._paginate(rows, page, page_size)
+                return page_rows, total
+
+    def list_perf_plans(self, status=None, keyword=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM perf_plans WHERE 1=1"
+                params = []
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if keyword:
+                    sql += " AND (name LIKE ? OR target_url LIKE ? OR description LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY created_at DESC"
+                rows = [self._row_to_record(r, PerfPlanRecord) for r in conn.execute(sql, params).fetchall()]
+                page_rows, total = self._paginate(rows, page, page_size)
+                return page_rows, total
+
+    def list_web_executions(self, status=None, keyword=None, test_case=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM web_executions WHERE 1=1"
+                params = []
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if test_case:
+                    sql += " AND test_case = ?"; params.append(test_case)
+                if keyword:
+                    sql += " AND (test_case_title LIKE ? OR executed_by_username LIKE ? OR error_message LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY executed_at DESC"
+                rows = [self._row_to_record(r, WebExecutionRecord) for r in conn.execute(sql, params).fetchall()]
+                page_rows, total = self._paginate(rows, page, page_size)
+                return page_rows, total
+
+    def list_perf_executions(self, status=None, keyword=None, test_case=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM perf_executions WHERE 1=1"
+                params = []
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if test_case:
+                    sql += " AND test_case = ?"; params.append(test_case)
+                if keyword:
+                    sql += " AND (test_case_name LIKE ? OR started_by_name LIKE ? OR exec_summary LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY started_at DESC"
+                rows = [self._row_to_record(r, PerfExecutionRecord) for r in conn.execute(sql, params).fetchall()]
+                page_rows, total = self._paginate(rows, page, page_size)
+                return page_rows, total
+
+    # ============================================================
+    # 测试执行报告：真实 SQLite 查询
+    # ============================================================
+    def create_execution(self, data: dict) -> dict:
+        """创建一条执行记录及明细，返回 exec_id。"""
+        exec_id = data.get("exec_id") or ("exec-" + str(uuid.uuid4())[:8])
+        now = datetime.now(timezone.utc).isoformat()
+        name = data.get("name", "")
+        status = data.get("status", "completed")
+        total_cases = int(data.get("total_cases", 0))
+        passed_cases = int(data.get("passed_cases", 0))
+        failed_cases = int(data.get("failed_cases", 0))
+        skipped_cases = int(data.get("skipped_cases", 0))
+        duration = float(data.get("duration", 0))
+        trigger_type = data.get("trigger_type", "manual")
+        summary = data.get("summary", "")
+        results = data.get("results", [])
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO executions
+                    (exec_id, name, status, total_cases, passed_cases, failed_cases, skipped_cases,
+                     duration, trigger_type, summary, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (exec_id, name, status, total_cases, passed_cases, failed_cases, skipped_cases,
+                     duration, trigger_type, summary, now, now),
+                )
+                for r in results:
+                    conn.execute(
+                        """
+                        INSERT INTO execution_results
+                        (exec_id, case_id, case_title, status, duration_ms, response_body,
+                         assertions, extracted_vars, error_message, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (exec_id,
+                         r.get("case_id", ""),
+                         r.get("case_title", ""),
+                         r.get("status", "pending"),
+                         int(r.get("duration_ms", 0)),
+                         r.get("response_body", "") if isinstance(r.get("response_body"), str) else json.dumps(r.get("response_body", ""), ensure_ascii=False),
+                         json.dumps(r.get("assertions", []), ensure_ascii=False),
+                         json.dumps(r.get("extracted_vars", {}), ensure_ascii=False),
+                         r.get("error_message", ""),
+                         now),
+                    )
+                conn.commit()
+        return {"exec_id": exec_id, "created_at": now}
+
+    def list_executions(self, status=None, keyword=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM executions WHERE 1=1"
+                params = []
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if keyword:
+                    sql += " AND (name LIKE ? OR summary LIKE ? OR exec_id LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY created_at DESC"
+                rows = conn.execute(sql, params).fetchall()
+                items = [dict(r) for r in rows]
+                page_rows, total = self._paginate(items, page, page_size)
+                return page_rows, total
+
+    def get_execution(self, exec_id: str) -> dict | None:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM executions WHERE exec_id = ?", (exec_id,)
+                ).fetchone()
+                return dict(row) if row else None
+
+    def list_execution_results(self, exec_id: str):
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM execution_results WHERE exec_id = ? ORDER BY id",
+                    (exec_id,),
+                ).fetchall()
+                results = []
+                for r in rows:
+                    d = dict(r)
+                    for k in ("assertions", "extracted_vars"):
+                        v = d.get(k)
+                        if isinstance(v, str):
+                            try:
+                                d[k] = json.loads(v)
+                            except Exception:
+                                pass
+                    results.append(d)
+                return results
+
     def __getattr__(self, name: str):
         """对尚未实现的 Phase 3 存储方法返回空 stub，避免页面 500。"""
         if name.startswith("_"):
@@ -2353,6 +3088,8 @@ class TaskStore:
             "list_testsuites",
             "list_templates",
             "list_tasks",
+            "list_web_executions",
+            "list_perf_executions",
         }
         # 返回 dict 的统计类方法
         _dict_methods = {

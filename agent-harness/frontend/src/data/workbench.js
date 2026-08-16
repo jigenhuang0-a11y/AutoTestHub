@@ -45,7 +45,7 @@ export const domains = [
         key: 'testing-ai',
         title: 'AI 增强测试',
         cards: [
-          { id: 'r1-3', title: '知识中枢', subtitle: 'RAG 知识点加载与问答', icon: Collection, route: '/knowledge/chat', type: 'normal' },
+          { id: 'r1-3', title: '测试知识库', subtitle: 'RAG 知识点加载与问答', icon: Collection, route: '/knowledge/chat', type: 'normal' },
           { id: 'r1-4', title: '全链路评测中心', subtitle: '基于AI底座的智能体评估追踪', icon: DataAnalysis, route: '/eval-center', type: 'highlight' },
           { id: 'r1-5', title: '需求评审师', subtitle: '评审需求、评估测试用例', icon: ChatDotRound, route: '/quality-checker', type: 'normal' },
           { id: 'r1-6', title: '数据工厂', subtitle: '测试数据构造与生成', icon: MagicStick, route: '/data-factory', type: 'normal' }
