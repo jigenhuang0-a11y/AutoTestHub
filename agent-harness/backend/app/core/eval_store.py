@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -62,7 +62,8 @@ class EvalStore:
         record_id = record.get("trace_id") or f"local-{int(time.time() * 1000)}"
         record["record_id"] = record_id
         if "created_at" not in record:
-            record["created_at"] = datetime.now().isoformat()
+            # 统一使用 UTC，避免服务器时区不一致导致前端显示错乱
+            record["created_at"] = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
             data = self._read()

@@ -430,12 +430,17 @@ function initRadar() {
   radarChart.setOption(option)
 }
 
-// 把后端 hour 字段（day 聚合: "2026-08-18"；hour 聚合: "2026-08-18T13"）缩短为短标签
+// 后端 hour 字段是 UTC（day 聚合: "2026-08-18"；hour 聚合: "2026-08-18T13"）。
+// 这里按浏览器本地时区解析并格式化为短标签。
 function formatTrendLabel(hour) {
   if (!hour) return ''
-  const [datePart, timePart] = hour.split('T')
-  const md = datePart.slice(5) // "08-18"
-  return timePart ? `${md} ${timePart}:00` : md
+  const hasTime = hour.includes('T')
+  const iso = hasTime ? `${hour}:00:00Z` : `${hour}T00:00:00Z`
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return hour
+  const pad = n => String(n).padStart(2, '0')
+  const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return hasTime ? `${md} ${pad(d.getHours())}:00` : md
 }
 
 function initTrend() {
