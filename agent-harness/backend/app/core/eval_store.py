@@ -54,14 +54,11 @@ class EvalStore:
             return {"records": []}
 
     def _write(self, data: Dict[str, Any]):
-        try:
-            with open(self.db_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"[EvalStore] 写入失败: {e}")
+        with open(self.db_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def save(self, record: Dict[str, Any]) -> str:
-        """保存一条评测记录，返回 record_id。"""
+        """保存一条评测记录，返回 record_id。写入失败直接抛异常，避免前端误判。"""
         record_id = record.get("trace_id") or f"local-{int(time.time() * 1000)}"
         record["record_id"] = record_id
         if "created_at" not in record:
@@ -75,6 +72,7 @@ class EvalStore:
             # 最多保留 2000 条，避免文件过大
             data["records"] = data["records"][:2000]
             self._write(data)
+        logger.info(f"[EvalStore] 已保存评测记录 {record_id}，当前共 {len(data['records'])} 条")
         return record_id
 
     def list_records(
