@@ -30,6 +30,7 @@
           <el-select v-model="hours" size="default" style="width: 130px" @change="loadDashboard">
             <el-option label="近 24 小时" :value="24" />
             <el-option label="近 7 天" :value="168" />
+            <el-option label="近 30 天" :value="720" />
           </el-select>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
           <el-button type="success" :icon="VideoPlay" @click="demoJudge">触发样例评测</el-button>
@@ -134,7 +135,7 @@
         <el-card shadow="never" class="chart-card trend-card">
           <template #header>
             <div class="card-header">
-              <span>综合分趋势（近 {{ hours }}h）</span>
+              <span>综合分趋势（近 {{ hours }}h · {{ dashboard.granularity === 'day' ? '按天' : '按小时' }}）</span>
               <el-tag size="small" type="info">{{ dashboard.trend.length }} 个时间点</el-tag>
             </div>
           </template>
@@ -214,6 +215,7 @@ const hours = ref(24)
 const loading = ref(false)
 const dashboard = ref({
   total_records: 0,
+  granularity: 'hour',
   avg_scores: { overall: 0, hallucination: 0, consistency: 0, completeness: 0, executability: 0, safety: 0 },
   by_feature: {},
   trend: [],
@@ -223,6 +225,8 @@ const langfuse = ref({ enabled: false, host: '', traces_url: '' })
 
 const isTrendEmpty = computed(() => !(dashboard.value.trend || []).length)
 const isFeatureEmpty = computed(() => !Object.keys(dashboard.value.by_feature || {}).length)
+// 单点兜底：趋势只有 1 个时间点时，隐藏柱状图、放大圆点并提示
+const isSinglePoint = computed(() => (dashboard.value.trend || []).length === 1)
 
 const radarRef = ref(null)
 const trendRef = ref(null)
@@ -234,6 +238,7 @@ let featureChart = null
 const defaultScores = () => ({ overall: 0, hallucination: 0, consistency: 0, completeness: 0, executability: 0, safety: 0 })
 const defaultDashboard = () => ({
   total_records: 0,
+  granularity: 'hour',
   avg_scores: defaultScores(),
   by_feature: {},
   trend: [],
@@ -244,6 +249,7 @@ function normalizeDashboard(data) {
   const d = data || {}
   return {
     total_records: d.total_records ?? 0,
+    granularity: d.granularity || 'hour',
     avg_scores: { ...defaultScores(), ...(d.avg_scores || {}) },
     by_feature: d.by_feature || {},
     trend: Array.isArray(d.trend) ? d.trend : [],
@@ -255,7 +261,7 @@ async function loadDashboard() {
   loading.value = true
   try {
     // axios 拦截器已返回 response.data，无需再解构 { data }
-    const data = await evalCenterAPI.dashboard(hours.value)
+    const data = await evalCenterAPI.dashboard(hours.value, 'auto')
     dashboard.value = normalizeDashboard(data)
     nextTick(() => setTimeout(initCharts, 100))
   } catch (e) {
@@ -437,25 +443,61 @@ function initTrend() {
   const avg = trend.map(t => Number(t.avg_overall) || 0)
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
+
+  const series = [
+    {
+      name: '平均综合分',
+      type: 'line',
+      data: avg,
+      smooth: true,
+      lineStyle: { width: isSinglePoint.value ? 0 : 3 },
+      symbol: 'circle',
+      symbolSize: isSinglePoint.value ? 22 : 8,
+      itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: isSinglePoint.value ? 3 : 0 },
+      label: { show: true, position: 'top', color: '#e2e8f0', fontSize: isSinglePoint.value ? 14 : 12, formatter: '{c}' },
+    },
+  ]
+  // 单点时不画柱状图，避免遮挡折线；多点时才叠加评测次数柱状
+  if (!isSinglePoint.value) {
+    series.push({
+      name: '评测次数',
+      type: 'bar',
+      yAxisIndex: 1,
+      data: count,
+      itemStyle: { borderRadius: [4, 4, 0, 0], color: 'rgba(52,211,153,0.55)' },
+      barMaxWidth: 24,
+      label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' },
+    })
+  }
+
   const option = {
     color: ['#60a5fa', '#34d399'],
+    graphic: isSinglePoint.value ? [
+      {
+        type: 'text',
+        left: 'center',
+        top: '78%',
+        style: {
+          text: '当前仅 1 个时间点，已自动切换为按天聚合；数据累积后此处将显示趋势曲线',
+          fill: '#94a3b8',
+          fontSize: 12,
+        },
+      },
+    ] : [],
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(15,23,42,0.95)',
       borderColor: 'rgba(148,163,184,0.2)',
       textStyle: { color: '#e2e8f0' },
     },
-    legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
+    legend: { data: isSinglePoint.value ? ['平均综合分'] : ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
     grid: { top: 30, left: 40, right: 50, bottom: 40, containLabel: true },
     xAxis: { type: 'category', data: x, axisLabel: { rotate: 30, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
     yAxis: [
       { type: 'value', name: '分数', min: 0, max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
-      { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
+      { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false }, show: !isSinglePoint.value },
     ],
-    series: [
-      { name: '平均综合分', type: 'line', data: avg, smooth: true, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 8, itemStyle: { color: '#60a5fa' }, label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' } },
-      { name: '评测次数', type: 'bar', yAxisIndex: 1, data: count, itemStyle: { borderRadius: [4, 4, 0, 0], color: 'rgba(52,211,153,0.6)' }, barMaxWidth: 24, label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' } },
-    ],
+    series,
   }
   trendChart.setOption(option)
 }

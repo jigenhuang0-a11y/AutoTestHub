@@ -62,9 +62,16 @@ def run_judge(req: JudgeRequest):
 
 
 @router.get("/dashboard")
-def get_dashboard(hours: int = Query(24, ge=1, le=168)):
-    """获取近 N 小时的评测聚合数据。"""
-    return get_eval_store().get_dashboard(hours=hours)
+def get_dashboard(
+    hours: int = Query(24, ge=1, le=720),
+    granularity: str = Query("auto", pattern="^(auto|hour|day)$"),
+):
+    """获取评测聚合数据。
+
+    - hours: 统计窗口（1~720 小时，默认 24）
+    - granularity: 趋势粒度 auto/hour/day。auto 时若窗口内仅 1 个时间点，自动退化为按天聚合。
+    """
+    return get_eval_store().get_dashboard(hours=hours, granularity=granularity)
 
 
 @router.get("/records")

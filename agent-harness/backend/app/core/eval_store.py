@@ -95,13 +95,22 @@ class EvalStore:
             ]
         return records[offset : offset + limit]
 
-    def get_dashboard(self, hours: int = 24) -> Dict[str, Any]:
-        """聚合仪表盘数据。"""
+    def get_dashboard(self, hours: int = 24, granularity: str = "auto") -> Dict[str, Any]:
+        """聚合仪表盘数据。
+
+        granularity:
+          - 'hour': 按小时聚合（默认 24h 窗口内最多 24 个点）
+          - 'day' : 按天聚合（适合跨天拉长曲线）
+          - 'auto': 若指定 hours 窗口内只有 1 个时间点，则自动退化为 'day'，
+                    让趋势曲线更完整；否则用 'hour'。
+        """
         records = self.list_records(hours=hours, limit=10000)
         total = len(records)
         if total == 0:
             return {
                 "total_records": 0,
+                "granularity": "hour",
+                # 空数据也返回粒度，前端好判断
                 "avg_scores": {"overall": 0, "hallucination": 0, "consistency": 0,
                                "completeness": 0, "executability": 0, "safety": 0},
                 "by_feature": {},
@@ -128,21 +137,38 @@ class EvalStore:
             )
             del by_feature[feat]["overall_sum"]
 
-        # 按小时聚合趋势
+        # 智能粒度：auto 时，若窗口内只有 1 个时间点，退化为按天聚合
+        effective_gran = granularity
+        if effective_gran == "auto":
+            # 先按小时聚合看有几个点
+            hour_map: Dict[str, int] = {}
+            for r in records:
+                hour = r.get("created_at", "")[:13]
+                hour_map[hour] = hour_map.get(hour, 0) + 1
+            effective_gran = "day" if len(hour_map) <= 1 else "hour"
+
+        # 按粒度聚合趋势
         trend_map: Dict[str, Dict[str, Any]] = {}
         for r in records:
-            hour = r.get("created_at", "")[:13]  # '2026-08-16T14'
-            if hour not in trend_map:
-                trend_map[hour] = {"hour": hour, "count": 0, "overall_sum": 0.0}
-            trend_map[hour]["count"] += 1
-            trend_map[hour]["overall_sum"] += r.get("overall", 0)
-        trend = sorted(trend_map.values(), key=lambda x: x["hour"])[-24:]
+            if effective_gran == "day":
+                key = r.get("created_at", "")[:10]        # '2026-08-16'
+            else:
+                key = r.get("created_at", "")[:13]        # '2026-08-16T14'
+            if key not in trend_map:
+                trend_map[key] = {"hour": key, "count": 0, "overall_sum": 0.0}
+            trend_map[key]["count"] += 1
+            trend_map[key]["overall_sum"] += r.get("overall", 0)
+        trend = sorted(trend_map.values(), key=lambda x: x["hour"])
+        # 小时粒度最多展示最近 24 个点，避免过宽
+        if effective_gran == "hour":
+            trend = trend[-24:]
         for t in trend:
             t["avg_overall"] = round(t["overall_sum"] / t["count"], 2)
             del t["overall_sum"]
 
         return {
             "total_records": total,
+            "granularity": effective_gran,
             "avg_scores": avg_scores,
             "by_feature": by_feature,
             "trend": trend,

@@ -406,7 +406,7 @@ export const environmentAPI = {
 
 // 全链路评测中心 API（Langfuse 监控 + Judge LLM 幻觉率评分）
 export const evalCenterAPI = {
-  dashboard: (hours = 24) => api.get('/eval-center/dashboard', { params: { hours } }),
+  dashboard: (hours = 24, granularity = 'auto') => api.get('/eval-center/dashboard', { params: { hours, granularity } }),
   records: (params) => api.get('/eval-center/records', { params }),
   judge: (data) => api.post('/eval-center/judge', data),
   langfuseConfig: () => api.get('/eval-center/langfuse-config'),
