@@ -18,11 +18,14 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 from app.tools.evaluate_run import evaluate
 from app.core.webhook_notifier import notify_human_review
+from app.core.hallucination_judge import judge_output
+from app.core.eval_store import get_eval_store
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,9 @@ class EvalResult:
     needs_human: bool = False        # 循环耗尽仍不达标，转人工协同
     eval_summary: str = ""
     criteria: List[str] = field(default_factory=list)
+    trace_id: Optional[str] = None           # 关联的 Langfuse trace_id
+    judge: Optional[Dict] = None             # 五维 Judge 结果（hallucination_judge）
+    judge_record_id: Optional[str] = None    # 写入 EvalStore 的记录 id
 
 
 def _make_evaluator(criteria: Optional[List[str]] = None) -> Callable:
@@ -83,6 +89,10 @@ def run_eval_loop(
     sink_if_passed: Optional[Callable[[str], None]] = None,
     human_review_ctx: Optional[Dict] = None,
     criteria: Optional[List[str]] = None,
+    feature: str = "agent_loop",
+    trace_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> EvalResult:
     """
     评估闭环主入口。
@@ -97,9 +107,13 @@ def run_eval_loop(
         regenerate_fn:   重生成函数，接收 issues 文本，返回新回答（循环工程）
         sink_if_passed:  评估通过时的回调（沉淀长期记忆）
         human_review_ctx: 人工协同上下文（含 user_id / mode 等），非空才推飞书
+        feature:         业务模块标识（写入评估中心，如 ai_testcase / knowledge_chat / agent_loop）
+        question_feature: 兼容别名
+        trace_id:        关联的 Langfuse trace_id；为空时自动生成，使每次 Loop 都可被全链路追踪
+        user_id/session_id: 追踪字段
 
     Returns:
-        EvalResult
+        EvalResult（含 judge 五维评分与 EvalStore 记录 id）
     """
     result = EvalResult()
     if not candidates:
@@ -111,6 +125,11 @@ def run_eval_loop(
         result.iterations = 1
         result.passed = True
         return result
+
+    # 关联/创建 Langfuse trace：让 Agent Loop 的每一次评估都可被全链路追踪
+    if not trace_id:
+        trace_id = str(uuid.uuid4())
+    result.trace_id = trace_id
 
     # 默认测试场景维度；RAG/知识库场景（有 reference）强制使用测试维度
     effective_criteria = criteria or TESTING_CRITERIA
@@ -154,6 +173,10 @@ def run_eval_loop(
                     sink_if_passed(answer)
                 except Exception as e:
                     logger.error(f"[EvalLoop] 长期记忆沉淀失败: {e}")
+            # 通过即退出循环，对最终答案做五维 Judge 并写入评估中心
+            _run_judge_and_persist(
+                result, question, answer, reference, feature, trace_id, user_id, session_id
+            )
             return result
 
         # 未达标且还有重生成机会：调用 regenerate_fn 生成下一轮答案
@@ -176,6 +199,11 @@ def run_eval_loop(
     result.needs_human = not result.passed
     result.criteria = effective_criteria
 
+    # 不论达标与否，都对最终答案做五维 Judge 并写入评估中心（供全链路评测中心看板）
+    _run_judge_and_persist(
+        result, question, best_answer, reference, feature, trace_id, user_id, session_id
+    )
+
     if result.needs_human and human_review_ctx:
         try:
             notify_human_review(
@@ -191,3 +219,43 @@ def run_eval_loop(
             logger.error(f"[EvalLoop] 飞书人工协同推送失败: {e}")
 
     return result
+
+
+def _run_judge_and_persist(
+    result: EvalResult,
+    question: str,
+    answer: str,
+    reference: str,
+    feature: str,
+    trace_id: Optional[str],
+    user_id: Optional[str],
+    session_id: Optional[str],
+) -> None:
+    """对最终答案执行五维 Judge 评分，写入 EvalStore 并回传 Langfuse trace。
+
+    失败仅记日志，绝不阻塞主业务（Agent Loop 的吞吐优先）。
+    """
+    try:
+        judge = judge_output(
+            input_text=question,
+            output_text=answer,
+            reference=reference,
+            trace_id=trace_id,
+            feature=feature,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        record = judge.to_dict()
+        record["feature"] = feature
+        record["input_text"] = question[:1000]
+        record["output_text"] = answer[:1000]
+        record_id = get_eval_store().save(record)
+        # result 可能来自后台异步路径（None），仅在非空时回填
+        if result is not None:
+            result.judge = judge.to_dict()
+            result.judge_record_id = record_id
+        logger.info(
+            f"[EvalLoop] Judge 完成 overall={judge.overall}, record={record_id}, trace={trace_id}"
+        )
+    except Exception as e:
+        logger.warning(f"[EvalLoop] Judge/持久化失败（已忽略）: {e}")

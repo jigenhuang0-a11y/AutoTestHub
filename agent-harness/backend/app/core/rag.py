@@ -105,13 +105,14 @@ async def _run_eval_async(
     后台异步执行评估闭环：评分 -> 不达标重生成 -> 通过则沉淀记忆 -> 未通过转人工协同。
     不阻塞前端 SSE 流式响应。
     """
-    from app.core.eval_loop import _make_evaluator, TESTING_CRITERIA
-    from app.core.webhook_notifier import notify_human_review
+    from app.core.eval_loop import _make_evaluator, TESTING_CRITERIA, _run_judge_and_persist
 
     scorer = _make_evaluator(TESTING_CRITERIA)
     candidates = [first_answer]
     best_answer = first_answer
     best_score = -1.0
+    import uuid as _uuid
+    trace_id = str(_uuid.uuid4())
     best_issues: List[str] = []
 
     router = get_llm_router()
@@ -130,6 +131,12 @@ async def _run_eval_async(
                 logger.info(f"[RAG][后台评估] {mode} 评估通过，已沉淀长期记忆")
             except Exception as e:
                 logger.error(f"[RAG][后台评估] 沉淀记忆失败: {e}")
+            # 通过即退出循环，对最终答案做五维 Judge 并写入评估中心（供全链路评测看板）
+            _run_judge_and_persist(
+                result=None, question=question, answer=best_answer, reference=reference,
+                feature="knowledge_chat" if mode == "knowledge" else "chat",
+                trace_id=trace_id, user_id=user_id,
+            )
             return
         if iteration < max_iterations:
             issue_hint = "\n".join(f"- {i}" for i in issues) if issues else ""
@@ -156,6 +163,12 @@ async def _run_eval_async(
 
     # 循环耗尽仍未达标
     logger.warning(f"[RAG][后台评估] {mode} 循环耗尽仍未达标，score={best_score:.2f}，转人工协同")
+    # 不论达标与否，都对最终答案做五维 Judge 并写入评估中心（供全链路评测看板）
+    _run_judge_and_persist(
+        result=None, question=question, answer=best_answer, reference=reference,
+        feature="knowledge_chat" if mode == "knowledge" else "chat",
+        trace_id=trace_id, user_id=user_id,
+    )
     try:
         notify_human_review(
             question=question,
@@ -362,6 +375,10 @@ def answer(
         regenerate_fn=_regenerate,
         sink_if_passed=lambda ans: sink_memory(mm, question, ans, llm_fn=_llm_fn_for_memory),
         human_review_ctx={"mode": "knowledge", "user_id": user_id},
+        feature="knowledge_chat",
+        user_id=user_id,
+        session_id=session_id,
+        trace_id=trace_id,
     )
     answer_text = eval_result.final_answer or first_answer
 
@@ -430,8 +447,13 @@ def answer_stream(
     history: Optional[List[Dict]] = None,
     user_id: str = "anonymous",
     enable_reasoning: bool = False,
+    session_id: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
     """流式检索 + LLM 生成回答（已接入长短期记忆）。yield 的事件字典会由 SSE 包装。"""
+    import uuid as _uuid
+    if not session_id:
+        session_id = str(_uuid.uuid4())
+    trace_id = str(_uuid.uuid4())
     # 先推送状态，避免检索与记忆召回期间前端长时间无反馈
     yield {"type": "status", "content": "正在检索知识库..."}
 
