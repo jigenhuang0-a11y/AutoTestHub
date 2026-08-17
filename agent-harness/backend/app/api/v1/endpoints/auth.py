@@ -142,8 +142,18 @@ async def login(req: LoginRequest):
         "email": user_info["email"],
         "roles": user_info.get("roles", []),
     }
-    TOKEN_STORE[token] = user_payload
     return {"access": token, "user": user_payload}
+
+
+def _decode_token(token: str) -> dict:
+    """验证 JWT token，失败直接抛 401"""
+    try:
+        signing_key = os.getenv("JWT_SIGNING_KEY", "harness-dev-fallback-key")
+        return jwt.decode(token, signing_key, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已过期")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 无效")
 
 
 @router.get("/profile")
@@ -154,20 +164,18 @@ async def profile(credentials: HTTPAuthorizationCredentials = Depends(security))
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="未提供认证信息",
         )
-    token = credentials.credentials
-    if token not in TOKEN_STORE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="登录已过期或 token 无效",
-        )
-    return {"user": TOKEN_STORE[token]}
+    payload = _decode_token(credentials.credentials)
+    return {"user": {
+        "user_id": payload.get("user_id"),
+        "username": payload.get("username"),
+        "role": payload.get("role"),
+        "roles": [payload.get("role")] if payload.get("role") else [],
+    }}
 
 
 @router.post("/logout")
 async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """退出登录，作废 token"""
-    if credentials and credentials.credentials in TOKEN_STORE:
-        TOKEN_STORE.pop(credentials.credentials)
+    """退出登录：前端清除 token 即可；后端 JWT 无状态，无需作废"""
     return {"detail": "已登出"}
 
 
@@ -199,29 +207,32 @@ async def register(req: RegisterRequest):
         "email": req.email,
         "roles": ["viewer"],
     }
-    TOKEN_STORE[token] = user_payload
     logger.info(f"[Auth] 新用户注册：{req.username}")
     return {"access": token, "user": user_payload}
 
 
 @router.post("/refresh", response_model=RefreshResponse)
 async def refresh(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """刷新 token：使用现有有效 token 换发新的 access token"""
+    """刷新 token：使用当前有效 token 换发新的 access token"""
     if not credentials:
         raise HTTPException(status_code=401, detail="未提供认证信息")
-    old_token = credentials.credentials
-    if old_token not in TOKEN_STORE:
-        raise HTTPException(status_code=401, detail="登录已过期或 token 无效")
-    user_payload = TOKEN_STORE[old_token]
-    # 作废旧 token，签发新 token
+    payload = _decode_token(credentials.credentials)
+    new_payload = {
+        "user_id": payload.get("user_id"),
+        "username": payload.get("username"),
+        "role": payload.get("role"),
+    }
     new_token = _issue_token(
-        user_payload["username"],
-        user_payload["user_id"],
-        user_payload["role"],
+        new_payload["username"],
+        new_payload["user_id"],
+        new_payload["role"],
     )
-    TOKEN_STORE.pop(old_token, None)
-    TOKEN_STORE[new_token] = user_payload
-    return {"access": new_token, "user": user_payload}
+    return {"access": new_token, "user": {
+        "user_id": new_payload["user_id"],
+        "username": new_payload["username"],
+        "role": new_payload["role"],
+        "roles": [new_payload["role"]] if new_payload["role"] else [],
+    }}
 
 
 # ============================================================
@@ -246,10 +257,12 @@ def get_current_user(
 
     if not credentials:
         raise HTTPException(status_code=401, detail="未提供认证信息")
-    token = credentials.credentials
-    if token not in TOKEN_STORE:
-        raise HTTPException(status_code=401, detail="登录已过期或 token 无效")
-    return TOKEN_STORE[token]
+    payload = _decode_token(credentials.credentials)
+    return {
+        "username": payload.get("username"),
+        "role": payload.get("role"),
+        "user_id": payload.get("user_id"),
+    }
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
