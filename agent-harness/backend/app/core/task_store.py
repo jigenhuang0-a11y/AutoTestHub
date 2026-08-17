@@ -1032,10 +1032,26 @@ class TaskStore:
                     name TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     embedding_model TEXT NOT NULL DEFAULT 'bge-m3',
+                    doc_count INTEGER NOT NULL DEFAULT 0,
+                    chunk_count INTEGER NOT NULL DEFAULT 0,
                     created_by TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                -- 知识库文档表
+                CREATE TABLE IF NOT EXISTS documents (
+                    doc_id TEXT PRIMARY KEY,
+                    kb_id TEXT NOT NULL,
+                    filename TEXT NOT NULL DEFAULT '',
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    file_type TEXT NOT NULL DEFAULT '',
+                    chunk_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (kb_id) REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_documents_kb_id ON documents(kb_id);
 
                 -- 日常对话/知识库问答会话表
                 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -3105,14 +3121,14 @@ class TaskStore:
             with self._get_conn() as conn:
                 conn.execute(
                     """INSERT INTO knowledge_bases
-                    (kb_id, name, description, embedding_model, created_by, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (kb_id, name, description, embedding_model, created_by, now, now),
+                    (kb_id, name, description, embedding_model, doc_count, chunk_count, created_by, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (kb_id, name, description, embedding_model, 0, 0, created_by, now, now),
                 )
                 conn.commit()
         return {"kb_id": kb_id, "id": kb_id, "name": name, "description": description,
-                "embedding_model": embedding_model, "created_by": created_by,
-                "created_at": now, "updated_at": now}
+                "embedding_model": embedding_model, "doc_count": 0, "chunk_count": 0,
+                "created_by": created_by, "created_at": now, "updated_at": now}
 
     def list_knowledge_bases(self, user_id=None) -> list:
         with self._lock:
@@ -3129,6 +3145,60 @@ class TaskStore:
                     "SELECT * FROM knowledge_bases WHERE kb_id = ?", (kb_id,)
                 ).fetchone()
                 return dict(row) if row else None
+
+    def create_document(self, kb_id: str, filename: str, file_size: int = 0,
+                        file_type: str = "", chunk_count: int = 0) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """INSERT INTO documents
+                    (doc_id, kb_id, filename, file_size, file_type, chunk_count, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (doc_id, kb_id, filename, file_size, file_type, chunk_count, now, now),
+                )
+                conn.commit()
+        return {"doc_id": doc_id, "kb_id": kb_id, "filename": filename,
+                "file_size": file_size, "file_type": file_type,
+                "chunk_count": chunk_count, "created_at": now, "updated_at": now}
+
+    def get_document(self, doc_id: str) -> dict | None:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE doc_id = ?", (doc_id,)
+                ).fetchone()
+                return dict(row) if row else None
+
+    def list_documents(self, kb_id: str) -> list:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM documents WHERE kb_id = ? ORDER BY created_at DESC",
+                    (kb_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+
+    def delete_document(self, doc_id: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cur = conn.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+                conn.commit()
+                return cur.rowcount > 0
+
+    def update_knowledge_base_stats(self, kb_id: str, doc_count: int = 0, chunk_count: int = 0) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_conn() as conn:
+                cur = conn.execute(
+                    """UPDATE knowledge_bases
+                       SET doc_count = ?, chunk_count = ?, updated_at = ?
+                       WHERE kb_id = ?""",
+                    (doc_count, chunk_count, now, kb_id),
+                )
+                conn.commit()
+                return cur.rowcount > 0
 
     def save_chat_session(self, user_id: str, title: str, mode: str, kb_id: str, session_id: str) -> dict:
         now = datetime.now(timezone.utc).isoformat()
