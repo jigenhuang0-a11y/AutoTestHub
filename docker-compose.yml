@@ -4,6 +4,8 @@ services:
   # ===== 基础设施 =====
   postgres:
     image: pgvector/pgvector:pg16
+    mem_limit: 2g
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ai_test_platform
       POSTGRES_USER: postgres
@@ -11,7 +13,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - /data/ai-test-platform/volumes/postgres/data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -20,10 +22,12 @@ services:
 
   redis:
     image: redis:7-alpine
+    mem_limit: 512m
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - /data/ai-test-platform/volumes/redis/data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,15 +36,21 @@ services:
 
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
+    mem_limit: 512m
+    restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
       ETCD_QUOTA_BACKEND_BYTES: "4294967296"
       ETCD_SNAPSHOT_COUNT: "50000"
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - /data/ai-test-platform/volumes/etcd/data:/etcd
 
   minio:
     image: minio/minio:RELEASE.2024-06-13T22-53-56Z
+    mem_limit: 512m
+    restart: unless-stopped
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -54,10 +64,12 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/minio_data
+      - /data/ai-test-platform/volumes/minio/data:/minio_data
 
   milvus:
     image: milvusdb/milvus:v2.4.0
+    mem_limit: 4g
+    restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -68,7 +80,7 @@ services:
       - "19530:19530"
       - "9091:9091"
     volumes:
-      - milvus_data:/var/lib/milvus
+      - /data/ai-test-platform/volumes/milvus/data:/var/lib/milvus
     depends_on:
       - etcd
       - minio
@@ -78,6 +90,8 @@ services:
     build:
       context: ./agent-harness/backend
       dockerfile: Dockerfile
+    mem_limit: 2g
+    restart: unless-stopped
     ports:
       - "8001:8001"
     environment:
@@ -91,7 +105,7 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     volumes:
-      - orchestrator_data:/app/data
+      - /data/ai-test-platform/volumes/orchestrator/data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -106,6 +120,8 @@ services:
     build:
       context: ./agent-harness/frontend
       dockerfile: Dockerfile
+    mem_limit: 512m
+    restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
@@ -114,6 +130,8 @@ services:
   # ===== Langfuse：LLM 可观测性与幻觉率监控 =====
   langfuse:
     image: langfuse/langfuse:2
+    mem_limit: 2g
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -135,10 +153,3 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-volumes:
-  pg_data:
-  redis_data:
-  minio_data:
-  milvus_data:
-  orchestrator_data:
