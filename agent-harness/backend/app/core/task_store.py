@@ -1082,6 +1082,8 @@ class TaskStore:
             self._migrate_datafactory_columns(conn)
             # 迁移：测试管理三表补充新列（演示库可能用旧 schema）
             self._migrate_test_mgmt_columns(conn)
+            # 迁移：知识库表补充统计列、创建文档表（旧 schema 可能没有）
+            self._migrate_knowledge_base_columns(conn)
 
     def _migrate_test_mgmt_columns(self, conn):
         """兼容旧 schema：为 testsuites / testcases / perf_plans 补齐新列。"""
@@ -1122,6 +1124,35 @@ class TaskStore:
             conn.commit()
         except Exception as e:
             logger.warning(f"[TaskStore] 迁移测试管理表列失败: {e}")
+
+    def _migrate_knowledge_base_columns(self, conn):
+        """兼容旧 schema：为 knowledge_bases 补充 doc_count/chunk_count，创建 documents 表。"""
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
+            for col, ddl in [
+                ("doc_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("chunk_count", "INTEGER NOT NULL DEFAULT 0"),
+            ]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE knowledge_bases ADD COLUMN {col} {ddl}")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    doc_id TEXT PRIMARY KEY,
+                    kb_id TEXT NOT NULL,
+                    filename TEXT NOT NULL DEFAULT '',
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    file_type TEXT NOT NULL DEFAULT '',
+                    chunk_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (kb_id) REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_kb_id ON documents(kb_id)")
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[TaskStore] 迁移知识库表列失败: {e}")
 
     def _migrate_datafactory_columns(self, conn):
         """若 datafactory_datasets 表缺少 status/error 列，则 ALTER 补齐。"""
