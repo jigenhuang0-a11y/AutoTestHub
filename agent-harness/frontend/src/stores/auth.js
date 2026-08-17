@@ -34,7 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('refresh_token', refresh)
       localStorage.setItem('user', JSON.stringify(userPayload))
       ElMessage.success('登录成功')
-      await router.push('/workbench')
+      await router.push({ path: '/workbench', query: { domain: 'test' } })
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || '登录失败，请检查用户名和密码'
       ElMessage.error(msg)

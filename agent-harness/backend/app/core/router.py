@@ -45,7 +45,8 @@ class LLMRouter:
             return provider.chat(messages, **trace_kwargs, **extra_kwargs)
         except Exception as e:
             logger.error(f"[LLMRouter] {used_model} 失败: {e}")
-            fallback = self._pool.get("dashscope", model="qwen-turbo")
+            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+            fallback = self._pool.get_for_model(fallback_model)
             logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
             return fallback.chat(messages, **trace_kwargs, **extra_kwargs)
 
@@ -85,7 +86,8 @@ class LLMRouter:
             yield from provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
         except Exception as e:
             logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
-            fallback = self._pool.get("dashscope", model="qwen-turbo")
+            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+            fallback = self._pool.get_for_model(fallback_model)
             yield from fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
 
     def chat_with_tools(
@@ -130,7 +132,8 @@ class LLMRouter:
         except Exception as e:
             logger.error(f"[LLMRouter] {used_model} chat_with_tools 失败: {e}")
             # 降级：纯文本 chat（不带工具）
-            fallback = self._pool.get("dashscope", model="qwen-turbo")
+            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+            fallback = self._pool.get_for_model(fallback_model)
             logger.warning(f"[LLMRouter] 降级到纯文本 {fallback.model}")
             try:
                 content = fallback.chat(messages)

@@ -90,3 +90,11 @@ tmp/
 .playwright-cli/
 harness-core/venv_p1/
 .codebuddy/
+
+# 临时调试 / 验证脚本与输出（本地产物，勿提交）
+scripts/_*.ps1
+scripts/_*.txt
+scripts/_*.py
+scripts/probe_*.py
+scripts/probe_*.txt
+_wait_*.txt

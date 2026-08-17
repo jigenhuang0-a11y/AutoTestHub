@@ -167,7 +167,10 @@ export const testsuiteAPI = {
 // 后端知识库对象使用 kb_id 作为主键，前端组件统一使用 id，这里做字段适配。
 const _normalizeKB = (kb) => {
   if (!kb || typeof kb !== 'object') return kb
-  return { ...kb, id: kb.kb_id || kb.id }
+  // 兼容后端 stub/包装层可能把真实字段放在 _data 里的情况
+  const inner = kb._data || kb
+  const id = inner.kb_id || inner.id || inner._id || inner.kbId || inner.uuid || ''
+  return { ...kb, id }
 }
 
 export const knowledgeBaseAPI = {
@@ -182,7 +185,9 @@ export const knowledgeBaseAPI = {
   },
   create: async (data) => {
     const res = await api.post('/knowledge/knowledge-bases/', data)
-    return _normalizeKB(res)
+    // 后端可能直接返回对象，也可能包在 data/result/results 字段里
+    const kb = res?.data ?? res?.result ?? res?.results ?? res
+    return _normalizeKB(kb)
   },
   update: (id, data) => api.put(`/knowledge/knowledge-bases/${id}/`, data),
   delete: (id) => api.delete(`/knowledge/knowledge-bases/${id}/`),
@@ -255,7 +260,8 @@ export const knowledgeBaseAPI = {
     data: { message_ids: messageIds }
   }),
   deleteSession: (kbId, sessionId) => api.delete(`/knowledge/knowledge-bases/${kbId}/delete_session/`, {
-    data: { session_id: sessionId }
+    data: { session_id: sessionId },
+    skipErrorHandler: true
   }),
 
   // 日常对话（无 kbId）
@@ -264,7 +270,9 @@ export const knowledgeBaseAPI = {
   chatSessionMessages: (sessionId) => api.get('/knowledge/chat/messages/', {
     params: { session_id: sessionId }
   }),
-  deleteChatSession: (sessionId) => api.delete(`/knowledge/chat/sessions/${sessionId}/`),
+  deleteChatSession: (sessionId) => api.delete(`/knowledge/chat/sessions/${sessionId}/`, {
+    skipErrorHandler: true
+  }),
   documents: (params) => api.get('/knowledge/documents/', { params }),
   getDocuments: (kbId) => api.get('/knowledge/documents/', { 
     params: { knowledge_base: kbId },

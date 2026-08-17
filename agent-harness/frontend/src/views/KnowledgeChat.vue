@@ -187,7 +187,10 @@
             </div>
             <div class="message-content">
               <!-- AI 回答元信息行：Skill + 响应耗时 + 质量评分 + 人工协同 -->
-              <div v-if="!msg.isUser && (msg.skill || msg.responseTime || msg.evalScore !== undefined || msg.needsHuman || (msg.evalPending && showEvalMeta))" class="message-meta-row">
+              <div v-if="!msg.isUser && (msg.skill || msg.responseTime || msg.evalScore !== undefined || msg.needsHuman || (msg.evalPending && showEvalMeta) || msg._interrupted)" class="message-meta-row">
+                <el-tag v-if="msg._interrupted" size="small" type="danger" effect="dark">
+                  生成已中断
+                </el-tag>
                 <el-tag v-if="msg.skill" size="small" type="success" effect="light">
                   <el-icon><SetUp /></el-icon> {{ msg.skill }}
                 </el-tag>
@@ -343,7 +346,7 @@
               <div v-if="streamingText.length > 0 && !isReasoningPhase" class="message-text ai-message-bubble" v-html="formatMessage(streamingText)"></div>
               <div v-else-if="answering && reasoningMode === 'reasoning'" class="answer-placeholder">
                 <el-icon class="is-loading"><Loading /></el-icon>
-                <span>{{ isReasoningPhase ? '推理完成后再输出答案…' : '正在整理最终答案…' }}</span>
+                <span>{{ isReasoningPhase ? '正在深度思考，请稍候…' : '正在整理最终答案…' }}</span>
               </div>
               <div v-if="streamingText.length > 0 && !isReasoningPhase" class="streaming-footer">
                 <span class="streaming-timer">
@@ -628,6 +631,7 @@ const route = useRoute()
 const kbId = ref(route.params.id)
 const knowledgeBase = ref(null)
 const kbNotFound = ref(false)  // 知识库不存在或无权限
+
 const kbLoading = ref(true)    // 加载状态
 const historyLoading = ref(false)
 const historyLoadError = ref(false)
@@ -639,6 +643,7 @@ const messageListRef = ref(null)
 const currentMessageId = ref(null)
 const selectedMessages = ref(new Set()) // 选中的消息ID集合
 const currentSessionId = ref('') // 当前选中的会话ID
+const currentTaskId = ref('') // 后台生成任务 ID，用于切换页面后重连继续接收增量
 const pendingImages = ref([]) // 待发送的图片列表（base64）
 const imagePreviewVisible = ref(false)
 const previewImageIndex = ref(0)
@@ -678,10 +683,12 @@ let streamAbortController = null // 用于取消请求
 let typewriterTimer = null // 打字机效果 timer
 let typewriterIndex = 0 // 打字机当前显示到的位置
 let streamReader = null // 当前流式读取器（用于手动取消）
+let eventSeq = 0 // 已处理的 SSE 事件序号（用于重连 offset，不含 meta）
 let messageKeySeed = 0 // 本地消息 key 自增种子，避免 v-for 用 index 闪烁
 const nextMessageKey = () => `msg-${Date.now()}-${++messageKeySeed}`
 
 // 问答模式：'chat' - 日常对话，'knowledge' - 知识库问答
+// 默认先设为 chat，onMounted 中会根据持久化状态或 URL 再决定最终模式
 const qaMode = ref('chat')
 
 // 推理模式：'fast' - 直接回答，'reasoning' - 深度思考
@@ -1081,7 +1088,9 @@ const loadKnowledgeBase = async () => {
         kbId.value = firstKb.id
         knowledgeBase.value = firstKb
         kbNotFound.value = false
-        window.history.replaceState(null, '', `/knowledge/${firstKb.id}`)
+        // 注意：不再 router.replace 到 /knowledge/{id}。
+        // 否则路径变化会触发二次 remount，onMounted 再次运行时把 qaMode 误判为 knowledge，
+        // 覆盖从 localStorage 恢复的 chat 模式，导致“切回变 knowledge / 消息被清空”。
         console.log('[KB] Chat mode auto-selected KB:', firstKb.id, firstKb.name)
       } else {
         kbNotFound.value = true
@@ -1119,7 +1128,7 @@ const loadKnowledgeBase = async () => {
         kbId.value = firstKb.id
         knowledgeBase.value = firstKb
         kbNotFound.value = false
-        window.history.replaceState(null, '', `/knowledge/${firstKb.id}`)
+        // 同上：不再 router.replace 改变路径，避免二次 remount 改写 qaMode。
         console.log('[KB] Auto-selected KB:', firstKb.id, firstKb.name)
       } else {
         kbNotFound.value = true
@@ -1160,7 +1169,7 @@ const loadKnowledgeBase = async () => {
         knowledgeBase.value = firstKb
         kbNotFound.value = false
         // 更新URL但不触发导航（避免死循环）
-        window.history.replaceState(null, '', `/knowledge/${firstKb.id}`)
+        router.replace( `/knowledge/${firstKb.id}`)
       } else {
         kbNotFound.value = true
         knowledgeBase.value = null
@@ -1173,6 +1182,21 @@ const loadKnowledgeBase = async () => {
     kbLoading.value = false
   }
 }
+
+// 防御：当进入知识库模式但 kbId 仍为无效值（undefined/空）时，
+// 兜底触发一次知识库加载，确保 URL 与 kbId 始终有效，避免停在 /knowledge/undefined
+watch(
+  () => [qaMode.value, kbId.value],
+  async ([mode, id]) => {
+    if (mode === 'knowledge') {
+      const invalid = !id || ['0', 'undefined', 'null', '', 'chat', 'select'].includes(String(id))
+      if (invalid) {
+        console.warn('[KB] 检测到无效 kbId，触发兜底加载:', id)
+        await loadKnowledgeBase()
+      }
+    }
+  }
+)
 
 // 创建新知识库
 const createNewKB = async () => {
@@ -1189,7 +1213,7 @@ const createNewKB = async () => {
     kbId.value = res.id
     knowledgeBase.value = res
     kbNotFound.value = false
-    window.history.replaceState(null, '', `/knowledge/${res.id}`)
+    router.replace( `/knowledge/${res.id}`)
     ElMessage.success('知识库创建成功')
   } catch (e) {
     if (e !== 'cancel') console.error('Create KB error:', e)
@@ -1215,9 +1239,10 @@ const loadChatHistory = async (silent = false) => {
     // 其余按后端数据更新，避免整表替换导致 v-for 闪烁。
     const newMap = new Map((items || []).map(session => {
       const mode = session.mode || (qaMode.value === 'chat' ? 'chat' : 'knowledge')
-      return [session.id, {
-        id: session.id,
-        session_id: session.id,
+      const sid = session.session_id || session.id
+      return [sid, {
+        id: sid,
+        session_id: sid,
         question: session.title,
         answer: '',
         created_at: session.updated_at || session.created_at,
@@ -1227,9 +1252,9 @@ const loadChatHistory = async (silent = false) => {
       }]
     }))
 
-    // 保留当前列表中属于当前模式、且后端尚未返回的临时会话（乐观插入的）
+    // 保留当前列表中属于当前模式、且后端尚未返回的临时会话（乐观插入的 / 当前对话占位）
     const preserved = chatHistory.value.filter(
-      h => h.mode === qaMode.value && h._isOptimistic && !newMap.has(h.id)
+      h => h.mode === qaMode.value && (h._isOptimistic || h._isCurrent) && !newMap.has(h.id)
     )
 
     // 按 updated_at 倒序排列
@@ -1303,6 +1328,11 @@ const selectMessage = async (msg) => {
 
   // 如果是会话，加载该会话的所有消息
   if (msg.is_session && msg.session_id) {
+    // 本地当前对话的临时占位项：不要请求后端，直接用本地已恢复的 messages
+    if (msg._isCurrent) {
+      scrollToBottom()
+      return
+    }
     try {
       let items = []
       if (qaMode.value === 'chat') {
@@ -1351,10 +1381,122 @@ const selectMessage = async (msg) => {
 // ========== 模式独立状态（输入框、右侧消息、当前会话均按模式隔离） ==========
 const HISTORY_REFRESH_COOLDOWN_MS = 15000
 const modeState = reactive({
-  chat: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0 },
-  knowledge: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0 },
-  workflow: { question: '', workflowSteps: [], workflowDone: false, workflowError: false, workflowResult: '', historyLoaded: false, historyLoadedAt: 0 },
+  chat: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0, streamingSnapshot: null },
+  knowledge: { question: '', messages: [], currentSessionId: '', historyLoaded: false, historyLoadedAt: 0, streamingSnapshot: null },
+  workflow: { question: '', workflowSteps: [], workflowDone: false, workflowError: false, workflowResult: '', historyLoaded: false, historyLoadedAt: 0, streamingSnapshot: null },
 })
+
+// ========== 对话状态持久化（防止切换页面/组件 remount 后消息丢失） ==========
+// 以 access_token 前缀隔离多用户；状态按 kbId 维度分别保存，避免 modeState 体积过大且跨知识库互相串。
+const STORAGE_PREFIX = 'kc_state_v1'
+const storageUserKey = () => {
+  const t = localStorage.getItem('access_token') || ''
+  // 取 token 前 12 位作为用户隔离标识
+  return t ? t.slice(0, 12) : 'anon'
+}
+// 注意：不要使用 kbId 作为 key 的一部分——kbId 是动态值（进入时可能为 'chat'/'none'，
+// loadKnowledgeBase 后会变成真实 id 并触发 replaceState + 路由名变化 → 组件 remount，
+// 导致存储 key 漂移、恢复不到。统一用固定 per-user key 即可（多知识库场景后续可扩展）。
+const storageKey = () => `${STORAGE_PREFIX}_${storageUserKey()}`
+
+const persistState = () => {
+  try {
+    const payload = {
+      modeState: JSON.parse(JSON.stringify(modeState)),
+      chatHistory: chatHistory.value.map(h => ({ ...h })),
+      qaMode: qaMode.value,
+      // 额外保存全局流式状态，供 onUnmounted 后组件 remount 时恢复
+      streamingSnapshot: {
+        answering: answering.value,
+        streamingText: streamingText.value,
+        streamingReasoning: streamingReasoning.value,
+        answerBuffer: answerBuffer.value,
+        isReasoningPhase: isReasoningPhase.value,
+        currentThinkingStatus: currentThinkingStatus.value,
+        activeStreamingThinkingPanel: [...(activeStreamingThinkingPanel.value || [])],
+        thinkingSteps: [...(thinkingSteps.value || [])],
+        elapsedTime: elapsedTime.value,
+        qaMode: qaMode.value,
+      },
+      savedAt: Date.now(),
+    }
+    localStorage.setItem(storageKey(), JSON.stringify(payload))
+  } catch (e) {
+    // 序列化失败（如超大/循环引用）时静默忽略，不影响主流程
+    console.warn('[Persist] save failed:', e?.message || e)
+  }
+}
+
+const restoreState = () => {
+  try {
+    const raw = localStorage.getItem(storageKey())
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (data?.modeState) {
+      // 逐模式合并，避免缺字段；仅覆盖存在对应模式的属性
+      for (const mode of Object.keys(modeState)) {
+        const saved = data.modeState[mode]
+        if (saved) {
+          if (Array.isArray(saved.messages)) modeState[mode].messages = saved.messages
+          if (typeof saved.currentSessionId === 'string') modeState[mode].currentSessionId = saved.currentSessionId
+          if (typeof saved.question === 'string') modeState[mode].question = saved.question
+          if (typeof saved.historyLoaded === 'boolean') modeState[mode].historyLoaded = saved.historyLoaded
+          if (typeof saved.historyLoadedAt === 'number') modeState[mode].historyLoadedAt = saved.historyLoadedAt
+          if (saved.streamingSnapshot && typeof saved.streamingSnapshot === 'object') {
+            modeState[mode].streamingSnapshot = saved.streamingSnapshot
+          }
+          if (Array.isArray(saved.workflowSteps)) modeState[mode].workflowSteps = saved.workflowSteps
+          if (typeof saved.workflowDone === 'boolean') modeState[mode].workflowDone = saved.workflowDone
+          if (typeof saved.workflowError === 'boolean') modeState[mode].workflowError = saved.workflowError
+          if (typeof saved.workflowResult === 'string') modeState[mode].workflowResult = saved.workflowResult
+        }
+      }
+    }
+    if (Array.isArray(data?.chatHistory)) chatHistory.value = data.chatHistory
+    // 恢复全局流式快照
+    const ss = data?.streamingSnapshot
+    if (ss && ss.qaMode === qaMode.value) {
+      answering.value = !!ss.answering
+      streamingText.value = ss.streamingText || ''
+      streamingReasoning.value = ss.streamingReasoning || ''
+      answerBuffer.value = ss.answerBuffer || ''
+      isReasoningPhase.value = !!ss.isReasoningPhase
+      currentThinkingStatus.value = ss.currentThinkingStatus || ''
+      activeStreamingThinkingPanel.value = Array.isArray(ss.activeStreamingThinkingPanel) ? [...ss.activeStreamingThinkingPanel] : []
+      thinkingSteps.value = Array.isArray(ss.thinkingSteps) ? [...ss.thinkingSteps] : []
+      elapsedTime.value = typeof ss.elapsedTime === 'number' ? ss.elapsedTime : 0
+    }
+    return data
+  } catch (e) {
+    console.warn('[Persist] restore failed:', e?.message || e)
+    return null
+  }
+}
+
+// 状态变化时自动落盘：deep 监听 messages，同步到 modeState 后再 debounce 落盘。
+// 之前仅监听 messages.length，流式输出 content 变化时不会触发，导致刷新丢消息。
+let persistTimer = null
+const debouncedPersistState = () => {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistState()
+    persistTimer = null
+  }, 250)
+}
+
+watch(
+  [() => messages.value, () => currentSessionId.value, qaMode],
+  () => {
+    const mode = qaMode.value
+    if (mode !== 'workflow') {
+      modeState[mode].messages = messages.value.map(m => ({ ...m }))
+      modeState[mode].currentSessionId = currentSessionId.value || ''
+    }
+    debouncedPersistState()
+  },
+  { deep: true }
+)
+watch(chatHistory, debouncedPersistState, { deep: true })
 
 // 切换问答模式
 const switchMode = (mode) => {
@@ -1446,6 +1588,58 @@ const switchMode = (mode) => {
   setTimeout(() => {
     ElMessage.success(`已切换到${modeNames[mode]}模式`)
   }, 120)
+  debouncedPersistState() // 切换模式后立即落盘
+}
+
+// 强制停止当前生成并清空右侧对话状态（用于删除当前会话、切换页面等场景）
+const resetCurrentChatState = () => {
+  // 1. 取消网络请求和 reader，停止后台推流
+  if (streamReader) {
+    try { streamReader.cancel() } catch (e) { /* ignore */ }
+    streamReader = null
+  }
+  if (streamAbortController) {
+    try { streamAbortController.abort() } catch (e) { /* ignore */ }
+    streamAbortController = null
+  }
+
+  // 2. 清掉后台任务 ID，避免卸载/重连时又把旧任务拉回来
+  currentTaskId.value = ''
+  try {
+    localStorage.removeItem('kb_current_task_id')
+    localStorage.removeItem('kb_event_seq')
+  } catch (e) {}
+
+  // 3. 清掉流式相关状态
+  stopTimer()
+  stopTypewriter()
+  answering.value = false
+  streamingText.value = ''
+  fullStreamingText.value = ''
+  streamingReasoning.value = ''
+  thinkingSteps.value = []
+  currentThinkingStatus.value = ''
+  isReasoningPhase.value = false
+  answerBuffer.value = ''
+
+  // 4. 清掉当前会话的右侧消息
+  currentMessageId.value = null
+  currentSessionId.value = ''
+  messages.value = []
+
+  // 5. 同步清空当前模式状态，避免 persistState 又写回旧消息
+  const mode = qaMode.value
+  if (modeState[mode]) {
+    modeState[mode].messages = []
+    modeState[mode].currentSessionId = ''
+    modeState[mode].question = ''
+    if (mode === 'workflow') {
+      modeState.workflow.workflowSteps = []
+      modeState.workflow.workflowDone = false
+      modeState.workflow.workflowError = false
+      modeState.workflow.workflowResult = ''
+    }
+  }
 }
 
 // 开始新对话（仅清空当前模式）。聊天模式下乐观插入一个临时会话条目，
@@ -1483,6 +1677,7 @@ const startNewChat = () => {
     }
     chatHistory.value = [tempSession, ...chatHistory.value.filter(h => h.id !== tempId)]
   }
+  persistState() // 新对话状态立即落盘
 }
 
 // 删除历史消息（会话）
@@ -1502,21 +1697,47 @@ const deleteMessage = async (msgId) => {
     })
 
     let res
-    if (qaMode.value === 'chat') {
-      res = await knowledgeBaseAPI.deleteChatSession(msg.session_id)
+    let notFound = false
+    // 临时会话（未落库）直接在前端移除，不调后端
+    if (msg.session_id && String(msg.session_id).startsWith('temp-')) {
+      res = { ok: true, success: true }
+    } else if (qaMode.value === 'chat') {
+      try {
+        res = await knowledgeBaseAPI.deleteChatSession(msg.session_id)
+      } catch (err) {
+        if (err?.response?.status === 404 || err?.status === 404) {
+          notFound = true
+          res = { ok: true, success: true }
+        } else {
+          throw err
+        }
+      }
     } else {
-      res = await knowledgeBaseAPI.deleteSession(kbId.value, msg.session_id)
+      try {
+        res = await knowledgeBaseAPI.deleteSession(kbId.value, msg.session_id)
+      } catch (err) {
+        if (err?.response?.status === 404 || err?.status === 404) {
+          notFound = true
+          res = { ok: true, success: true }
+        } else {
+          throw err
+        }
+      }
     }
     if (res.ok || res.success) {
       ElMessage.success('删除成功')
-      // 刷新历史列表
-      await loadChatHistory()
+      // 直接从本地列表移除（包括后端不存在的幽灵会话）
+      chatHistory.value = chatHistory.value.filter(h => h.id !== msg.id && h.session_id !== msg.session_id)
+      selectedMessages.value.delete(msg.id)
+      persistState()
       // 如果删除的是当前选中的会话，清空右侧对话区域
       if (currentSessionId.value === msg.session_id) {
         currentMessageId.value = null
         currentSessionId.value = ''
         messages.value = []
       }
+      // 最后再拉一次后端列表兜底
+      await loadChatHistory()
     } else {
       ElMessage.error('删除失败')
     }
@@ -1577,29 +1798,46 @@ const batchDelete = async () => {
     
     // 逐个删除会话（根据当前模式选择对应接口）
     let totalDeleted = 0
+    let successCount = 0
     for (const sessionId of selectedSessionIds) {
       try {
+        // 临时会话（未落库）直接跳过，不调后端
+        if (String(sessionId).startsWith('temp-')) {
+          successCount += 1
+          continue
+        }
         const res = qaMode.value === 'chat'
           ? await knowledgeBaseAPI.deleteChatSession(sessionId)
           : await knowledgeBaseAPI.deleteSession(kbId.value, sessionId)
         if (res.success || res.ok) {
+          successCount += 1
           totalDeleted += res.deleted_count || 0
         }
       } catch (error) {
-        console.error(`删除会话 ${sessionId} 失败:`, error)
+        // 404 表示后端已无该会话，也视为删除成功，前端移除即可
+        if (error?.response?.status === 404 || error?.status === 404) {
+          successCount += 1
+          console.log(`会话 ${sessionId} 在后端不存在，前端直接移除`)
+        } else {
+          console.error(`删除会话 ${sessionId} 失败:`, error)
+        }
       }
     }
     
-    ElMessage.success(`成功删除 ${selectedSessionIds.length} 个会话，共 ${totalDeleted} 条消息`)
-    selectedMessages.value.clear()
-    // 刷新历史列表
-    await loadChatHistory()
-    // 如果删除的是当前选中的会话，清空右侧对话区域
+    ElMessage.success(`成功删除 ${successCount} 个会话，共 ${totalDeleted} 条消息`)
+    // 如果删除的是当前选中的会话，先停止可能正在进行的生成任务并清空状态
     if (currentSessionId.value && selectedSessionIds.includes(currentSessionId.value)) {
-      currentMessageId.value = null
-      currentSessionId.value = ''
-      messages.value = []
+      resetCurrentChatState()
     }
+
+    // 直接从本地列表移除所有选中的会话（包括后端不存在的幽灵会话）
+    chatHistory.value = chatHistory.value.filter(
+      h => !selectedSessionIds.includes(h.session_id)
+    )
+    selectedMessages.value.clear()
+    persistState()
+    // 最后再拉一次后端列表兜底
+    await loadChatHistory()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('Batch delete error:', error)
@@ -2332,6 +2570,12 @@ const finishStreaming = (fullAnswer, contextDocs, skillName, responseTimeMs, { c
   stopTimer()
   answering.value = false
 
+  // 深度思考模型可能把内容全输出在 reasoning 字段，content 为空；
+  // 兜底：用已累积的推理内容作为最终答案，避免只显示占位符。
+  if (!fullAnswer && reasoningMode.value === 'reasoning' && streamingReasoning.value) {
+    fullAnswer = streamingReasoning.value
+  }
+
   // 将完成的 AI 回复添加到消息列表（附带思考过程和真实推理）
   if (fullAnswer) {
     const isDeepThinking = reasoningMode.value === 'reasoning'
@@ -2369,6 +2613,7 @@ const finishStreaming = (fullAnswer, contextDocs, skillName, responseTimeMs, { c
   activeStreamingThinkingPanel.value = []
   isReasoningPhase.value = false
   answerBuffer.value = ''
+  persistState() // AI 回复完成后立即落盘
 }
 
 // ========== 多Agent工作流 ==========
@@ -2395,6 +2640,7 @@ const sendWorkflowMessage = async (userQuestion) => {
   // 添加用户消息
   messages.value.push({ _id: nextMessageKey(), content: userQuestion, isUser: true })
   scrollToBottom()
+  persistState() // 工作流用户问题发出后立即落盘
 
   // 初始化工作流状态
   answering.value = true
@@ -2695,6 +2941,7 @@ const stopStreaming = () => {
     if (!currentSessionId.value || !chatHistory.value.some(h => h.id === currentSessionId.value)) {
       setTimeout(() => loadChatHistory(), 500)
     }
+    persistState() // 停止流式后落盘已生成内容
   }
 
   // 4. 清理流式状态
@@ -2736,6 +2983,7 @@ const sendMessage = async () => {
   // 添加用户消息（包含图片）
   messages.value.push({ _id: nextMessageKey(), content: userQuestion, isUser: true, images: userImages })
   scrollToBottom()
+  persistState() // 用户问题发出后立即落盘
 
   // 初始化流式状态：不再伪造“AI 正在连接”步骤，等后端推送真实状态
   answering.value = true
@@ -2756,6 +3004,7 @@ const sendMessage = async () => {
     if (idleTimeoutId) clearTimeout(idleTimeoutId)
     totalTimeoutId = null
     idleTimeoutId = null
+    stopContentIdleCheck()
   }
   const resetIdleTimeout = () => {
     if (idleTimeoutId) clearTimeout(idleTimeoutId)
@@ -2774,6 +3023,52 @@ const sendMessage = async () => {
 
   let streamDone = false
   const finishCalled = ref(false)
+  let fullAnswer = ''
+  let contextDocs = []
+  let responseTimeMs = 0
+
+  // 统一的流式内容静默兜底：只要 reasoning / answer / streamingText 任一
+  // 超过 IDLE_MS 没增长，就认为模型已经停止输出，自动完成。
+  let contentIdleTimer = null
+  let lastContentLen = 0
+  let lastContentTime = 0
+  const CONTENT_IDLE_MS = 4000
+  const startContentIdleCheck = () => {
+    if (contentIdleTimer) return
+    lastContentLen = (
+      (streamingReasoning.value?.length || 0) +
+      (answerBuffer.value?.length || 0) +
+      (streamingText.value?.length || 0)
+    )
+    lastContentTime = Date.now()
+    contentIdleTimer = setInterval(() => {
+      if (streamDone || reasoningMode.value !== 'reasoning') return
+      const reasoningLen = streamingReasoning.value?.length || 0
+      const answerLen = answerBuffer.value?.length || 0
+      const textLen = streamingText.value?.length || 0
+      const totalLen = reasoningLen + answerLen + textLen
+      const now = Date.now()
+      if (totalLen > lastContentLen) {
+        lastContentLen = totalLen
+        lastContentTime = now
+        return
+      }
+      if (totalLen === lastContentLen && now - lastContentTime > CONTENT_IDLE_MS) {
+        const fallbackAnswer = answerBuffer.value || streamingReasoning.value || streamingText.value || ''
+        console.log('[ContentIdle] 流式内容 4s 未增长，自动兜底完成', fallbackAnswer.length)
+        streamDone = true
+        resetIdleTimeout()
+        clearStreamTimers()
+        finishStreaming(fallbackAnswer, contextDocs, skillName, responseTimeMs, { calledRef: finishCalled })
+      }
+    }, 500)
+  }
+  const stopContentIdleCheck = () => {
+    if (contentIdleTimer) {
+      clearInterval(contentIdleTimer)
+      contentIdleTimer = null
+    }
+  }
 
   try {
     // 只在对话模式下使用 Skill，知识库模式不需要角色设定
@@ -2829,33 +3124,17 @@ const sendMessage = async () => {
     streamReader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let fullAnswer = ''
-    let contextDocs = []
-    let responseTimeMs = 0
-    let aiMessageIndex = -1
-
     while (true) {
       const { done, value } = await streamReader.read()
       if (done) break
-
-      // 收到数据则重置空闲超时
-      resetIdleTimeout()
-
       buffer += decoder.decode(value, { stream: true })
-
-      // 按 SSE 事件块分隔符 \n\n 切分，只处理完整的事件块
       const blocks = buffer.split('\n\n')
       buffer = blocks.pop() || ''
-
       for (const block of blocks) {
         processSSEBlock(block)
       }
     }
-
-    // 流结束时，处理最后可能未以 \n\n 结尾的残留块
-    if (buffer.trim()) {
-      processSSEBlock(buffer.trim())
-    }
+    if (buffer.trim()) processSSEBlock(buffer.trim())
 
     function processSSEBlock(block) {
       const lines = block.split('\n')
@@ -2871,6 +3150,11 @@ const sendMessage = async () => {
 
           switch (data.type) {
             case 'meta':
+              // 接收 session_id 和 task_id（task_id 用于切换页面后重连）
+              if (data.task_id) {
+                currentTaskId.value = data.task_id
+                try { localStorage.setItem('kb_current_task_id', data.task_id) } catch (e) {}
+              }
               // 接收 session_id 和 skill 信息
               if (data.session_id && !currentSessionId.value) {
                 currentSessionId.value = data.session_id
@@ -2902,6 +3186,7 @@ const sendMessage = async () => {
                   thinkingSteps.value = [...thinkingSteps.value, data.content]
                   // 进入深度思考即刻展开临时思考面板，让用户实时看到思考过程
                   activeStreamingThinkingPanel.value = ['reasoning']
+                  scrollToBottom()
                 }
               }
               break
@@ -2913,17 +3198,26 @@ const sendMessage = async () => {
                 isReasoningPhase.value = true
                 // 思考阶段保持临时思考面板展开，让用户实时看到思考过程
                 activeStreamingThinkingPanel.value = ['reasoning']
+                // 思考过程不断变长时，自动向下滚动，避免用户手动下拉
+                scrollToBottom()
+                startContentIdleCheck()
               }
               break
             
             case 'token':
-              // 深度思考模式：思考结束后，答案 token 先缓存，等流结束时一次性完整显示
+              // 深度思考模式：思考阶段（收到第一个 token 之前）不显示答案，
+              // 让用户先完整看到黑框思考过程；一旦 reasoning 阶段结束（首个 token 到达），
+              // 立即把已缓存的答案实时逐字流出，避免「思考完→答案空白等待」的卡顿感。
               if (reasoningMode.value === 'reasoning') {
                 if (isReasoningPhase.value) {
                   isReasoningPhase.value = false
-                  activeStreamingThinkingPanel.value = []  // 思考结束，自动收起
+                  // reasoning 阶段结束，把已缓存的内容交接给实时显示区，无缝衔接
+                  streamingText.value = answerBuffer.value || ''
                 }
                 answerBuffer.value += data.content
+                streamingText.value += data.content
+                scrollToBottom()
+                startContentIdleCheck()
               } else {
                 fullAnswer += data.content
                 streamingText.value = fullAnswer
@@ -2933,9 +3227,16 @@ const sendMessage = async () => {
             
             case 'done':
               // 流式完成：若已处理过则忽略，避免后端/网络重发导致重复渲染
+              stopContentIdleCheck()
+              currentTaskId.value = ''
+              try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
               if (!streamDone) {
                 streamDone = true
-                fullAnswer = data.full_answer || answerBuffer.value || fullAnswer
+                fullAnswer = data.full_answer || answerBuffer.value || streamingText.value || fullAnswer
+                // 深度思考模式下若答案仍为空，用累积的 reasoning 兜底，避免卡住
+                if (!fullAnswer && reasoningMode.value === 'reasoning' && streamingReasoning.value) {
+                  fullAnswer = streamingReasoning.value
+                }
                 contextDocs = data.context_docs || []
                 // 记录后端计算的响应耗时（毫秒）
                 if (data.response_time) {
@@ -2961,6 +3262,8 @@ const sendMessage = async () => {
             case 'error':
               throw new Error(data.message || '未知错误')
           }
+          // 非 meta 事件计入序号，供重连 offset 使用
+          if (data.type !== 'meta') eventSeq += 1
         } catch (parseError) {
           // JSON 解析失败，跳过该条消息，避免整流失败
           console.warn('SSE parse error:', parseError, 'payload:', payload)
@@ -2970,6 +3273,10 @@ const sendMessage = async () => {
 
     // 如果流结束但没有收到 done 事件（异常情况），也完成
     if (!streamDone) {
+      // 深度思考模式下，若 content 为空但有 reasoning 累积，用 reasoning 兜底
+      if (!fullAnswer && reasoningMode.value === 'reasoning' && (answerBuffer.value || streamingReasoning.value)) {
+        fullAnswer = answerBuffer.value || streamingReasoning.value
+      }
       finishStreaming(fullAnswer, contextDocs, skillName, responseTimeMs, { calledRef: finishCalled })
     }
     // 保证流式显示已结束
@@ -2988,9 +3295,9 @@ const sendMessage = async () => {
         console.log('用户停止了流式输出')
       }
       // 超时情况下保存已有内容
-      if ((msg === 'REQUEST_TIMEOUT' || msg === 'IDLE_TIMEOUT') && (streamingText.value || answerBuffer.value)) {
-        // 深度思考模式下答案缓存在 answerBuffer，优先用它保存
-        const currentAnswer = answerBuffer.value || streamingText.value
+      if ((msg === 'REQUEST_TIMEOUT' || msg === 'IDLE_TIMEOUT') && (streamingText.value || answerBuffer.value || streamingReasoning.value)) {
+        // 深度思考模式下答案缓存在 answerBuffer；若 answerBuffer 也为空，用 reasoning 兜底
+        const currentAnswer = answerBuffer.value || streamingText.value || streamingReasoning.value
         messages.value.push({
           _id: nextMessageKey(),
           content: currentAnswer,
@@ -3031,6 +3338,101 @@ const sendMessage = async () => {
   }
 }
 
+// ── 切换页面后重连后台生成任务，从断点 offset 继续接收增量 ──
+async function reconnectTask() {
+  const taskId = currentTaskId.value
+  if (!taskId) return
+  const token = localStorage.getItem('access_token')
+  const url = `/api/v1/knowledge/chat/task/${taskId}/stream?offset=${eventSeq}`
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!resp.ok) {
+      console.warn('[Reconnect] 任务重连失败 status', resp.status)
+      return
+    }
+    answering.value = true
+    streamReader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await streamReader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() || ''
+      for (const block of blocks) {
+        handleReconnectBlock(block)
+      }
+    }
+    if (buffer.trim()) handleReconnectBlock(buffer.trim())
+  } catch (e) {
+    console.warn('[Reconnect] 重连异常', e)
+  } finally {
+    streamReader = null
+  }
+}
+
+function handleReconnectBlock(block) {
+  const lines = block.split('\n')
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line || !line.startsWith('data: ')) continue
+    const payload = line.substring(6)
+    if (payload === '[DONE]') continue
+    try {
+      const data = JSON.parse(payload)
+      switch (data.type) {
+        case 'status':
+          if (data.content && reasoningMode.value === 'reasoning') {
+            thinkingSteps.value = [...thinkingSteps.value, data.content]
+            activeStreamingThinkingPanel.value = ['reasoning']
+            scrollToBottom()
+          }
+          break
+        case 'reasoning':
+          if (data.content && reasoningMode.value === 'reasoning') {
+            streamingReasoning.value += data.content
+            isReasoningPhase.value = true
+            activeStreamingThinkingPanel.value = ['reasoning']
+            scrollToBottom()
+          }
+          break
+        case 'token':
+          if (reasoningMode.value === 'reasoning') {
+            if (isReasoningPhase.value) {
+              isReasoningPhase.value = false
+              streamingText.value = answerBuffer.value || ''
+            }
+            answerBuffer.value += data.content
+            streamingText.value += data.content
+            scrollToBottom()
+          } else {
+            streamingText.value += data.content
+            scrollToBottom()
+          }
+          break
+        case 'done':
+          currentTaskId.value = ''
+          try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+          const finalAnswer = data.full_answer || answerBuffer.value || streamingText.value || ''
+          const ctx = data.context_docs || []
+          const rt = data.response_time || elapsedTime.value * 1000
+          finishStreaming(finalAnswer, ctx, null, rt, {})
+          break
+        case 'error':
+          console.warn('[Reconnect] 后端错误', data.message)
+          break
+      }
+      if (data.type !== 'meta') eventSeq += 1
+    } catch (e) {
+      console.warn('[Reconnect] parse error', e)
+    }
+  }
+}
+
 // 滚动到底部
 const scrollToBottom = async () => {
   await nextTick()
@@ -3048,7 +3450,7 @@ const scrollReasoningToBottom = async () => {
   }
 }
 
-// 思考内容变化时自动滚动到底部，营造“实时滚动”的专业感
+// 思考内容变化时自动滚动到底部，让最新文字始终出现在可视区域内
 watch(streamingReasoning, () => {
   if (activeStreamingThinkingPanel.value.includes('reasoning')) {
     scrollReasoningToBottom()
@@ -3521,14 +3923,117 @@ onMounted(async () => {
   const ok = await ensureValidToken()
   if (!ok) return  // token 失效，已跳登录页，停止后续初始化
 
+  // 1. 先恢复本地持久化的对话状态（消息/历史/当前会话/上次模式），避免切换页面 remount 后丢失
+  const restored = restoreState()
+  // 2. 以持久化的模式为准；没有持久化时再由 URL 决定默认模式。
+  // 注意：不能用 route.path.startsWith('/knowledge/') 判断是否 knowledge 模式，
+  // 因为 chat 模式下 loadKnowledgeBase 也会把 kbId 写进路径（参见下方改动说明），
+  // 导致 remount 后误判为 knowledge。改用 route.name 区分（KnowledgeChatDetail 才是显式知识库详情）。
+  if (restored?.qaMode && ['chat', 'knowledge', 'workflow'].includes(restored.qaMode)) {
+    qaMode.value = restored.qaMode
+    console.log('[Restore] restored qaMode:', restored.qaMode)
+  } else {
+    qaMode.value = route.name === 'KnowledgeChatDetail' ? 'knowledge' : 'chat'
+  }
+
   await loadKnowledgeBase()  // 先加载知识库，确保kbId就绪
-  // 根据当前模式加载对应历史（知识库或日常对话）
-  loadChatHistory()
+
+  // 3. 恢复当前模式的输入框、workflow 步骤等非消息类 UI 状态
+  const cur = qaMode.value
+  if (modeState[cur]) {
+    question.value = modeState[cur].question || ''
+    // 消息/会话 id 先不恢复，由第 5 步统一决定（刷新保留，菜单进入新对话）
+    if (cur === 'workflow') {
+      workflowSteps.value = Array.isArray(modeState.workflow.workflowSteps) ? [...modeState.workflow.workflowSteps] : []
+      workflowDone.value = !!modeState.workflow.workflowDone
+      workflowError.value = !!modeState.workflow.workflowError
+      workflowResult.value = modeState.workflow.workflowResult || ''
+    }
+  }
+  // 4. 根据当前模式加载对应历史（知识库或日常对话）——会增量合并，不会覆盖本地会话内消息
+  await loadChatHistory()
+  // 5. 恢复当前进行中的对话：
+  //    - 只要本地有未结束的消息，不管刷新还是从菜单切回，都恢复当前对话。
+  //    - 只有本地没有任何消息时，才默认打开全新对话。
+  const restoredMessages = modeState[cur]?.messages || []
+  const restoredSessionId = modeState[cur]?.currentSessionId || ''
+  console.log('[Restore] cur:', cur, 'restoredMessages:', restoredMessages.length, 'sessionId:', restoredSessionId)
+  if (restoredMessages.length > 0) {
+    // 恢复当前进行中的对话
+    messages.value = restoredMessages.map(m => ({ ...m }))
+    currentSessionId.value = restoredSessionId
+    currentMessageId.value = null
+    // 恢复未完成的后台任务 id 与已消费事件序号，用于切回页面时继续接收增量
+    const savedTaskId = localStorage.getItem('kb_current_task_id')
+    const savedSeq = parseInt(localStorage.getItem('kb_event_seq') || '0', 10) || 0
+    if (savedTaskId) {
+      currentTaskId.value = savedTaskId
+      eventSeq = savedSeq
+    }
+    // 若最后一条是离开页面时中断的 AI 消息（兼容旧版 localStorage 数据），清理流式占位状态
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg && !lastMsg.isUser && lastMsg._interrupted) {
+      answering.value = false
+      streamingText.value = ''
+      streamingReasoning.value = ''
+      answerBuffer.value = ''
+      isReasoningPhase.value = false
+      currentThinkingStatus.value = ''
+      activeStreamingThinkingPanel.value = []
+      thinkingSteps.value = []
+      modeState[cur].streamingSnapshot = null
+    }
+    let matched = chatHistory.value.find(h => h.session_id === restoredSessionId)
+    if (matched) {
+      currentMessageId.value = matched.id
+    } else if (restoredSessionId && !restoredSessionId.startsWith('temp-')) {
+      // 后端历史列表里还没出现当前会话（可能尚未落库或列表接口未返回），
+      // 临时补一个当前会话项到左侧，避免“右侧有消息、左侧找不到会话”
+      const firstUserMsg = restoredMessages.find(m => m.role === 'user')
+      const title = firstUserMsg?.content?.slice(0, 30) || '当前对话'
+      const tempItem = {
+        id: restoredSessionId,
+        session_id: restoredSessionId,
+        question: title,
+        answer: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        is_session: true,
+        mode: cur,
+        _isCurrent: true,
+      }
+      chatHistory.value = [tempItem, ...chatHistory.value.filter(h => h.session_id !== restoredSessionId)]
+      currentMessageId.value = restoredSessionId
+    }
+  } else {
+    // 没有进行中的对话：优先定位到当前模式下最新的一条历史记录，
+    // 避免每次进入页面都自动创建空的新对话；只有当前模式完全没有历史时才新建。
+    const visible = chatHistory.value.filter(h => h.mode === cur && !h._isOptimistic)
+    if (visible.length > 0) {
+      const latest = visible[0] // 已按 updated_at 倒序，第一条即最新
+      await selectMessage(latest)
+    } else {
+      startNewChat()
+    }
+  }
   setupCodeBlockCopy()
   loadSkills() // 加载 Skills
+
+  // 6. 若离开页面时存在未完成的后台生成任务，切回后自动重连继续接收增量
+  if (currentTaskId.value) {
+    // 等待本轮初始化（历史/消息恢复）完成再重连，避免与初次渲染竞争
+    nextTick(async () => {
+      try {
+        await reconnectTask()
+      } catch (e) {
+        console.warn('[Reconnect] 自动重连失败', e)
+      }
+    })
+  }
 })
 
-// 同步当前模式的消息和会话 id，确保切换模式时状态最新
+// 同步当前模式的消息和会话 id，确保切换模式时状态最新。
+// 注意：不要 immediate，否则 setup 阶段会清空 restoreState 之前已持久化的状态。
 watch(
   [() => messages.value.length, () => currentSessionId.value, qaMode],
   () => {
@@ -3537,8 +4042,7 @@ watch(
       modeState[mode].messages = messages.value.map(m => ({ ...m }))
       modeState[mode].currentSessionId = currentSessionId.value || ''
     }
-  },
-  { immediate: true }
+  }
 )
 
 onUnmounted(() => {
@@ -3561,6 +4065,20 @@ onUnmounted(() => {
     workflowAbortController.abort()
     workflowAbortController = null
   }
+  // 兜底：组件销毁（路由切换 remount）前，把当前对话状态落盘，回来时可恢复
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  // 后台生成任务不依赖前端连接：离开页面时只需保存 task_id 与已消费事件序号，
+  // 回来时通过 reconnectTask 从断点继续接收增量（后端任务仍在跑，结果自动落库）。
+  if (currentTaskId.value) {
+    try {
+      localStorage.setItem('kb_current_task_id', currentTaskId.value)
+      localStorage.setItem('kb_event_seq', String(eventSeq))
+    } catch (e) { /* ignore */ }
+  }
+  persistState()
 })
 </script>
 

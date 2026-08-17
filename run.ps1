@@ -100,9 +100,18 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Host "[Erro
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Host "[Error] node not found" -ForegroundColor Red; exit 1 }
 Write-Host "  Python: $(python --version 2>&1)  Node: $(node --version)"
 
-if (-not (Test-Path (Join-Path $FRONTEND_DIR "node_modules"))) {
+$VITE_BIN = Join-Path $FRONTEND_DIR "node_modules\.bin\vite.cmd"
+if (-not (Test-Path $VITE_BIN)) {
     Write-Host "  Installing frontend dependencies..." -ForegroundColor Gray
-    Push-Location $FRONTEND_DIR; & npm install; Pop-Location
+    Push-Location $FRONTEND_DIR
+    & npm install
+    $installExit = $LASTEXITCODE
+    Pop-Location
+    if ($installExit -ne 0) {
+        Write-Host "  [Error] npm install failed (exit $installExit). Please run 'npm install' manually and check the error." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 } else {
     Write-Host "  Frontend dependencies: OK"
 }
@@ -112,6 +121,12 @@ if (Test-Path $VITE_CACHE) {
     Write-Host "  Clearing Vite cache..." -ForegroundColor Gray
     Remove-Item -Recurse -Force $VITE_CACHE -ErrorAction SilentlyContinue
 }
+
+# 清理本地 dist/.vite，避免 dev 与旧 build 产物冲突
+$DIST_DIR = Join-Path $FRONTEND_DIR "dist"
+$DOT_VITE_DIR = Join-Path $FRONTEND_DIR ".vite"
+if (Test-Path $DIST_DIR) { Remove-Item -Recurse -Force $DIST_DIR -ErrorAction SilentlyContinue }
+if (Test-Path $DOT_VITE_DIR) { Remove-Item -Recurse -Force $DOT_VITE_DIR -ErrorAction SilentlyContinue }
 
 Write-Host "[3/4] Starting services..." -ForegroundColor Yellow
 Import-Env
@@ -123,7 +138,7 @@ Write-Host "  Backend starting at http://localhost:$BACK_PORT" -ForegroundColor 
 
 Start-Sleep -Seconds 2
 
-Start-Process -FilePath "cmd" -ArgumentList "/c","npm","run","dev" `
+Start-Process -FilePath "cmd" -ArgumentList "/k","npm","run","dev" `
     -WorkingDirectory $FRONTEND_DIR -WindowStyle Normal
 Write-Host "  Frontend starting at http://localhost:$FRONT_PORT" -ForegroundColor Green
 

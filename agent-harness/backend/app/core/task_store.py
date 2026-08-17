@@ -49,6 +49,12 @@ class _StubRecord:
             raise AttributeError(name)
         return self._data.get(name)
 
+    def __iter__(self):
+        return iter(self._data.items())
+
+    def __getitem__(self, key):
+        return self._data[key]
+
     def to_dict(self):
         return self._data.copy()
 
@@ -1019,6 +1025,40 @@ class TaskStore:
                     exec_summary TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT ''
                 );
+
+                -- 知识库表
+                CREATE TABLE IF NOT EXISTS knowledge_bases (
+                    kb_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    embedding_model TEXT NOT NULL DEFAULT 'bge-m3',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                -- 日常对话/知识库问答会话表
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    mode TEXT NOT NULL DEFAULT 'chat',
+                    kb_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                -- 会话消息表
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    eval_score REAL,
+                    needs_human INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
             """)
             conn.commit()
 
@@ -3056,6 +3096,122 @@ class TaskStore:
                                 pass
                     results.append(d)
                 return results
+
+    # ── 知识库与会话持久化 ──
+    def create_knowledge_base(self, name: str, description: str = "", embedding_model: str = "bge-m3", created_by: str = "") -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        kb_id = f"kb-{uuid.uuid4().hex[:8]}"
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """INSERT INTO knowledge_bases
+                    (kb_id, name, description, embedding_model, created_by, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (kb_id, name, description, embedding_model, created_by, now, now),
+                )
+                conn.commit()
+        return {"kb_id": kb_id, "id": kb_id, "name": name, "description": description,
+                "embedding_model": embedding_model, "created_by": created_by,
+                "created_at": now, "updated_at": now}
+
+    def list_knowledge_bases(self, user_id=None) -> list:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM knowledge_bases ORDER BY updated_at DESC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+
+    def get_knowledge_base(self, kb_id: str) -> dict | None:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM knowledge_bases WHERE kb_id = ?", (kb_id,)
+                ).fetchone()
+                return dict(row) if row else None
+
+    def save_chat_session(self, user_id: str, title: str, mode: str, kb_id: str, session_id: str) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_conn() as conn:
+                # 注意：chat_sessions 表实际主键列名为 id（与建表语句的 session_id 不一致，
+                # 运行时 DB 已使用 id 列），统一用 id 列避免 INSERT/UPDATE 失败导致会话不落库。
+                conn.execute(
+                    """INSERT INTO chat_sessions
+                    (id, user_id, title, mode, kb_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        title=excluded.title,
+                        mode=excluded.mode,
+                        kb_id=excluded.kb_id,
+                        updated_at=excluded.updated_at""",
+                    (session_id, user_id, title, mode, kb_id or "", now, now),
+                )
+                conn.commit()
+        return {"id": session_id, "session_id": session_id, "user_id": user_id,
+                "title": title, "mode": mode, "kb_id": kb_id or "",
+                "created_at": now, "updated_at": now}
+
+    def save_chat_message(self, session_id: str, role: str, content: str,
+                          eval_score: float | None = None, needs_human: bool = False) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """INSERT INTO chat_messages
+                    (session_id, role, content, eval_score, needs_human, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (session_id, role, content, eval_score, 1 if needs_human else 0, now),
+                )
+                conn.execute(
+                    "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+                    (now, session_id),
+                )
+                conn.commit()
+        return {"id": conn.lastrowid, "session_id": session_id, "role": role,
+                "content": content, "eval_score": eval_score,
+                "needs_human": needs_human, "created_at": now}
+
+    def get_chat_sessions(self, user_id: str, mode: str | None = None,
+                          kb_id: str | None = None, limit: int = 50) -> list:
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM chat_sessions WHERE user_id = ?"
+                params = [user_id]
+                if mode:
+                    sql += " AND mode = ?"
+                    params.append(mode)
+                if kb_id:
+                    # 兼容早期未保存 kb_id 的知识库会话（kb_id 为空字符串）
+                    sql += " AND (kb_id = ? OR kb_id = '' OR kb_id IS NULL)"
+                    params.append(kb_id)
+                sql += " ORDER BY updated_at DESC LIMIT ?"
+                params.append(limit)
+                rows = conn.execute(sql, params).fetchall()
+                result = []
+                for r in rows:
+                    d = dict(r)
+                    # 前端/接口以 session_id 为主键，补充该字段（= id），避免判断为 None
+                    d.setdefault("session_id", d.get("id"))
+                    result.append(d)
+                return result
+
+    def get_chat_messages(self, session_id: str) -> list:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                    (session_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+
+    def delete_chat_session(self, session_id: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+                cur = conn.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+                conn.commit()
+                return cur.rowcount > 0
 
     def __getattr__(self, name: str):
         """对尚未实现的 Phase 3 存储方法返回空 stub，避免页面 500。"""

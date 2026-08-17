@@ -594,6 +594,11 @@ def answer_stream(
         yield {"type": "token", "content": pending_thinking_text}
 
     first_answer = "".join(full_answer_parts).strip()
+    # 深度思考模型偶发把内容全部输出在 reasoning 字段，content 为空；
+    # 兜底：用 reasoning 内容作为最终答案，避免前端只显示占位符。
+    if enable_reasoning and not first_answer and reasoning_parts:
+        first_answer = "\n\n".join(reasoning_parts).strip()
+        logger.info(f"[RAG] 答案为空，已用 reasoning 兜底，长度={len(first_answer)}")
     logger.info(f"[RAG] 首轮生成完成，长度={len(first_answer)}，启动后台评估闭环（max_iter={max_iterations}, threshold={threshold}, enable_eval={enable_eval}）")
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
@@ -764,6 +769,11 @@ def chat_stream(
         yield {"type": "token", "content": pending_thinking_text}
 
     first_answer = "".join(full_answer_parts).strip()
+    # 深度思考模型偶发把内容全部输出在 reasoning 字段，content 为空；
+    # 兜底：用 reasoning 内容作为最终答案，避免前端只显示占位符。
+    if enable_reasoning and not first_answer and reasoning_parts:
+        first_answer = "\n\n".join(reasoning_parts).strip()
+        logger.info(f"[RAG] 答案为空，已用 reasoning 兜底，长度={len(first_answer)}")
     logger.info(f"[RAG] 首轮生成完成，长度={len(first_answer)}，启动后台评估闭环（max_iter={max_iterations}, threshold={threshold}, enable_eval={enable_eval}）")
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──

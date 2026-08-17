@@ -14,4 +14,5 @@ if /I "%~1"=="restartbackend" (
 )
 
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%ROOT%run.ps1"
+pause
 goto :eof

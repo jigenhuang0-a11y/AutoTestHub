@@ -31,7 +31,7 @@ const routes = [
   {
     path: '/',
     name: 'Home',
-    redirect: '/workbench',
+    redirect: '/workbench?domain=test',
   },
   {
     path: '/workbench',
@@ -243,7 +243,7 @@ router.beforeEach(async (to, from) => {
 
   // 1. 已登录用户不应再看到登录页
   if (to.path === '/login' && authStore.isAuthenticated) {
-    return { path: '/workbench', replace: true }
+    return { path: '/workbench', query: { domain: 'test' }, replace: true }
   }
 
   // 2. 需要登录但未登录 -> 引导登录

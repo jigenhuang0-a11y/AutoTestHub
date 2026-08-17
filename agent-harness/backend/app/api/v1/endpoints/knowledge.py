@@ -21,12 +21,14 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+import threading
+import time
 from io import BytesIO
 
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -122,6 +124,163 @@ def _extract_docx_text(stream: BytesIO) -> str:
 
 
 router = APIRouter(tags=["knowledge-rag"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 后台生成任务管理：把 LLM 生成放到独立线程，结果写入内存缓存；
+# 前端（多个标签页 / 切换页面后重连）都作为「消费者」从缓存拉增量。
+# 这样即使某个 SSE 连接断开，生成任务仍在后台继续跑，不会中断。
+# ─────────────────────────────────────────────────────────────────────────────
+class _GenTask:
+    def __init__(self):
+        self.events = []          # 按序累积的所有 SSE 事件
+        self.done = False
+        self.error = None
+        self.lock = threading.Lock()
+        # 持久化所需元数据（在 SSE 消费者线程里写库，避免后台线程直接碰 DB）
+        self.session_id = ''
+        self.question = ''
+        self.mode = 'knowledge'
+        self.kb_id = None
+        self.user_id = ''
+        self.saved = False  # 是否已落库，保证只保存一次
+
+
+GEN_TASKS: dict[str, _GenTask] = {}
+GEN_TASKS_CLEANUP_AFTER = 3600  # 任务完成后 1 小时清理
+
+
+def _run_gen_task(task_id: str, gen_callable, on_done=None):
+    """在线程中迭代同步生成器，把事件写入 GEN_TASKS[task_id]，结束后调用 on_done。"""
+    task = GEN_TASKS.get(task_id)
+    if task is None:
+        return
+    try:
+        for event in gen_callable():
+            with task.lock:
+                task.events.append(event)
+        with task.lock:
+            task.done = True
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[GenTask] {task_id} 生成失败: {e}")
+        with task.lock:
+            task.error = str(e)
+            task.done = True
+    finally:
+        if on_done:
+            try:
+                on_done()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[GenTask] {task_id} on_done 失败: {e}")
+
+
+def _consume_generator(task_id: str, offset: int = 0):
+    """消费者生成器：从 offset 开始把 GEN_TASKS[task_id] 的增量事件推给 SSE。"""
+    task = GEN_TASKS.get(task_id)
+    if task is None:
+        yield _sse_event({"type": "error", "message": "任务不存在或已过期"})
+        return
+    idx = max(0, min(offset, len(task.events)))
+    while True:
+        with task.lock:
+            new_events = task.events[idx:]
+            done = task.done
+            error = task.error
+        for ev in new_events:
+            yield _sse_event(ev)
+            idx += 1
+        if done:
+            if error:
+                yield _sse_event({"type": "error", "message": error})
+            # 任务结束：在 SSE 请求线程里把完整结果落库（仅一次，且处于请求线程，DB 线程安全）
+            try:
+                with task.lock:
+                    if not task.saved:
+                        task.saved = True
+                        full = []
+                        for ev in task.events:
+                            if ev.get("type") == "delta":
+                                full.append(ev.get("content", ""))
+                            elif ev.get("type") == "token":
+                                full.append(ev.get("content", ""))
+                        full_answer = "".join(full)
+                        eval_score = None
+                        needs_human = False
+                        for ev in task.events:
+                            if ev.get("type") == "done":
+                                eval_score = ev.get("eval_score")
+                                needs_human = bool(ev.get("needs_human"))
+                        if full_answer:
+                            _save_chat_round(
+                                store=get_task_store(),
+                                user_id=task.user_id,
+                                question=task.question,
+                                answer=full_answer,
+                                mode=task.mode,
+                                session_id=task.session_id,
+                                kb_id=task.kb_id,
+                                eval_score=eval_score,
+                                needs_human=needs_human,
+                            )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[GenTask] {task_id} 落库失败: {e}")
+            yield _sse_event("[DONE]")
+            return
+        # 无新事件时短暂等待，避免空轮询
+        time.sleep(0.1)
+
+
+def _start_gen_task(kb_id: Optional[str], body: "KBQuery", user_id: str, mode: str):
+    """
+    创建后台生成任务，立即返回 (task_id, session_id)。
+    SSE 流由调用方通过 _consume_generator(task_id) 消费；
+    任务本身在独立线程跑，不依赖 HTTP 连接生命周期。
+    """
+    task_id = str(uuid.uuid4())
+    new_session_id = body.session_id or str(uuid.uuid4())
+    GEN_TASKS[task_id] = _GenTask()
+    GEN_TASKS[task_id].session_id = new_session_id
+    GEN_TASKS[task_id].question = body.question.strip()
+    GEN_TASKS[task_id].kb_id = kb_id
+    GEN_TASKS[task_id].user_id = user_id
+    GEN_TASKS[task_id].mode = "knowledge" if mode == "knowledge" else "chat"
+    question = body.question.strip()
+    history = body.history
+    enable_reasoning = body.enable_reasoning
+    system_prompt = body.system_prompt
+    skill_name = body.skill_name
+    # 预建会话元数据，确保左侧列表能立即显示
+    try:
+        GEN_TASKS[task_id]._session_id = new_session_id
+    except Exception:
+        pass
+
+    if mode == "knowledge":
+        def gen():
+            yield from rag.answer_stream(
+                kb_id, question, history, user_id=user_id, enable_reasoning=enable_reasoning
+            )
+        target_mode = "knowledge"
+    else:
+        def gen():
+            yield from rag.chat_stream(
+                question, system_prompt, history, user_id=user_id, enable_reasoning=enable_reasoning
+            )
+        target_mode = "chat"
+
+    def on_done():
+        # 后台生成结束后，仅做轻量清理/日志；DB 持久化由前端收到 done 事件时
+        # 在 finishStreaming 中完成（_save_chat_round），避免后台线程直接操作 DB 的线程安全问题。
+        logger.info(f"[GenTask] {task_id} 生成结束（session={new_session_id}）")
+
+    t = threading.Thread(
+        target=_run_gen_task,
+        args=(task_id, gen, on_done),
+        daemon=True,
+    )
+    t.start()
+    return task_id, new_session_id, target_mode
+
 
 _ALLOWED_EXT = {".txt", ".md", ".markdown", ".pdf", ".docx"}
 
@@ -373,7 +532,7 @@ def _sse_event(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-@router.post("/knowledge-bases/{kb_id}/ask_stream/", summary="基于知识库流式问答")
+@router.post("/knowledge-bases/{kb_id}/ask_stream/", summary="基于知识库流式问答（后台任务+多消费者）")
 def ask_kb_stream(
     kb_id: str,
     body: KBQuery,
@@ -387,54 +546,19 @@ def ask_kb_stream(
         raise HTTPException(status_code=400, detail="问题不能为空")
 
     user_id = str(body.user_id or current_user.get("user_id", current_user.get("username", "")))
-    question = body.question.strip()
-    session_id = body.session_id
-    # 新会话时提前生成稳定的 session_id，确保 meta 事件返回与持久化写入的 id 一致
-    new_session_id = session_id or str(uuid.uuid4())
-    full_answer_parts: list[str] = []
+    # 创建后台生成任务；本请求作为第一个消费者，从 offset=0 拉取全部增量
+    task_id, new_session_id, _mode = _start_gen_task(kb_id, body, user_id, mode="knowledge")
 
     def event_generator():
-        nonlocal full_answer_parts
-        eval_score = None
-        needs_human = False
-        yield _sse_event({"type": "meta", "session_id": new_session_id})
-        yield _sse_event({"type": "status", "content": "正在检索知识库..."})
-        try:
-            for event in rag.answer_stream(kb_id, question, body.history, user_id=user_id, enable_reasoning=body.enable_reasoning):
-                if event.get("type") == "delta":
-                    full_answer_parts.append(event.get("content", ""))
-                if event.get("type") == "done":
-                    eval_score = event.get("eval_score")
-                    needs_human = bool(event.get("needs_human"))
-                yield _sse_event(event)
-                if event.get("type") == "error":
-                    return
-        except Exception as e:
-            logger.error(f"[KB] ask_stream 失败: {e}")
-            yield _sse_event({"type": "error", "message": f"问答失败: {e}"})
-            return
-        yield _sse_event("[DONE]")
-        # SSE 结束后持久化会话（同步执行，不影响流式返回）
-        try:
-            saved_sid = _save_chat_round(
-                store=store,
-                user_id=user_id,
-                question=question,
-                answer="".join(full_answer_parts),
-                mode="knowledge",
-                session_id=new_session_id,
-                kb_id=kb_id,
-                eval_score=eval_score,
-                needs_human=needs_human,
-            )
-            logger.info(f"[KB] 已保存知识库会话 {saved_sid}")
-        except Exception as e:
-            logger.warning(f"[KB] 保存知识库会话失败: {e}")
+        # 首包先回 meta（含 task_id，供前端重连使用）
+        yield _sse_event({"type": "meta", "session_id": new_session_id, "task_id": task_id})
+        for ev in _consume_generator(task_id, offset=0):
+            yield ev
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@router.post("/chat/stream/", summary="日常对话流式问答")
+@router.post("/chat/stream/", summary="日常对话流式问答（后台任务+多消费者）")
 def chat_stream(
     body: KBQuery,
     current_user=Depends(get_current_user),
@@ -444,47 +568,28 @@ def chat_stream(
         raise HTTPException(status_code=400, detail="问题不能为空")
 
     user_id = str(body.user_id or current_user.get("user_id", current_user.get("username", "")))
-    question = body.question.strip()
-    session_id = body.session_id
-    # 新会话时提前生成稳定的 session_id，确保 meta 事件返回与持久化写入的 id 一致
-    new_session_id = session_id or str(uuid.uuid4())
-    full_answer_parts: list[str] = []
+    task_id, new_session_id, _mode = _start_gen_task(None, body, user_id, mode="chat")
 
     def event_generator():
-        nonlocal full_answer_parts
-        eval_score = None
-        needs_human = False
-        yield _sse_event({"type": "meta", "session_id": new_session_id})
-        try:
-            for event in rag.chat_stream(question, body.system_prompt, body.history, user_id=user_id, enable_reasoning=body.enable_reasoning):
-                if event.get("type") == "delta":
-                    full_answer_parts.append(event.get("content", ""))
-                if event.get("type") == "done":
-                    eval_score = event.get("eval_score")
-                    needs_human = bool(event.get("needs_human"))
-                yield _sse_event(event)
-                if event.get("type") == "error":
-                    return
-        except Exception as e:
-            logger.error(f"[KB] chat_stream 失败: {e}")
-            yield _sse_event({"type": "error", "message": f"对话失败: {e}"})
-            return
-        yield _sse_event("[DONE]")
-        # SSE 结束后持久化会话
-        try:
-            saved_sid = _save_chat_round(
-                store=store,
-                user_id=user_id,
-                question=question,
-                answer="".join(full_answer_parts),
-                mode="chat",
-                session_id=new_session_id,
-                eval_score=eval_score,
-                needs_human=needs_human,
-            )
-            logger.info(f"[KB] 已保存日常对话会话 {saved_sid}")
-        except Exception as e:
-            logger.warning(f"[KB] 保存日常对话会话失败: {e}")
+        yield _sse_event({"type": "meta", "session_id": new_session_id, "task_id": task_id})
+        for ev in _consume_generator(task_id, offset=0):
+            yield ev
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/chat/task/{task_id}/stream", summary="重连后台生成任务流（切回页面时调用）")
+def reconnect_task_stream(task_id: str, offset: int = 0):
+    """前端切换页面/会话后，用 task_id 从断点 offset 继续接收增量事件。"""
+    if task_id not in GEN_TASKS:
+        return StreamingResponse(
+            iter([_sse_event({"type": "error", "message": "任务不存在或已过期"})]),
+            media_type="text/event-stream",
+        )
+
+    def event_generator():
+        for ev in _consume_generator(task_id, offset=offset):
+            yield ev
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -521,7 +626,7 @@ def session_messages(
     user_id = str(current_user.get("user_id", current_user.get("username", "")))
     # 简单鉴权：确认会话属于当前用户
     sessions = store.get_chat_sessions(user_id=user_id, mode="knowledge", kb_id=kb_id)
-    if not any(s["id"] == session_id for s in sessions):
+    if not any(s.get("session_id") == session_id for s in sessions):
         raise HTTPException(status_code=404, detail="会话不存在")
     items = store.get_chat_messages(session_id)
     return {"items": items, "total": len(items)}
@@ -539,7 +644,13 @@ def delete_session(
         raise HTTPException(status_code=400, detail="缺少 session_id")
     user_id = str(current_user.get("user_id", current_user.get("username", "")))
     sessions = store.get_chat_sessions(user_id=user_id, mode="knowledge", kb_id=kb_id)
-    if not any(s["id"] == session_id for s in sessions):
+    matched = next((s for s in sessions if s.get("session_id") == session_id), None)
+    # 兼容旧数据：早期保存的知识库会话 kb_id 为空，按 URL 的 kb_id 查不到；
+    # 若该会话属于当前用户且 mode=knowledge，则允许删除。
+    if matched is None:
+        all_knowledge = store.get_chat_sessions(user_id=user_id, mode="knowledge")
+        matched = next((s for s in all_knowledge if s.get("session_id") == session_id), None)
+    if matched is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     store.delete_chat_session(session_id)
     return {"ok": True}
@@ -575,7 +686,7 @@ def chat_session_messages(
 ):
     user_id = str(current_user.get("user_id", current_user.get("username", "")))
     sessions = store.get_chat_sessions(user_id=user_id, mode="chat")
-    if not any(s["id"] == session_id for s in sessions):
+    if not any(s.get("session_id") == session_id for s in sessions):
         raise HTTPException(status_code=404, detail="会话不存在")
     items = store.get_chat_messages(session_id)
     return {"items": items, "total": len(items)}
@@ -589,7 +700,7 @@ def delete_chat_session_endpoint(
 ):
     user_id = str(current_user.get("user_id", current_user.get("username", "")))
     sessions = store.get_chat_sessions(user_id=user_id, mode="chat")
-    if not any(s["id"] == session_id for s in sessions):
+    if not any(s.get("session_id") == session_id for s in sessions):
         raise HTTPException(status_code=404, detail="会话不存在")
     store.delete_chat_session(session_id)
     return {"ok": True}

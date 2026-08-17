@@ -59,10 +59,10 @@ class ProviderPool:
 
     def get_default(self) -> BaseLLMProvider:
         available = get_available_providers()
-        if "dashscope" in available:
-            return self.get("dashscope", model="qwen-plus")
         if "deepseek" in available:
             return self.get("deepseek", model="deepseek-chat")
+        if "dashscope" in available:
+            return self.get("dashscope", model="qwen-plus")
         if "glm" in available:
             return self.get("glm", model="glm-4-flash")
         raise ValueError("没有可用的 LLM Provider，请至少配置一个 API Key")

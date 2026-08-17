@@ -9,6 +9,8 @@ RUN npm install --no-audit --no-fund --platform=linux --arch=x64 --registry=http
 
 # 构建
 COPY . .
+# 强制清除 Vite/Rollup 缓存，确保源码修改一定进入构建产物
+RUN rm -rf node_modules/.vite dist .vite
 RUN npm run build
 
 # 第二阶段：Nginx 托管静态资源
