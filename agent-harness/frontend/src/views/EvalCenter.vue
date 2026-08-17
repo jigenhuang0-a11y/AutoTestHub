@@ -254,7 +254,8 @@ function normalizeDashboard(data) {
 async function loadDashboard() {
   loading.value = true
   try {
-    const { data } = await evalCenterAPI.dashboard(hours.value)
+    // axios 拦截器已返回 response.data，无需再解构 { data }
+    const data = await evalCenterAPI.dashboard(hours.value)
     dashboard.value = normalizeDashboard(data)
     nextTick(() => setTimeout(initCharts, 100))
   } catch (e) {
@@ -266,8 +267,8 @@ async function loadDashboard() {
 
 async function loadLangfuseConfig() {
   try {
-    const { data } = await evalCenterAPI.langfuseConfig()
-    langfuse.value = data
+    const data = await evalCenterAPI.langfuseConfig()
+    langfuse.value = data || { enabled: false }
   } catch {
     langfuse.value = { enabled: false }
   }
@@ -281,8 +282,7 @@ async function demoJudge() {
       reference: '订单系统需求：支持下单、取消、库存校验。',
       feature: 'ai_testcase',
     }
-    const { data } = await evalCenterAPI.judge(req)
-    // 兼容后端两种返回：{success, data} 包装 或 直接评分对象
+    const data = await evalCenterAPI.judge(req)
     const payload = data.success === true ? data.data : data
     if (payload && payload.overall !== undefined) {
       ElMessage.success('样例评测完成，综合分：' + payload.overall)
