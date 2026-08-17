@@ -377,18 +377,33 @@ function initRadar() {
   radarChart?.dispose()
   radarChart = echarts.init(radarRef.value, null, { renderer: 'canvas' })
   const s = dashboard.value.avg_scores
+  const dims = ['幻觉率', '一致性', '完整性', '可执行性', '安全性']
+  const values = [s.hallucination, s.consistency, s.completeness, s.executability, s.safety]
   const option = {
     color: ['#818cf8'],
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(15,23,42,0.95)',
+      borderColor: 'rgba(148,163,184,0.2)',
+      textStyle: { color: '#e2e8f0' },
+      formatter: () => {
+        return dims.map((name, i) => `${name}: <strong>${values[i] ?? 0}</strong>`).join('<br/>')
+      },
+    },
     radar: {
-      indicator: [
-        { name: '幻觉率', max: 100 },
-        { name: '一致性', max: 100 },
-        { name: '完整性', max: 100 },
-        { name: '可执行性', max: 100 },
-        { name: '安全性', max: 100 },
-      ],
+      indicator: dims.map(name => ({ name, max: 100 })),
       radius: '60%',
-      axisName: { color: '#94a3b8' },
+      axisName: {
+        color: '#94a3b8',
+        formatter: (name, indicator) => {
+          const idx = dims.indexOf(name)
+          return `{name|${name}}\n{score|${values[idx] ?? 0}}`
+        },
+        rich: {
+          name: { color: '#94a3b8', fontSize: 12, lineHeight: 16 },
+          score: { color: '#e2e8f0', fontSize: 14, fontWeight: 'bold', lineHeight: 18 },
+        },
+      },
       splitArea: { areaStyle: { color: ['rgba(148,163,184,0.06)', 'rgba(148,163,184,0.12)'] } },
       axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } },
       splitLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
@@ -396,13 +411,14 @@ function initRadar() {
     series: [{
       type: 'radar',
       data: [{
-        value: [s.hallucination, s.consistency, s.completeness, s.executability, s.safety],
+        value: values,
         name: '平均分',
       }],
-      areaStyle: { opacity: 0.35, color: '#818cf8' },
+      areaStyle: { opacity: 0.25, color: '#818cf8' },
       lineStyle: { width: 3 },
       symbol: 'circle',
       symbolSize: 6,
+      label: { show: false },
     }],
   }
   radarChart.setOption(option)
@@ -418,21 +434,27 @@ function initTrend() {
   trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
   const trend = dashboard.value.trend || []
   const x = trend.map(t => t.hour?.replace('T', ' ') || '')
-  const avg = trend.map(t => t.avg_overall)
-  const count = trend.map(t => t.count)
+  const avg = trend.map(t => Number(t.avg_overall) || 0)
+  const count = trend.map(t => Number(t.count) || 0)
+  const maxCount = Math.max(...count, 1)
   const option = {
     color: ['#60a5fa', '#34d399'],
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,23,42,0.95)', borderColor: 'rgba(148,163,184,0.2)', textStyle: { color: '#e2e8f0' } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(15,23,42,0.95)',
+      borderColor: 'rgba(148,163,184,0.2)',
+      textStyle: { color: '#e2e8f0' },
+    },
     legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 30, left: 40, right: 40, bottom: 40, containLabel: true },
+    grid: { top: 30, left: 40, right: 50, bottom: 40, containLabel: true },
     xAxis: { type: 'category', data: x, axisLabel: { rotate: 30, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
     yAxis: [
-      { type: 'value', name: '分数', max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
-      { type: 'value', name: '次数', axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
+      { type: 'value', name: '分数', min: 0, max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
+      { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
     ],
     series: [
-      { name: '平均综合分', type: 'line', data: avg, smooth: true, lineStyle: { width: 3 }, areaStyle: { opacity: 0.15, color: '#60a5fa' }, symbol: 'circle', symbolSize: 6 },
-      { name: '评测次数', type: 'bar', yAxisIndex: 1, data: count, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+      { name: '平均综合分', type: 'line', data: avg, smooth: true, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 8, itemStyle: { color: '#60a5fa' }, label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' } },
+      { name: '评测次数', type: 'bar', yAxisIndex: 1, data: count, itemStyle: { borderRadius: [4, 4, 0, 0], color: 'rgba(52,211,153,0.6)' }, barMaxWidth: 24, label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' } },
     ],
   }
   trendChart.setOption(option)
