@@ -480,18 +480,6 @@ function initTrend() {
 
   const option = {
     color: ['#60a5fa', '#34d399'],
-    graphic: isSinglePoint.value ? [
-      {
-        type: 'text',
-        left: 'center',
-        top: '78%',
-        style: {
-          text: '当前仅 1 个时间点，已自动切换为按天聚合；数据累积后此处将显示趋势曲线',
-          fill: '#94a3b8',
-          fontSize: 12,
-        },
-      },
-    ] : [],
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(15,23,42,0.95)',
