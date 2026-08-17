@@ -430,6 +430,14 @@ function initRadar() {
   radarChart.setOption(option)
 }
 
+// 把后端 hour 字段（day 聚合: "2026-08-18"；hour 聚合: "2026-08-18T13"）缩短为短标签
+function formatTrendLabel(hour) {
+  if (!hour) return ''
+  const [datePart, timePart] = hour.split('T')
+  const md = datePart.slice(5) // "08-18"
+  return timePart ? `${md} ${timePart}:00` : md
+}
+
 function initTrend() {
   if (!trendRef.value) return
   trendChart?.dispose()
@@ -439,7 +447,7 @@ function initTrend() {
   }
   trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
   const trend = dashboard.value.trend || []
-  const x = trend.map(t => t.hour?.replace('T', ' ') || '')
+  const x = trend.map(t => formatTrendLabel(t.hour))
   const avg = trend.map(t => Number(t.avg_overall) || 0)
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
@@ -492,7 +500,7 @@ function initTrend() {
     },
     legend: { data: isSinglePoint.value ? ['平均综合分'] : ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
     grid: { top: 30, left: 40, right: 50, bottom: 40, containLabel: true },
-    xAxis: { type: 'category', data: x, axisLabel: { rotate: 30, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
+    xAxis: { type: 'category', data: x, axisLabel: { rotate: 0, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
     yAxis: [
       { type: 'value', name: '分数', min: 0, max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
       { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false }, show: !isSinglePoint.value },
