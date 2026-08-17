@@ -282,8 +282,10 @@ async function demoJudge() {
       feature: 'ai_testcase',
     }
     const { data } = await evalCenterAPI.judge(req)
-    if (data.success) {
-      ElMessage.success('样例评测完成，综合分：' + data.data.overall)
+    // 兼容后端两种返回：{success, data} 包装 或 直接评分对象
+    const payload = data.success === true ? data.data : data
+    if (payload && payload.overall !== undefined) {
+      ElMessage.success('样例评测完成，综合分：' + payload.overall)
       loadDashboard()
     } else {
       ElMessage.error(data.message || '评测失败')

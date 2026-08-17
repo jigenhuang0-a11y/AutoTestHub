@@ -54,7 +54,8 @@ def run_judge(req: JudgeRequest):
         record["input_text"] = req.input_text[:1000]
         record["output_text"] = req.output_text[:1000]
         get_eval_store().save(record)
-        return JudgeResponse(success=True, data=record)
+        # 显式返回标准包装结构，避免旧镜像/代理返回裸对象
+        return {"success": True, "data": record, "message": ""}
     except Exception as e:
         logger.error(f"[eval_center] judge 失败: {e}")
         return JudgeResponse(success=False, data={}, message=str(e))
