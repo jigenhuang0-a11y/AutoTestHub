@@ -48,7 +48,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const parts = token.split('.')
       if (parts.length !== 3) return null
-      const payload = JSON.parse(decodeURIComponent(escape(window.atob(parts[1])))
+      const payload = JSON.parse(decodeURIComponent(escape(window.atob(parts[1]))))
       return payload
     } catch (e) {
       return null
