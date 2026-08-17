@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
   const accessToken = ref(localStorage.getItem('access_token') || '')
   const refreshToken = ref(localStorage.getItem('refresh_token') || '')
+  let refreshTimer = null
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
@@ -40,6 +41,56 @@ export const useAuthStore = defineStore('auth', () => {
       ElMessage.error(msg)
       throw error
     }
+  }
+
+  // 解析 JWT payload（不校验签名，仅读 exp 用于前端续期判断）
+  const parseJwt = (token) => {
+    try {
+      const parts = token.split('.')
+      if (parts.length !== 3) return null
+      const payload = JSON.parse(decodeURIComponent(escape(window.atob(parts[1])))
+      return payload
+    } catch (e) {
+      return null
+    }
+  }
+
+  // 是否接近过期（剩余 < 6 小时则续期）
+  const shouldRefresh = (token = accessToken.value) => {
+    const payload = parseJwt(token)
+    if (!payload || !payload.exp) return false
+    const remain = payload.exp - Math.floor(Date.now() / 1000)
+    return remain < 6 * 3600
+  }
+
+  // 用当前 token 静默换新（后端 /auth/refresh）
+  let refreshing = null
+  const refreshAccessToken = async () => {
+    if (!accessToken.value) return false
+    // 单飞：避免并发请求同时触发多次刷新
+    if (refreshing) return refreshing
+    refreshing = (async () => {
+      try {
+        const res = await authAPI.refreshToken()
+        const token = res.access || res.access_token
+        if (!token) return false
+        accessToken.value = token
+        localStorage.setItem('access_token', token)
+        if (res.user) {
+          user.value = res.user
+          localStorage.setItem('user', JSON.stringify(res.user))
+        }
+        return true
+      } catch (e) {
+        // 刷新失败（如 refresh 端点也要求有效 token 但已失效）→ 登出
+        console.warn('[auth] 续期失败，跳转登录:', e)
+        logout(true)
+        return false
+      } finally {
+        refreshing = null
+      }
+    })()
+    return refreshing
   }
 
   const logout = (silent = false) => {
@@ -78,7 +129,6 @@ export const useAuthStore = defineStore('auth', () => {
         const parsed = JSON.parse(storedUser)
         if (parsed && parsed.role) {
           user.value = parsed
-          return
         }
       } catch (e) {
         console.warn('Failed to parse stored user:', e)
@@ -93,6 +143,15 @@ export const useAuthStore = defineStore('auth', () => {
         console.error('Initialize fetchProfile failed:', error)
       }
     }
+    // 后台静默续期：每 30 分钟检查一次，剩余 <6h 自动刷新 token
+    if (!refreshTimer) {
+      refreshTimer = setInterval(() => {
+        const t = localStorage.getItem('access_token')
+        if (t && shouldRefresh(t)) {
+          refreshAccessToken()
+        }
+      }, 30 * 60 * 1000)
+    }
   }
 
   return {
@@ -104,5 +163,7 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchProfile,
     initialize,
+    shouldRefresh,
+    refreshAccessToken,
   }
 })

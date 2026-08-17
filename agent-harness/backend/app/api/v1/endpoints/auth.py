@@ -88,6 +88,10 @@ class UpdateRoleRequest(BaseModel):
 # 工具函数
 # ============================================================
 
+# Token 有效期：7 天（秒）。避免操作中频繁跳登录。
+JWT_EXPIRE_SECONDS = int(os.getenv("JWT_EXPIRE_SECONDS", "604800"))
+
+
 def _issue_token(username: str, user_id: int, role: str) -> str:
     signing_key = os.getenv("JWT_SIGNING_KEY", "harness-dev-fallback-key")
     now = int(time.time())
@@ -96,7 +100,7 @@ def _issue_token(username: str, user_id: int, role: str) -> str:
         "username": username,
         "role": role,
         "token_type": "access",
-        "exp": now + 86400,
+        "exp": now + JWT_EXPIRE_SECONDS,
         "iat": now,
         "jti": uuid.uuid4().hex[:12],
     }

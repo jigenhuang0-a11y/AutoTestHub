@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -26,7 +27,7 @@ api.interceptors.response.use(
   (response) => {
     return response.data
   },
-  (error) => {
+  async (error) => {
     if (error.config?.skipErrorHandler) {
       return Promise.reject(error)
     }
@@ -38,14 +39,23 @@ api.interceptors.response.use(
 
     if (error.response) {
       switch (error.response.status) {
-        case 401:
+        case 401: {
+          const auth = useAuthStore()
+          // 已登录态下，尝试用 /auth/refresh 静默续期并重试一次原请求
+          if (auth.accessToken && !error.config._retried) {
+            const ok = await auth.refreshAccessToken()
+            if (ok) {
+              error.config._retried = true
+              const newToken = localStorage.getItem('access_token')
+              if (newToken) error.config.headers.Authorization = `Bearer ${newToken}`
+              return api.request(error.config)
+            }
+          }
           // 打印关键调试信息，帮助定位是哪个请求触发 401
           console.error('[api] 401 触发跳转登录页:', {
             url: error.config?.url,
             method: error.config?.method,
-            headers: error.config?.headers,
             status: error.response?.status,
-            statusText: error.response?.statusText,
             data: error.response?.data,
           })
           // 避免在登录页本身触发无限跳转
@@ -57,6 +67,7 @@ api.interceptors.response.use(
             router.replace('/login')
           }
           break
+        }
         case 403:
           ElMessage.error('禁止访问')
           break
