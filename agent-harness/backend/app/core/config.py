@@ -32,6 +32,8 @@ class LLMRouterConfig:
         "evaluation": ["deepseek-chat", "qwen-max"],
         "agent": ["deepseek-chat", "qwen-plus"],        # ReAct Agent 专用
         "fast_chat": ["deepseek-chat", "qwen-turbo"],   # 日常对话默认走 DeepSeek（本地 Key 可用）
+        "chat": ["deepseek-chat", "qwen-turbo"],
+        "knowledge_chat": ["deepseek-chat", "qwen-plus"],  # RAG 知识库问答
         "data_generation": ["deepseek-chat", "qwen-plus"],
         "rag_query": ["deepseek-chat", "qwen-plus"],    # 知识库问答默认 DeepSeek
         "reasoning": ["deepseek-chat", "qwen-max"],      # 深度思考优先原生推理模型

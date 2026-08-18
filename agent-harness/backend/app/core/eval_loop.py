@@ -26,6 +26,7 @@ from app.tools.evaluate_run import evaluate
 from app.core.webhook_notifier import notify_human_review
 from app.core.hallucination_judge import judge_output
 from app.core.eval_store import get_eval_store
+from app.core.eval_event_store import get_eval_event_store
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,9 @@ def run_eval_loop(
     trace_id: Optional[str] = None,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    retrieved_docs: Optional[List[Dict]] = None,
+    model: Optional[str] = None,
+    latency_ms: Optional[int] = None,
 ) -> EvalResult:
     """
     评估闭环主入口。
@@ -175,7 +179,8 @@ def run_eval_loop(
                     logger.error(f"[EvalLoop] 长期记忆沉淀失败: {e}")
             # 通过即退出循环，对最终答案做五维 Judge 并写入评估中心
             _run_judge_and_persist(
-                result, question, answer, reference, feature, trace_id, user_id, session_id
+                result, question, answer, reference, feature, trace_id, user_id, session_id,
+                retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
             )
             return result
 
@@ -201,7 +206,8 @@ def run_eval_loop(
 
     # 不论达标与否，都对最终答案做五维 Judge 并写入评估中心（供全链路评测中心看板）
     _run_judge_and_persist(
-        result, question, best_answer, reference, feature, trace_id, user_id, session_id
+        result, question, best_answer, reference, feature, trace_id, user_id, session_id,
+        retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
     )
 
     if result.needs_human and human_review_ctx:
@@ -264,6 +270,17 @@ def _run_judge_and_persist(
         if token_usage is not None:
             record["token_usage"] = token_usage
         record_id = get_eval_store().save(record)
+        # 同时把 Judge 结果关联到 EvalEventStore 的对应事件，让 EvalCenter 能看实时过程
+        try:
+            get_eval_event_store().attach_judge_to_latest(
+                feature=feature,
+                input_text=question,
+                judge=judge.to_dict(),
+                dimension_scores=record.get("dimension_scores", {}),
+                issues=record.get("issues", []),
+            )
+        except Exception as e:
+            logger.warning(f"[EvalLoop] 关联 EvalEvent 失败（已忽略）: {e}")
         # result 可能来自后台异步路径（None），仅在非空时回填
         if result is not None:
             result.judge = judge.to_dict()

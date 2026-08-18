@@ -8,12 +8,17 @@
 - 否则回退到 DB 中当前激活的模型
 - 再不行回退到 provider_pool 的默认可用模型
 - 全部不可用时抛出清晰异常，由调用方降级为 mock
+
+追踪集成：
+- 每次真实 LLM 调用都会向 EvalEventStore 写入事件，供 EvalCenter 事件驱动刷新。
 """
 import logging
+import time
 from typing import Optional
 
 from app.core.task_store import get_task_store, ModelConfigRecord
 from app.core.provider_pool import get_provider_pool
+from app.core.eval_event_store import build_event, get_eval_event_store
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +71,41 @@ def get_llm_for_test(model_id: Optional[str] = None):
     return provider, provider.model
 
 
-async def generate_text(prompt: str, model_id: Optional[str] = None, temperature: float = 0.7) -> str:
-    """调用真实 LLM 生成文本（同步 Provider 包成 async）。"""
+async def generate_text(
+    prompt: str,
+    model_id: Optional[str] = None,
+    temperature: float = 0.7,
+    task_type: str = "agent_loop",
+) -> str:
+    """调用真实 LLM 生成文本（同步 Provider 包成 async）。
+
+    Args:
+        task_type: 业务模块类型，用于 EvalCenter 按功能追踪。可选值参考 eval_event_store 的 TRACKED_FEATURES。
+    """
     provider, model_name = get_llm_for_test(model_id)
-    logger.info(f"[llm_helper] generate_text via {model_name}")
+    logger.info(f"[llm_helper] generate_text via {model_name} task_type={task_type}")
+    start = time.time()
     result = provider.chat([
         {"role": "system", "content": "你是资深测试开发工程师。"},
         {"role": "user", "content": prompt},
     ], temperature=temperature)
-    if isinstance(result, dict):
-        return result.get("content", "")
-    return str(result)
+    latency_ms = int((time.time() - start) * 1000)
+    content = result.get("content", "") if isinstance(result, dict) else str(result)
+
+    # 记录到 EvalEventStore，供 EvalCenter 事件驱动刷新
+    try:
+        event = build_event(
+            feature=task_type,
+            task_type=task_type,
+            model=model_name,
+            provider=provider.__class__.__name__,
+            input_text=prompt,
+            output_text=content,
+            latency_ms=latency_ms,
+            token_usage=max(1, len(content) // 4),
+        )
+        get_eval_event_store().add(event)
+    except Exception as e:
+        logger.warning(f"[llm_helper] 记录 EvalEvent 失败: {e}")
+
+    return content

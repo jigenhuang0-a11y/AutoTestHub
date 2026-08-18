@@ -422,6 +422,10 @@ export const evalCenterAPI = {
   records: (params) => api.get('/eval-center/records', { params }),
   judge: (data) => api.post('/eval-center/judge', data),
   langfuseConfig: () => api.get('/eval-center/langfuse-config'),
+  events: (params) => api.get('/eval-center/events', { params }),
+  event: (id) => api.get(`/eval-center/events/${id}`),
+  poll: (sinceMs = 0) => api.get('/eval-center/poll', { params: { since_ms: sinceMs } }),
+  features: () => api.get('/eval-center/features'),
 }
 
 // 多 Agent 团队编排 API（对接后端 /api/v1/team/team/tasks 任务生命周期）

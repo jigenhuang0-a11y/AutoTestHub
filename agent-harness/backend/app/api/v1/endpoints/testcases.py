@@ -243,7 +243,7 @@ async def debug_temp(payload: DebugPayload, _: None = Depends(require_auth)):
     try:
         from app.core.llm_helper import generate_text
         prompt = f"请用一句话模拟以下 HTTP 请求的响应结果（只返回 JSON）：\n{payload.method} {payload.url}\n{payload.body or ''}"
-        note = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.3)
+        note = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.3, task_type="ai_testcase")
     except Exception as e:
         logger.warning(f"[testcases] debug LLM 不可用，mock: {e}")
         note = None
@@ -274,7 +274,7 @@ expected_response(示例响应字符串), assertion_rules(断言数组，元素�
 项目：{payload.project or '默认项目'}"""
     try:
         from app.core.llm_helper import generate_text
-        raw = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.7)
+        raw = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.7, task_type="ai_testcase")
         cases = _parse_llm_testcases(raw, payload, count)
         used_llm = True
     except Exception as e:
@@ -825,7 +825,7 @@ async def ai_parse_interface(payload: AIParsePayload, _: None = Depends(require_
     try:
         from app.core.llm_helper import generate_text
         prompt = f"解析下面的接口定义，提取 method、api_endpoint、请求头、请求体示例，以 JSON 返回：\n{text[:2000]}"
-        raw = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.2)
+        raw = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.2, task_type="ai_testcase")
         parsed = _parse_interface_raw(raw)
         used_llm = True
     except Exception as e:

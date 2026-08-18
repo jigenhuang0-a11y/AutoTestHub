@@ -98,7 +98,7 @@ async def execute(payload: ExecutePayload, _: None = Depends(require_auth)):
         from app.core.llm_helper import generate_text
         d = exec_dict
         prompt = f"请用 2-3 句话总结这次接口测试执行：共 {d['total_cases']} 条，通过 {d['passed_cases']}，失败 {d['failed_cases']}。"
-        ai_summary = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.4)
+        ai_summary = await generate_text(prompt, model_id=payload.model_id or None, temperature=0.4, task_type="agent_loop")
         if ai_summary:
             store.update_execution(d["exec_id"], {"summary": ai_summary})
             exec_dict = store.get_execution(d["exec_id"]).to_dict()

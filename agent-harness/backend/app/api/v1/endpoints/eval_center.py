@@ -10,10 +10,11 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.eval_store import get_eval_store
+from app.core.eval_event_store import get_eval_event_store, FEATURE_LABELS
 from app.core.hallucination_judge import judge_output
 
 logger = logging.getLogger(__name__)
@@ -96,3 +97,51 @@ def get_langfuse_config():
         "project_url": f"{host}/project" if host else "",
         "traces_url": f"{host}/traces" if host else "",
     }
+
+
+@router.get("/events")
+def list_events(
+    feature: Optional[str] = Query(None),
+    since_ms: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """获取最近的 AI 功能调用事件（EvalCenter 自动追踪的数据源）。"""
+    store = get_eval_event_store()
+    events = store.list(feature=feature, since_ms=since_ms, limit=limit, offset=offset)
+    return {
+        "events": [e.to_dict() for e in events],
+        "latest_ms": store.latest_ms(),
+    }
+
+
+@router.get("/events/{event_id}")
+def get_event(event_id: str):
+    """获取单个 AI 调用事件的完整过程细节。"""
+    ev = get_eval_event_store().get(event_id)
+    if not ev:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    return ev.to_dict()
+
+
+@router.get("/poll")
+def poll_events(since_ms: int = Query(0, ge=0)):
+    """EvalCenter 自动追踪轮询端点：返回自 since_ms 以来的新事件与统计。"""
+    store = get_eval_event_store()
+    events = store.list(since_ms=since_ms, limit=200)
+    return {
+        "new": len(events) > 0,
+        "count": len(events),
+        "latest_ms": store.latest_ms(),
+        "events": [e.to_dict() for e in events[:20]],
+        "stats_by_feature": store.stats_by_feature(),
+    }
+
+
+@router.get("/features")
+def list_features():
+    """返回 EvalCenter 支持追踪的 AI 功能模块列表。"""
+    return [
+        {"value": k, "label": v}
+        for k, v in FEATURE_LABELS.items()
+    ]

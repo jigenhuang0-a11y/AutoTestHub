@@ -193,22 +193,35 @@
             </div>
           </template>
           <el-table :data="records" size="default" max-height="340" stripe @row-click="openDetail">
-            <el-table-column prop="feature" label="模块" width="120" show-overflow-tooltip>
+            <el-table-column prop="feature" label="模块" width="130" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag size="small" effect="plain">{{ featureLabel(row.feature) }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="模型 / 耗时" width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <div class="record-model">{{ row.model || '—' }}</div>
+                <div class="record-meta">{{ row.latency_ms ? row.latency_ms + 'ms' : '—' }} · {{ row.provider || '—' }}</div>
+              </template>
+            </el-table-column>
             <el-table-column label="综合" width="70" align="center">
               <template #default="{ row }">
-                <el-tag :type="scoreTag(row.overall)" size="small">{{ row.overall }}</el-tag>
+                <el-tag v-if="row.overall" :type="scoreTag(row.overall)" size="small">{{ row.overall }}</el-tag>
+                <span v-else class="record-meta">—</span>
               </template>
             </el-table-column>
             <el-table-column label="幻觉" width="70" align="center">
               <template #default="{ row }">
-                <span :class="scoreClass(row.hallucination)">{{ row.hallucination }}</span>
+                <span v-if="row.hallucination" :class="scoreClass(row.hallucination)">{{ row.hallucination }}</span>
+                <span v-else class="record-meta">—</span>
               </template>
             </el-table-column>
-            <el-table-column prop="reason" label="Judge 结论" show-overflow-tooltip />
+            <el-table-column prop="reason" label="状态 / Judge 结论" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.status === 'judging'" class="record-meta">Judge 中…</span>
+                <span v-else>{{ row.reason || '已完成，暂无 Judge 结论' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="140" align="center">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
@@ -279,16 +292,19 @@
       <div v-if="detail" class="detail-wrap">
         <div class="detail-head">
           <el-tag effect="plain">{{ featureLabel(detail.feature) }}</el-tag>
-          <el-tag :type="scoreTag(detail.overall)">综合 {{ detail.overall }}</el-tag>
+          <el-tag v-if="detail.overall" :type="scoreTag(detail.overall)">综合 {{ detail.overall }}</el-tag>
+          <el-tag v-if="detail.status" :type="detail.status === 'completed' ? 'success' : 'warning'">{{ detail.status === 'judging' ? 'Judge 中' : detail.status }}</el-tag>
           <el-tag type="info">{{ formatTime(detail.created_at) }}</el-tag>
           <el-button v-if="detail.trace_id && langfuse?.enabled" size="small" type="info" @click="openTrace(detail.trace_id)">在 Langfuse 打开</el-button>
         </div>
 
         <el-divider>执行链路</el-divider>
-        <el-steps :active="3" align-center finish-status="success" class="trace-steps">
+        <el-steps :active="traceActiveStep(detail)" align-center finish-status="success" class="trace-steps">
           <el-step title="用户提问" :description="truncate(detail.input_text, 60)" />
-          <el-step title="RAG 检索" :description="(detail.retrieved_docs || []).length + ' 个片段'" />
-          <el-step title="Judge 评分" :description="'综合 ' + detail.overall" />
+          <el-step title="LLM 路由" :description="(detail.model || '—') + ' / ' + (detail.provider || '—')" />
+          <el-step v-if="(detail.retrieved_docs || []).length" title="RAG 检索" :description="(detail.retrieved_docs || []).length + ' 个片段'" />
+          <el-step title="LLM 生成" :description="(detail.latency_ms ? detail.latency_ms + 'ms' : '—') + (detail.token_usage ? ' · ' + detail.token_usage + ' tokens' : '')" />
+          <el-step title="Judge 评分" :description="(detail.overall ? '综合 ' + detail.overall : '未评分')" />
         </el-steps>
 
         <el-divider>检索上下文（RAG 引用）</el-divider>
@@ -380,10 +396,18 @@ import { evalCenterAPI } from '@/api'
 
 const featureLabels = {
   ai_testcase: 'AI 用例生成',
+  data_generation: '数据工厂',
   data_factory: '数据工厂',
   knowledge_chat: 'RAG 知识问答',
   chat: '智能对话',
+  fast_chat: 'AI 快速问答',
+  reasoning: 'AI 深度思考',
+  rag_query: 'RAG 问答',
+  rag_search: 'RAG 检索',
   agent_loop: 'Agent 循环',
+  requirement_review: '需求评审',
+  quality_check: '质量检查',
+  evaluate: 'AI 评测',
   unknown: '未分类',
 }
 const featureLabel = (f) => featureLabels[f] || f || '未分类'
@@ -418,6 +442,8 @@ const refreshInterval = ref(30)
 let trackingTimer = null
 const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
+const lastEventMs = ref(0)
+const pollLoading = ref(false)
 
 const lowScoreRecords = computed(() =>
   records.value.filter(r =>
@@ -429,8 +455,19 @@ const lowScoreRecords = computed(() =>
 async function loadRecords() {
   recordsLoading.value = true
   try {
-    const data = await evalCenterAPI.records({ hours: 720, limit: 100 })
-    records.value = Array.isArray(data) ? data : (data.records || [])
+    // 事件驱动：优先读取真实 AI 调用事件；为空时 fallback 到历史 Judge 记录
+    let list = []
+    try {
+      const data = await evalCenterAPI.events({ limit: 100, since_ms: 0 })
+      list = Array.isArray(data) ? data : (data.events || [])
+      lastEventMs.value = (data.latest_ms || lastEventMs.value)
+    } catch (_) {}
+    if (!list.length) {
+      const data = await evalCenterAPI.records({ hours: 720, limit: 100 })
+      const rows = Array.isArray(data) ? data : (data.records || [])
+      list = rows.map(normalizeRecordToEvent)
+    }
+    records.value = list.map(normalizeEventToRecord)
   } catch (e) {
     ElMessage.error('记录加载失败：' + (e.message || e))
   } finally {
@@ -438,8 +475,70 @@ async function loadRecords() {
   }
 }
 
-function openDetail(row) {
-  detail.value = row
+// 把旧 EvalStore 记录统一成 EvalEvent 样式，保证前端只处理一种结构
+function normalizeRecordToEvent(rec) {
+  return {
+    event_id: rec.record_id || rec.trace_id || ('rec-' + Date.now()),
+    feature: rec.feature,
+    input_summary: rec.input_text,
+    output_summary: rec.output_text,
+    model: rec.model,
+    provider: rec.provider || '—',
+    latency_ms: rec.latency_ms,
+    token_usage: rec.token_usage,
+    trace_id: rec.trace_id,
+    retrieved_docs: rec.retrieved_docs,
+    status: 'completed',
+    judge: rec.judge,
+    dimension_scores: rec.dimension_scores || (rec.judge || {}).dimension_scores,
+    issues: rec.issues,
+    timestamp: rec.created_at,
+    created_at_ms: rec.created_at ? new Date(rec.created_at).getTime() : Date.now(),
+  }
+}
+
+// 把 EvalEvent 统一成记录表可用的行结构
+function normalizeEventToRecord(ev) {
+  const judge = ev.judge || {}
+  const dims = ev.dimension_scores || judge.dimension_scores || {}
+  const overall = judge.overall ?? dims['综合分'] ?? dims.overall ?? 0
+  return {
+    event_id: ev.event_id,
+    feature: ev.feature,
+    input_text: ev.input_summary,
+    output_text: ev.output_summary,
+    model: ev.model,
+    provider: ev.provider,
+    latency_ms: ev.latency_ms,
+    token_usage: ev.token_usage,
+    trace_id: ev.trace_id,
+    retrieved_docs: ev.retrieved_docs,
+    overall,
+    hallucination: dims['幻觉率'] ?? dims.hallucination ?? 0,
+    consistency: dims['一致性'] ?? dims.consistency ?? 0,
+    completeness: dims['完整性'] ?? dims.completeness ?? 0,
+    executability: dims['可执行性'] ?? dims.executability ?? 0,
+    safety: dims['安全性'] ?? dims.safety ?? 0,
+    reason: judge.reason || (ev.status === 'judging' ? 'Judge 中…' : ''),
+    issues: ev.issues || judge.issues || [],
+    created_at: ev.timestamp,
+    status: ev.status,
+    _raw: ev,
+  }
+}
+
+async function openDetail(row) {
+  if (row.event_id) {
+    try {
+      const ev = await evalCenterAPI.event(row.event_id)
+      detail.value = normalizeEventToRecord(ev)
+    } catch (e) {
+      ElMessage.error('详情加载失败：' + (e.message || e))
+      detail.value = row
+    }
+  } else {
+    detail.value = row
+  }
   detailVisible.value = true
 }
 
@@ -597,6 +696,7 @@ function buildOfflineDemo() {
   }
 }
 
+// 手动触发：用固定样例跑一遍 Judge（用于离线演示或验证渲染）
 async function demoJudge() {
   demoLoading.value = true
   const req = {
@@ -631,7 +731,6 @@ async function demoJudge() {
       token_usage: 0,
     }
     loadDashboard()
-    // 追踪模式下静默执行（尤其 10/30 秒短周期，避免 toast 刷屏）；仅手动触发时提示
     if (!isTracking.value) {
       ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
     }
@@ -640,12 +739,36 @@ async function demoJudge() {
   }
 }
 
+// 自动追踪核心：轮询后端真实 AI 调用事件，只有用户使用 AI 功能才刷新
+async function pollEvents() {
+  if (pollLoading.value) return
+  pollLoading.value = true
+  try {
+    const data = await evalCenterAPI.poll(lastEventMs.value)
+    if (data.new) {
+      lastEventMs.value = data.latest_ms || lastEventMs.value
+      // 有新事件时刷新面板和记录列表
+      await loadDashboard()
+      await loadRecords()
+      // 静默模式下不弹 toast，避免短周期刷屏
+      if (!isTracking.value && data.count) {
+        ElMessage.info(`检测到 ${data.count} 条新的 AI 调用，已刷新看板`)
+      }
+    }
+  } catch (e) {
+    // 自动追踪失败时不弹窗刷屏，只打印日志
+    console.warn('[EvalCenter] 轮询失败', e)
+  } finally {
+    pollLoading.value = false
+  }
+}
+
 function openLatestReplay() {
-  if (detail.value && detail.value.overall !== undefined) {
-    detailVisible.value = true
+  // 优先打开最新真实事件；没有事件时 fallback 到手动样例
+  if (records.value.length) {
+    openDetail(records.value[0])
     return
   }
-  // 还没有结果时，先执行一次再打开
   demoLoading.value = true
   demoJudge().then(() => {
     demoLoading.value = false
@@ -657,15 +780,14 @@ function openLatestReplay() {
 
 function restartAutoRefresh() {
   if (isTracking.value) {
-    // 仅重启 timer，不关闭开关状态，避免切换周期时 autoRefresh 被置 false
     if (trackingTimer) {
       clearInterval(trackingTimer)
       trackingTimer = null
     }
-    demoJudge()
+    pollEvents()
     trackingTimer = setInterval(() => {
       if (!isTracking.value) return
-      demoJudge()
+      pollEvents()
     }, refreshInterval.value * 1000)
   }
 }
@@ -683,13 +805,12 @@ function startTracking() {
   autoRefresh.value = true
   const sec = refreshInterval.value
   const label = sec < 60 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`
-  ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次`, duration: 2000 })
-  // 静默执行一次并刷新面板
-  demoJudge()
-  // 按选定周期循环刷新
+  ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次（仅在使用 AI 功能时更新）`, duration: 2000 })
+  // 立即执行一次轮询，并启动定时器
+  pollEvents()
   trackingTimer = setInterval(() => {
     if (!isTracking.value) return
-    demoJudge()
+    pollEvents()
   }, refreshInterval.value * 1000)
 }
 
@@ -725,6 +846,16 @@ function dimLabel(dim) {
     hallucination: '幻觉', consistency: '一致性', completeness: '完整性',
     executability: '可执行性', safety: '安全性',
   }[dim] || dim || '其他'
+}
+
+function traceActiveStep(row) {
+  if (!row) return 0
+  let step = 1
+  if (row.model) step = 2
+  if ((row.retrieved_docs || []).length) step = 3
+  if (row.model && row.latency_ms) step = 4
+  if (row.overall) step = 5
+  return step
 }
 
 function barColor(score) {
@@ -984,6 +1115,8 @@ onUnmounted(() => {
 .io-text { background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.15); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin: 0; }
 .meta-line { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
+.record-model { font-size: 12px; color: #e2e8f0; line-height: 1.4; }
+.record-meta { font-size: 11px; color: #94a3b8; line-height: 1.3; }
 .score-excellent { color: #4ade80; }
 .score-good { color: #fbbf24; }
 .score-poor { color: #f87171; }

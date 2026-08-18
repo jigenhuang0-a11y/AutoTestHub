@@ -554,7 +554,7 @@ def _run_llm_generation(ds_id, scenario, languages, positive, negative, boundary
 只返回 JSON 数组，不要解释。"""
 
     try:
-        raw = asyncio.run(generate_text(prompt, model_id=model_id or None, temperature=0.8))
+        raw = asyncio.run(generate_text(prompt, model_id=model_id or None, temperature=0.8, task_type="data_generation"))
     except Exception as e:
         logger.warning(f"[data_factory] LLM 造数失败，降级 mock: {e}")
         records = _mock_llm_records(scenario, positive, negative, boundary, languages)

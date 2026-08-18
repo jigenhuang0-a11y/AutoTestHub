@@ -345,12 +345,11 @@ def answer(
                 "请修正上述问题后重新回答。"
             )
         try:
-            text = router.execute(
-                task_type="rag_query",
-                prompt=prompt_iter,
-                system_prompt="你是 AutoTestHub 的 RAG 知识助手，严格基于检索内容回答。使用有序列表时编号必须按 1、2、3… 递增。",
-                temperature=0.2,
-            )
+            messages = [
+                {"role": "system", "content": "你是 AutoTestHub 的 RAG 知识助手，严格基于检索内容回答。使用有序列表时编号必须按 1、2、3… 递增。"},
+                {"role": "user", "content": prompt_iter},
+            ]
+            text = router.chat(messages=messages, task_type="knowledge_chat", temperature=0.2)
             return text if isinstance(text, str) else str(text)
         except Exception as e:
             logger.error(f"[RAG] LLM 生成失败: {e}")
@@ -384,6 +383,8 @@ def answer(
         user_id=user_id,
         session_id=session_id,
         trace_id=trace_id,
+        retrieved_docs=[{"content": h.get("text", ""), "score": h.get("score", 0), "source": h.get("meta", {}).get("filename", "未知")} for h in hits],
+        model=router.get_model_for_task("knowledge_chat"),
     )
     answer_text = eval_result.final_answer or first_answer
 
@@ -639,7 +640,7 @@ def answer_stream(
             }
             for h in hits
         ]
-        _model_name = (get_llm_router().default_model if hasattr(get_llm_router(), "default_model") else None)
+        _model_name = get_llm_router().get_model_for_task("knowledge_chat")
         _run_latency = int((time.perf_counter() - start_time) * 1000)
         _schedule_background_eval(
             _run_eval_async(
@@ -820,7 +821,7 @@ def chat_stream(
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
     # 仅当答案非空时才触发 Judge，避免空/异常回答生成无效评测记录
     if enable_eval and first_answer:
-        _model_name = (get_llm_router().default_model if hasattr(get_llm_router(), "default_model") else None)
+        _model_name = get_llm_router().get_model_for_task("chat")
         _run_latency = int((time.perf_counter() - start_time) * 1000)
         _schedule_background_eval(
             _run_eval_async(

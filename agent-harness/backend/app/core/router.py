@@ -2,12 +2,14 @@
 LLM Router — 按任务类型智能路由到最优模型（去 Django 依赖版）
 """
 import logging
-from typing import Optional, Generator
+import time
+from typing import Optional, Generator, List
 
 from app.core.llm_provider import BaseLLMProvider
 from app.core.provider_pool import get_provider_pool
 from app.core.config import LLMRouterConfig, get_available_providers, MODEL_REGISTRY
 from app.core.task_store import get_task_store
+from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +43,21 @@ class LLMRouter:
             "__langfuse_user_id": user_id,
             "__langfuse_meta": {"feature": task_type, "model": used_model},
         }
+        start = time.time()
         try:
-            return provider.chat(messages, **trace_kwargs, **extra_kwargs)
+            content = provider.chat(messages, **trace_kwargs, **extra_kwargs)
+            latency_ms = int((time.time() - start) * 1000)
+            self._record_event(task_type, used_model, provider, messages, content, latency_ms)
+            return content
         except Exception as e:
             logger.error(f"[LLMRouter] {used_model} 失败: {e}")
             fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
             fallback = self._pool.get_for_model(fallback_model)
             logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
-            return fallback.chat(messages, **trace_kwargs, **extra_kwargs)
+            content = fallback.chat(messages, **trace_kwargs, **extra_kwargs)
+            latency_ms = int((time.time() - start) * 1000)
+            self._record_event(task_type, fallback.model, fallback, messages, content, latency_ms)
+            return content
 
     def chat_stream(
         self,
@@ -82,13 +91,20 @@ class LLMRouter:
             "__langfuse_user_id": user_id,
             "__langfuse_meta": {"feature": task_type, "model": used_model, "stream": True},
         }
+        start = time.time()
         try:
-            yield from provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
+            yield from self._stream_with_event(
+                provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
+                task_type, used_model, provider, messages,
+            )
         except Exception as e:
             logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
             fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
             fallback = self._pool.get_for_model(fallback_model)
-            yield from fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs)
+            yield from self._stream_with_event(
+                fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
+                task_type, fallback.model, fallback, messages,
+            )
 
     def chat_with_tools(
         self,
@@ -127,8 +143,15 @@ class LLMRouter:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        start = time.time()
         try:
-            return provider.chat_raw(messages, **kwargs)
+            result = provider.chat_raw(messages, **kwargs)
+            latency_ms = int((time.time() - start) * 1000)
+            content = result.get("content", "")
+            usage = result.get("usage") or {}
+            token_usage = usage.get("total_tokens", 0) or max(1, len(str(content)) // 4)
+            self._record_event(task_type, used_model, provider, messages, content, latency_ms, token_usage=token_usage)
+            return result
         except Exception as e:
             logger.error(f"[LLMRouter] {used_model} chat_with_tools 失败: {e}")
             # 降级：纯文本 chat（不带工具）
@@ -137,6 +160,8 @@ class LLMRouter:
             logger.warning(f"[LLMRouter] 降级到纯文本 {fallback.model}")
             try:
                 content = fallback.chat(messages)
+                latency_ms = int((time.time() - start) * 1000)
+                self._record_event(task_type, fallback.model, fallback, messages, content, latency_ms)
                 return {"content": content, "tool_calls": None, "model": fallback.model, "usage": {}}
             except Exception as fe:
                 logger.error(f"[LLMRouter] 降级也失败: {fe}")
@@ -190,6 +215,63 @@ class LLMRouter:
         # 3) 回退：全局路由表
         model_name = self.config.get_model(task_type, available)
         return self._pool.get_for_model(model_name, **kwargs), model_name
+
+    def _record_event(
+        self,
+        task_type: str,
+        used_model: str,
+        provider: BaseLLMProvider,
+        messages: list,
+        content: str,
+        latency_ms: int,
+        retrieved_docs: Optional[List[dict]] = None,
+        token_usage: int = 0,
+    ) -> None:
+        """把一次 LLM 调用记录到 EvalEventStore，供 EvalCenter 事件驱动刷新。"""
+        if not is_tracked_feature(task_type):
+            return
+        try:
+            last_user = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last_user = m.get("content", "")
+                    break
+            text = content if isinstance(content, str) else str(content)
+            event = build_event(
+                feature=task_type,
+                task_type=task_type,
+                model=used_model,
+                provider=provider.__class__.__name__,
+                input_text=last_user,
+                output_text=text,
+                latency_ms=latency_ms,
+                token_usage=token_usage or max(1, len(text) // 4),
+                retrieved_docs=retrieved_docs or [],
+            )
+            get_eval_event_store().add(event)
+        except Exception as e:
+            logger.warning(f"[LLMRouter] 记录事件失败: {e}")
+
+    def _stream_with_event(
+        self,
+        generator: Generator[dict, None, None],
+        task_type: str,
+        used_model: str,
+        provider: BaseLLMProvider,
+        messages: list,
+    ) -> Generator[dict, None, None]:
+        """包裹流式生成器，收集完整输出并在结束后记录事件。"""
+        buffer = []
+        start = time.time()
+        try:
+            for chunk in generator:
+                if chunk.get("type") in ("delta", "reasoning"):
+                    buffer.append(chunk.get("content", ""))
+                yield chunk
+        finally:
+            latency_ms = int((time.time() - start) * 1000)
+            content = "".join(buffer)
+            self._record_event(task_type, used_model, provider, messages, content, latency_ms)
 
 
 _router_instance: Optional[LLMRouter] = None
