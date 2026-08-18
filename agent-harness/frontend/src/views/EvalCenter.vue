@@ -33,7 +33,7 @@
             <el-option label="近 30 天" :value="720" />
           </el-select>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
-          <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="demoJudge">触发样例评测</el-button>
+          <el-button :type="isTracking ? 'warning' : 'success'" :icon="isTracking ? RefreshLeft : VideoPlay" :loading="demoLoading" @click="toggleTracking">链路追踪回放</el-button>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
           <el-dropdown @command="onExport" :disabled="!records.length">
             <el-button :icon="Download">导出</el-button>
@@ -263,7 +263,7 @@
     </el-card>
 
     <!-- 评测详情抽屉：RAG 链路回放 -->
-    <el-drawer v-model="detailVisible" title="评测详情 · 链路回放" size="46%" :destroy-on-close="true">
+    <el-drawer v-model="detailVisible" title="链路追踪回放" size="46%" :destroy-on-close="true">
       <div v-if="detail" class="detail-wrap">
         <div class="detail-head">
           <el-tag effect="plain">{{ featureLabel(detail.feature) }}</el-tag>
@@ -362,7 +362,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -400,6 +400,8 @@ const recordsLoading = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
 const demoLoading = ref(false)
+const isTracking = ref(false)
+let trackingTimer = null
 const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
 
@@ -583,7 +585,6 @@ function buildOfflineDemo() {
 
 async function demoJudge() {
   demoLoading.value = true
-  ElMessage.info('样例评测请求已发送，请稍候…')
   const req = {
     input_text: '我们的会员系统支持哪些退款方式？退款多久到账？',
     output_text: '根据知识库：本平台支持原路退回和余额退回两种方式。退款将在 24 小时内到账。' +
@@ -599,12 +600,10 @@ async function demoJudge() {
   } catch (e) {
     // 后端不可达（如未登录/无 token）→ 用离线样例展示渲染效果
     payload = buildOfflineDemo()
-    ElMessage.warning('后端评测不可用，已用离线样例展示定位效果')
   } finally {
     demoLoading.value = false
   }
   if (payload && payload.overall !== undefined) {
-    ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
     detail.value = {
       ...payload,
       input_text: req.input_text,
@@ -617,10 +616,41 @@ async function demoJudge() {
       latency_ms: 0,
       token_usage: 0,
     }
-    detailVisible.value = true
     loadDashboard()
-  } else {
+    if (!isTracking.value) {
+      ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
+    }
+  } else if (!isTracking.value) {
     ElMessage.error('评测失败')
+  }
+}
+
+function toggleTracking() {
+  if (isTracking.value) {
+    stopTracking()
+  } else {
+    startTracking()
+  }
+}
+
+function startTracking() {
+  isTracking.value = true
+  detailVisible.value = true
+  ElMessage.success('已开启链路追踪回放，每 8 秒自动刷新一次')
+  // 立即执行一次
+  demoJudge()
+  // 循环追踪
+  trackingTimer = setInterval(() => {
+    if (!isTracking.value) return
+    demoJudge()
+  }, 8000)
+}
+
+function stopTracking() {
+  isTracking.value = false
+  if (trackingTimer) {
+    clearInterval(trackingTimer)
+    trackingTimer = null
   }
 }
 
@@ -876,6 +906,7 @@ onUnmounted(() => {
   radarChart?.dispose()
   trendChart?.dispose()
   featureChart?.dispose()
+  stopTracking()
 })
 </script>
 
