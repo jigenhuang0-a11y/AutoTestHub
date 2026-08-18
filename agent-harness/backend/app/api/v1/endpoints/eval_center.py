@@ -77,7 +77,7 @@ def get_dashboard(
 @router.get("/records")
 def list_records(
     feature: Optional[str] = Query(None),
-    hours: int = Query(24, ge=1, le=168),
+    hours: int = Query(24, ge=1, le=720),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):

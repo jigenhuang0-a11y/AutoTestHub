@@ -1328,8 +1328,8 @@ const selectMessage = async (msg) => {
 
   // 如果是会话，加载该会话的所有消息
   if (msg.is_session && msg.session_id) {
-    // 本地当前对话的临时占位项：不要请求后端，直接用本地已恢复的 messages
-    if (msg._isCurrent) {
+    // 本地当前对话的临时占位项 / 未落库的临时会话：不要请求后端
+    if (msg._isCurrent || String(msg.session_id).startsWith('temp-')) {
       scrollToBottom()
       return
     }

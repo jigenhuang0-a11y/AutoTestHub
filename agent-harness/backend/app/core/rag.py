@@ -629,7 +629,8 @@ def answer_stream(
     logger.info(f"[RAG] 首轮生成完成，长度={len(first_answer)}，启动后台评估闭环（max_iter={max_iterations}, threshold={threshold}, enable_eval={enable_eval}）")
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
-    if enable_eval:
+    # 仅当答案非空时才触发 Judge，避免空/异常回答生成无效评测记录
+    if enable_eval and first_answer:
         _retrieved_docs = [
             {
                 "source": h.get("meta", {}).get("filename", "知识库"),
@@ -817,7 +818,8 @@ def chat_stream(
     logger.info(f"[RAG] 首轮生成完成，长度={len(first_answer)}，启动后台评估闭环（max_iter={max_iterations}, threshold={threshold}, enable_eval={enable_eval}）")
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
-    if enable_eval:
+    # 仅当答案非空时才触发 Judge，避免空/异常回答生成无效评测记录
+    if enable_eval and first_answer:
         _model_name = (get_llm_router().default_model if hasattr(get_llm_router(), "default_model") else None)
         _run_latency = int((time.perf_counter() - start_time) * 1000)
         _schedule_background_eval(
