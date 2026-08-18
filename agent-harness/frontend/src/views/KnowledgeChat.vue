@@ -1255,9 +1255,16 @@ const loadChatHistory = async (silent = false) => {
       }]
     }))
 
-    // 保留当前列表中属于当前模式、且后端尚未返回的临时会话（乐观插入的 / 当前对话占位）
-    const preserved = chatHistory.value.filter(
-      h => h.mode === qaMode.value && (h._isOptimistic || h._isCurrent) && !newMap.has(h.id)
+    // 保留当前列表中属于当前模式、且后端尚未返回的会话：
+    // - 乐观插入 / 当前对话占位 必须保留
+    // - 如果当前模式本地已有真实记录但后端返回空（生成中切走、后端未同步、切换页面 remount 等），
+    //   也保留本地记录，防止历史被吞。清空历史应通过删除会话完成。
+    const existingLocal = chatHistory.value.filter(
+      h => h.mode === qaMode.value && !newMap.has(h.id)
+    )
+    const hasBackendItems = newMap.size > 0
+    const preserved = existingLocal.filter(
+      h => h._isOptimistic || h._isCurrent || !hasBackendItems
     )
 
     // 按 updated_at 倒序排列
