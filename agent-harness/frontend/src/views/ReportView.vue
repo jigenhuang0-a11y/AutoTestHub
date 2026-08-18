@@ -203,7 +203,14 @@
     </el-dialog>
 
     <!-- 体检对话框 -->
-    <el-dialog v-model="healthDialogVisible" title="测试报告体检" width="520px" :close-on-click-modal="false">
+    <el-dialog
+      v-model="healthDialogVisible"
+      title="测试报告体检"
+      width="520px"
+      :close-on-click-modal="false"
+      class="health-dialog"
+      align-center
+    >
       <div v-if="health" class="health-body">
         <div class="health-score">
           <div class="score-circle" :style="scoreStyle(health.score)">
@@ -1032,7 +1039,7 @@ onMounted(() => {
 .score-sub {
   font-size: 12px;
   margin-top: 4px;
-  color: #94a3b8;
+  color: #e2e8f0;
 }
 
 .score-meta {
@@ -1057,8 +1064,8 @@ onMounted(() => {
 
 .suggestion-box {
   padding: 16px 18px;
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 10px;
 }
 
@@ -1071,7 +1078,46 @@ onMounted(() => {
 .suggestion-box ul {
   margin: 0;
   padding-left: 18px;
-  color: #cbd5e1;
+  color: #e2e8f0;
   line-height: 1.8;
+}
+
+/* 体检对话框深色主题 */
+.health-dialog .el-dialog {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.6);
+}
+
+.health-dialog .el-dialog__header {
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  margin-right: 0;
+}
+
+.health-dialog .el-dialog__title {
+  color: #f8fafc;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.health-dialog .el-dialog__headerbtn {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 18px;
+}
+
+.health-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #94a3b8;
+}
+
+.health-dialog .el-dialog__headerbtn .el-dialog__close:hover {
+  color: #f8fafc;
+}
+
+.health-dialog .el-dialog__body {
+  padding: 24px;
+  color: #e2e8f0;
 }
 </style>
