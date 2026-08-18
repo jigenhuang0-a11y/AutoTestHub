@@ -570,35 +570,6 @@ function scoreOf(key) {
   return typeof v === 'number' ? v : 0
 }
 
-function exportReport() {
-  const d = dashboard.value
-  const lines = [
-    '全链路评测中心 · 测试报告',
-    `统计周期：近 ${hours.value} 小时`,
-    `生成时间：${new Date().toLocaleString()}`,
-    '',
-    `评测样本总数：${d.total_records}`,
-    `覆盖业务模块：${Object.keys(d.by_feature).length}`,
-    '',
-    '【多维度平均分】',
-    ...dimList.map(x => `  ${x.label}：${scoreOf(x.key)}`),
-    '',
-    '【各模块评测分布】',
-    ...Object.entries(d.by_feature).map(([k, v]) => `  ${k}：样本 ${v.count} | 平均分 ${v.avg_overall}`),
-    '',
-    '【最近评测记录】',
-    ...d.recent_records.map(r => `  [${r.overall}] ${r.feature} - ${r.reason || '（无说明）'}`),
-  ]
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `eval-report-${new Date().toISOString().slice(0, 10)}.txt`
-  a.click()
-  URL.revokeObjectURL(url)
-  ElMessage.success('报告已导出')
-}
-
 function initCharts() {
   const refs = [radarRef.value, trendRef.value, featureRef.value]
   const ready = refs.every(el => el && el.offsetHeight > 0 && el.offsetWidth > 0)
