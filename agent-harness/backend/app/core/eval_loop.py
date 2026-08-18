@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -57,6 +58,7 @@ class EvalResult:
     trace_id: Optional[str] = None           # 关联的 Langfuse trace_id
     judge: Optional[Dict] = None             # 五维 Judge 结果（hallucination_judge）
     judge_record_id: Optional[str] = None    # 写入 EvalStore 的记录 id
+    trace_steps: List[Dict] = field(default_factory=list)  # 链路步骤，最终回写 EvalEvent
 
 
 def _make_evaluator(criteria: Optional[List[str]] = None) -> Callable:
@@ -128,12 +130,15 @@ def run_eval_loop(
         result.final_answer = candidates[-1]
         result.iterations = 1
         result.passed = True
+        result.trace_id = trace_id or str(uuid.uuid4())
+        result.trace_steps = trace_steps or []
         return result
 
     # 关联/创建 Langfuse trace：让 Agent Loop 的每一次评估都可被全链路追踪
     if not trace_id:
         trace_id = str(uuid.uuid4())
     result.trace_id = trace_id
+    result.trace_steps = trace_steps or []
 
     # 默认测试场景维度；RAG/知识库场景（有 reference）强制使用测试维度
     effective_criteria = criteria or TESTING_CRITERIA
@@ -181,6 +186,7 @@ def run_eval_loop(
             _run_judge_and_persist(
                 result, question, answer, reference, feature, trace_id, user_id, session_id,
                 retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
+                trace_steps=result.trace_steps,
             )
             return result
 
@@ -208,6 +214,7 @@ def run_eval_loop(
     _run_judge_and_persist(
         result, question, best_answer, reference, feature, trace_id, user_id, session_id,
         retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
+        trace_steps=result.trace_steps,
     )
 
     if result.needs_human and human_review_ctx:
@@ -240,6 +247,7 @@ def _run_judge_and_persist(
     model: Optional[str] = None,
     latency_ms: Optional[int] = None,
     token_usage: Optional[int] = None,
+    trace_steps: Optional[List[Dict]] = None,
 ) -> None:
     """对最终答案执行五维 Judge 评分，写入 EvalStore 并回传 Langfuse trace。
 
@@ -270,14 +278,31 @@ def _run_judge_and_persist(
         if token_usage is not None:
             record["token_usage"] = token_usage
         record_id = get_eval_store().save(record)
-        # 同时把 Judge 结果关联到 EvalEventStore 的对应事件，让 EvalCenter 能看实时过程
+        # 把 Judge 结果精确回写到 EvalEventStore 的对应 trace_id 事件
         try:
-            get_eval_event_store().attach_judge_to_latest(
-                feature=feature,
-                input_text=question,
+            judge_step = {
+                "step_id": f"step-judge-{trace_id or uuid.uuid4()}",
+                "type": "judge",
+                "title": "Judge 评分",
+                "status": "completed",
+                "start_time_ms": int(time.time() * 1000),
+                "end_time_ms": int(time.time() * 1000),
+                "detail": f"综合分 {judge.overall}，结论：{judge.summary}",
+                "metadata": {
+                    "overall": judge.overall,
+                    "dimension_scores": record.get("dimension_scores", {}),
+                    "issues": record.get("issues", []),
+                    "summary": judge.summary,
+                },
+            }
+            if trace_steps is not None:
+                trace_steps.append(judge_step)
+            get_eval_event_store().update_by_trace_id(
+                trace_id=trace_id or "",
                 judge=judge.to_dict(),
                 dimension_scores=record.get("dimension_scores", {}),
                 issues=record.get("issues", []),
+                trace_steps=trace_steps,
             )
         except Exception as e:
             logger.warning(f"[EvalLoop] 关联 EvalEvent 失败（已忽略）: {e}")

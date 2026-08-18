@@ -76,6 +76,8 @@ class EvalEvent:
     judge: Optional[Dict] = None
     dimension_scores: Optional[Dict] = None
     issues: List[str] = field(default_factory=list)
+    trace_steps: List[Dict] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     created_at_ms: int = field(default_factory=_now_ms)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -96,6 +98,8 @@ class EvalEvent:
             "judge": self.judge,
             "dimension_scores": self.dimension_scores,
             "issues": self.issues,
+            "trace_steps": self.trace_steps,
+            "metadata": self.metadata,
             "created_at_ms": self.created_at_ms,
         }
 
@@ -118,6 +122,8 @@ class EvalEvent:
             judge=data.get("judge"),
             dimension_scores=data.get("dimension_scores"),
             issues=data.get("issues") or [],
+            trace_steps=data.get("trace_steps") or [],
+            metadata=data.get("metadata") or {},
             created_at_ms=int(data.get("created_at_ms", 0) or 0),
         )
 
@@ -180,6 +186,28 @@ class EvalEventStore:
                     ev.status = "completed"
                     break
             self._save()
+
+    def update_by_trace_id(
+        self,
+        trace_id: str,
+        judge: Dict[str, Any],
+        dimension_scores: Dict[str, Any],
+        issues: List[str],
+        trace_steps: Optional[List[Dict]] = None,
+    ) -> Optional[str]:
+        """通过 trace_id 精确回写 Judge 结果和链路步骤（避免 feature/input 前缀匹配失败）。"""
+        with self._lock:
+            for ev in self._events:
+                if ev.trace_id == trace_id:
+                    ev.judge = judge
+                    ev.dimension_scores = dimension_scores
+                    ev.issues = issues
+                    ev.status = "completed"
+                    if trace_steps is not None:
+                        ev.trace_steps = trace_steps
+                    self._save()
+                    return ev.event_id
+        return None
 
     def attach_judge_to_latest(
         self,
@@ -296,6 +324,9 @@ def build_event(
     token_usage: int = 0,
     trace_id: Optional[str] = None,
     retrieved_docs: Optional[List[Dict]] = None,
+    trace_steps: Optional[List[Dict]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    status: str = "completed",
 ) -> EvalEvent:
     now = datetime.now(timezone.utc)
     return EvalEvent(
@@ -311,6 +342,9 @@ def build_event(
         token_usage=token_usage,
         trace_id=trace_id or str(uuid.uuid4()),
         retrieved_docs=retrieved_docs or [],
+        trace_steps=trace_steps or [],
+        metadata=metadata or {},
+        status=status,
     )
 
 

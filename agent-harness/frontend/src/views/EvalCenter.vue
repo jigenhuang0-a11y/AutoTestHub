@@ -299,7 +299,58 @@
         </div>
 
         <el-divider>执行链路</el-divider>
-        <el-steps :active="traceActiveStep(detail)" align-center finish-status="success" class="trace-steps">
+        <div v-if="detail.trace_steps && detail.trace_steps.length" class="trace-timeline">
+          <div v-for="(step, i) in detail.trace_steps" :key="step.step_id || i" class="trace-step" :class="'trace-type-' + step.type">
+            <div class="trace-left">
+              <div class="trace-dot" :class="step.status || 'completed'">{{ i + 1 }}</div>
+              <div v-if="i < detail.trace_steps.length - 1" class="trace-line" />
+            </div>
+            <div class="trace-body">
+              <div class="trace-title">{{ step.title }}</div>
+              <div class="trace-desc">{{ step.detail }}</div>
+              <div v-if="step.metadata" class="trace-meta">
+                <template v-if="step.type === 'route'">
+                  <el-tag size="small" type="info">task_type={{ step.metadata.task_type }}</el-tag>
+                  <el-tag size="small" type="success">model={{ step.metadata.model }}</el-tag>
+                  <div class="trace-reason">{{ step.metadata.reason }}</div>
+                </template>
+                <template v-else-if="step.type === 'retrieve'">
+                  <el-tag size="small" type="info">命中 {{ step.metadata.hit_count }} 个 chunk</el-tag>
+                  <div v-for="(h, hi) in step.metadata.hits || []" :key="hi" class="trace-hit">
+                    <span class="trace-hit-src">#{{ hi + 1 }} {{ h.source }}</span>
+                    <span class="trace-hit-score">score {{ h.score }}</span>
+                    <div class="trace-hit-text">{{ h.content }}</div>
+                  </div>
+                </template>
+                <template v-else-if="step.type === 'prompt'">
+                  <el-collapse v-if="step.metadata.system || step.metadata.user">
+                    <el-collapse-item title="System Prompt" v-if="step.metadata.system" name="sys">
+                      <pre class="trace-code">{{ step.metadata.system }}</pre>
+                    </el-collapse-item>
+                    <el-collapse-item title="User Prompt" v-if="step.metadata.user" name="user">
+                      <pre class="trace-code">{{ step.metadata.user }}</pre>
+                    </el-collapse-item>
+                  </el-collapse>
+                </template>
+                <template v-else-if="step.type === 'llm'">
+                  <el-tag size="small" type="info">model={{ step.metadata.model }}</el-tag>
+                  <el-tag size="small" type="info">provider={{ step.metadata.provider }}</el-tag>
+                  <el-tag size="small" type="warning">latency={{ step.metadata.latency_ms }}ms</el-tag>
+                  <el-tag size="small" type="success">tokens≈{{ step.metadata.token_usage }}</el-tag>
+                  <div v-if="step.metadata.route_reason" class="trace-reason">{{ step.metadata.route_reason }}</div>
+                </template>
+                <template v-else-if="step.type === 'judge'">
+                  <el-tag size="small" :type="scoreTag(step.metadata.overall || 0)">综合 {{ step.metadata.overall || 0 }}</el-tag>
+                  <div v-if="step.metadata.issues && step.metadata.issues.length" class="trace-issues">
+                    <div v-for="(iss, ii) in step.metadata.issues" :key="ii" class="trace-issue">· {{ iss }}</div>
+                  </div>
+                  <div v-if="step.metadata.summary" class="trace-reason">{{ step.metadata.summary }}</div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+        <el-steps v-else :active="traceActiveStep(detail)" align-center finish-status="success" class="trace-steps">
           <el-step title="用户提问" :description="truncate(detail.input_text, 60)" />
           <el-step title="LLM 路由" :description="(detail.model || '—') + ' / ' + (detail.provider || '—')" />
           <el-step v-if="(detail.retrieved_docs || []).length" title="RAG 检索" :description="(detail.retrieved_docs || []).length + ' 个片段'" />
@@ -519,10 +570,12 @@ function normalizeEventToRecord(ev) {
     completeness: dims['完整性'] ?? dims.completeness ?? 0,
     executability: dims['可执行性'] ?? dims.executability ?? 0,
     safety: dims['安全性'] ?? dims.safety ?? 0,
-    reason: judge.reason || (ev.status === 'judging' ? 'Judge 中…' : ''),
+    reason: judge.summary || judge.reason || (ev.status === 'judging' ? 'Judge 中…' : ''),
     issues: ev.issues || judge.issues || [],
     created_at: ev.timestamp,
     status: ev.status,
+    trace_steps: ev.trace_steps || [],
+    metadata: ev.metadata || {},
     _raw: ev,
   }
 }
@@ -1144,6 +1197,145 @@ onUnmounted(() => {
 .gap-list li, .rec-list li { font-size: 12.5px; line-height: 1.7; color: #e2e8f0; }
 .gap-list li { color: #fcd34d; }
 .rec-list li { color: #a5f3fc; }
+
+.trace-timeline {
+  position: relative;
+  padding: 8px 0 24px;
+}
+
+.trace-step {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.trace-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.trace-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #67c23a;
+  color: #fff;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
+}
+
+.trace-dot.running {
+  background: #409eff;
+  animation: pulse 1.5s infinite;
+}
+
+.trace-dot.failed {
+  background: #f56c6c;
+}
+
+.trace-line {
+  width: 2px;
+  flex: 1;
+  min-height: 24px;
+  background: #4a5568;
+  margin-top: 4px;
+}
+
+.trace-body {
+  flex: 1;
+  margin-left: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.trace-title {
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 6px;
+}
+
+.trace-desc {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.trace-meta .el-tag {
+  margin: 0 6px 6px 0;
+}
+
+.trace-reason {
+  margin-top: 6px;
+  padding: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.trace-hit {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+}
+
+.trace-hit-src {
+  color: #60a5fa;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.trace-hit-score {
+  float: right;
+  color: #34d399;
+  font-size: 12px;
+}
+
+.trace-hit-text {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.trace-code {
+  margin: 0;
+  padding: 10px;
+  background: #0f172a;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.trace-issues {
+  margin-top: 8px;
+}
+
+.trace-issue {
+  color: #f87171;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
 </style>
 
 <style scoped>

@@ -41,6 +41,103 @@ from app.core.memory_bridge import (
 logger = logging.getLogger(__name__)
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _summarize(text: str, max_len: int = 120) -> str:
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.strip().replace("\n", " ")
+    return text if len(text) <= max_len else text[:max_len] + "..."
+
+
+def _make_input_step(question: str, history: Optional[List[Dict]] = None) -> Dict:
+    return {
+        "step_id": f"step-input-{_now_ms()}",
+        "type": "input",
+        "title": "用户提问",
+        "status": "completed",
+        "start_time_ms": _now_ms(),
+        "end_time_ms": _now_ms(),
+        "detail": question,
+        "metadata": {
+            "history_turns": len(history) if history else 0,
+            "enable_reasoning": False,
+        },
+    }
+
+
+def _make_retrieve_step(question: str, hits: List[Dict], latency_ms: int = 0) -> Dict:
+    top = [
+        {
+            "source": h.get("meta", {}).get("filename", "知识库"),
+            "chunk_index": h.get("meta", {}).get("chunk_index", 0),
+            "score": round(h.get("score", 0.0), 4),
+            "content": _summarize(h.get("text", ""), 200),
+        }
+        for h in hits[:5]
+    ]
+    return {
+        "step_id": f"step-retrieve-{_now_ms()}",
+        "type": "retrieve",
+        "title": "检索上下文（RAG 引用）",
+        "status": "completed",
+        "start_time_ms": _now_ms() - latency_ms,
+        "end_time_ms": _now_ms(),
+        "detail": f"命中 {len(hits)} 个 chunk，取 top-{len(top)}",
+        "metadata": {"query": question, "hits": top, "hit_count": len(hits)},
+    }
+
+
+def _make_prompt_step(system_text: str, user_text: str) -> Dict:
+    return {
+        "step_id": f"step-prompt-{_now_ms()}",
+        "type": "prompt",
+        "title": "Prompt 组装",
+        "status": "completed",
+        "start_time_ms": _now_ms(),
+        "end_time_ms": _now_ms(),
+        "detail": f"system 长度 {len(system_text)} 字，user 长度 {len(user_text)} 字",
+        "metadata": {
+            "system": system_text,
+            "user": user_text,
+        },
+    }
+
+
+def _make_llm_step(model: str, provider: str, latency_ms: int, token_usage: int, route_reason: str = "") -> Dict:
+    return {
+        "step_id": f"step-llm-{_now_ms()}",
+        "type": "llm",
+        "title": "LLM 生成",
+        "status": "completed",
+        "start_time_ms": _now_ms() - latency_ms,
+        "end_time_ms": _now_ms(),
+        "detail": f"{model} / {provider}，耗时 {latency_ms}ms，token≈{token_usage}",
+        "metadata": {
+            "model": model,
+            "provider": provider,
+            "latency_ms": latency_ms,
+            "token_usage": token_usage,
+            "route_reason": route_reason,
+        },
+    }
+
+
+def _make_route_step(task_type: str, model: str, reason: str) -> Dict:
+    return {
+        "step_id": f"step-route-{_now_ms()}",
+        "type": "route",
+        "title": "LLM 路由",
+        "status": "completed",
+        "start_time_ms": _now_ms(),
+        "end_time_ms": _now_ms(),
+        "detail": f"task_type={task_type} -> {model}",
+        "metadata": {"task_type": task_type, "model": model, "reason": reason},
+    }
+
+
 def _llm_fn_for_memory(prompt: str) -> str:
     """供长期记忆自动提取使用的 LLM 调用封装（与 evaluate 工具同源）。"""
     try:
@@ -103,6 +200,8 @@ async def _run_eval_async(
     retrieved_docs: Optional[List[Dict]] = None,
     model: Optional[str] = None,
     latency_ms: Optional[int] = None,
+    trace_id: Optional[str] = None,
+    trace_steps: Optional[List[Dict]] = None,
 ):
     """
     后台异步执行评估闭环：评分 -> 不达标重生成 -> 通过则沉淀记忆 -> 未通过转人工协同。
@@ -114,12 +213,14 @@ async def _run_eval_async(
     candidates = [first_answer]
     best_answer = first_answer
     best_score = -1.0
-    import uuid as _uuid
-    trace_id = str(_uuid.uuid4())
+    trace_id = trace_id or str(uuid.uuid4())
+    trace_steps = trace_steps if trace_steps is not None else []
     best_issues: List[str] = []
 
     router = get_llm_router()
 
+    # 评估迭代：把每一轮评分也作为链路步骤追加
+    eval_steps: List[Dict] = []
     for iteration in range(1, max_iterations + 1):
         answer = candidates[iteration - 1]
         ev = await asyncio.to_thread(scorer, answer, reference)
@@ -128,6 +229,22 @@ async def _run_eval_async(
         if score > best_score:
             best_score, best_answer, best_issues = score, answer, issues
         logger.info(f"[RAG][后台评估] {mode} 第 {iteration}/{max_iterations} 轮 score={score:.2f}")
+        eval_steps.append({
+            "step_id": f"step-eval-{iteration}-{_now_ms()}",
+            "type": "judge",
+            "title": f"评估迭代 #{iteration}",
+            "status": "completed",
+            "start_time_ms": _now_ms(),
+            "end_time_ms": _now_ms(),
+            "detail": f"score={score:.2f}，threshold={threshold:.2f}",
+            "metadata": {
+                "iteration": iteration,
+                "score": score,
+                "threshold": threshold,
+                "issues": issues,
+                "passed": score >= threshold,
+            },
+        })
         if score >= threshold:
             try:
                 sink_memory(mm, question, best_answer, llm_fn=_llm_fn_for_memory)
@@ -140,6 +257,7 @@ async def _run_eval_async(
                 feature="knowledge_chat" if mode == "knowledge" else "chat",
                 trace_id=trace_id, user_id=user_id,
                 retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
+                trace_steps=trace_steps,
             )
             return
         if iteration < max_iterations:
@@ -166,13 +284,16 @@ async def _run_eval_async(
                 break
 
     # 循环耗尽仍未达标
+    # 循环耗尽仍未达标
     logger.warning(f"[RAG][后台评估] {mode} 循环耗尽仍未达标，score={best_score:.2f}，转人工协同")
+    trace_steps.extend(eval_steps)
     # 不论达标与否，都对最终答案做五维 Judge 并写入评估中心（供全链路评测看板）
     _run_judge_and_persist(
         result=None, question=question, answer=best_answer, reference=reference,
         feature="knowledge_chat" if mode == "knowledge" else "chat",
         trace_id=trace_id, user_id=user_id,
         retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
+        trace_steps=trace_steps,
     )
     try:
         notify_human_review(
@@ -285,16 +406,23 @@ def answer(
 
     返回 { answer, sources, chunks }
     """
+    trace_id = str(uuid.uuid4())
+    trace_steps: List[Dict] = []
+    trace_steps.append(_make_input_step(question, history))
+
     mm = None
     ltm_ctx = ""
     if history:
         mm = get_memory_for(user_id=user_id, mode="knowledge")
         ltm_ctx = build_long_term_context(mm, question)
 
+    ret_start = _now_ms()
     hits = retrieve(kb_id, question)
+    ret_latency = _now_ms() - ret_start
     context = "\n\n".join(
         f"[来源 {i+1}] {h['text']}" for i, h in enumerate(hits)
     )
+    trace_steps.append(_make_retrieve_step(question, hits, ret_latency))
 
     if not hits:
         return {
@@ -335,6 +463,7 @@ def answer(
    3. [来源 3] 展示了部署方案..."""
 
     router = get_llm_router()
+    sys_text = "你是 AutoTestHub 的 RAG 知识助手，严格基于检索内容回答。使用有序列表时编号必须按 1、2、3… 递增。"
 
     def _gen_once(issue_hint: str = "") -> str:
         """单次生成（循环工程：可带上一轮的 issues 重新生成）"""
@@ -345,11 +474,18 @@ def answer(
                 "请修正上述问题后重新回答。"
             )
         try:
+            trace_steps.append(_make_prompt_step(sys_text, prompt_iter))
             messages = [
-                {"role": "system", "content": "你是 AutoTestHub 的 RAG 知识助手，严格基于检索内容回答。使用有序列表时编号必须按 1、2、3… 递增。"},
+                {"role": "system", "content": sys_text},
                 {"role": "user", "content": prompt_iter},
             ]
-            text = router.chat(messages=messages, task_type="knowledge_chat", temperature=0.2)
+            text = router.chat(
+                messages=messages,
+                task_type="knowledge_chat",
+                temperature=0.2,
+                trace_id=trace_id,
+                trace_steps=trace_steps,
+            )
             return text if isinstance(text, str) else str(text)
         except Exception as e:
             logger.error(f"[RAG] LLM 生成失败: {e}")
@@ -383,6 +519,7 @@ def answer(
         user_id=user_id,
         session_id=session_id,
         trace_id=trace_id,
+        trace_steps=trace_steps,
         retrieved_docs=[{"content": h.get("text", ""), "score": h.get("score", 0), "source": h.get("meta", {}).get("filename", "未知")} for h in hits],
         model=router.get_model_for_task("knowledge_chat"),
     )
@@ -456,10 +593,11 @@ def answer_stream(
     session_id: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
     """流式检索 + LLM 生成回答（已接入长短期记忆）。yield 的事件字典会由 SSE 包装。"""
-    import uuid as _uuid
     if not session_id:
-        session_id = str(_uuid.uuid4())
-    trace_id = str(_uuid.uuid4())
+        session_id = str(uuid.uuid4())
+    trace_id = str(uuid.uuid4())
+    trace_steps: List[Dict] = []
+    trace_steps.append(_make_input_step(question, history))
     # 先推送状态，避免检索与记忆召回期间前端长时间无反馈
     yield {"type": "status", "content": "正在检索知识库..."}
 
@@ -471,12 +609,28 @@ def answer_stream(
         mm = get_memory_for(user_id=user_id, mode="knowledge")
         ltm_ctx = build_long_term_context(mm, question)
 
+    ret_start = _now_ms()
     hits = retrieve(kb_id, question)
+    ret_latency = _now_ms() - ret_start
     context = "\n\n".join(
         f"[来源 {i+1}] {h['text']}" for i, h in enumerate(hits)
     )
+    trace_steps.append(_make_retrieve_step(question, hits, ret_latency))
 
     if not hits:
+        # 无命中时也要记录事件，方便 EvalCenter 看到检索失败链路
+        get_eval_event_store().add(build_event(
+            feature="rag_query",
+            task_type="rag_query",
+            model="none",
+            provider="none",
+            input_text=question,
+            output_text="知识库中未找到相关内容",
+            latency_ms=ret_latency,
+            trace_id=trace_id,
+            trace_steps=trace_steps,
+            status="completed",
+        ))
         yield {"type": "done", "full_answer": "知识库中未找到相关内容，请先上传相关文档。", "context_docs": []}
         return
 
@@ -537,6 +691,7 @@ def answer_stream(
         {"role": "user", "content": prompt},
     ]
     messages = _apply_reasoning_prompt(messages, enable_reasoning)
+    trace_steps.append(_make_prompt_step(system_text, prompt))
 
     full_answer_parts: list[str] = []
     reasoning_parts: list[str] = []
@@ -560,7 +715,15 @@ def answer_stream(
 
     try:
         temperature = 0.3 if enable_reasoning else 0.2
-        for event in router.chat_stream(messages, task_type="rag_query", temperature=temperature, enable_reasoning=enable_reasoning, **extra_params):
+        for event in router.chat_stream(
+            messages,
+            task_type="rag_query",
+            temperature=temperature,
+            enable_reasoning=enable_reasoning,
+            trace_id=trace_id,
+            trace_steps=trace_steps,
+            **extra_params,
+        ):
             if not isinstance(event, dict):
                 # 兼容旧版纯字符串流
                 if not first_token_seen:
@@ -656,6 +819,8 @@ def answer_stream(
                 retrieved_docs=_retrieved_docs,
                 model=_model_name,
                 latency_ms=_run_latency,
+                trace_id=trace_id,
+                trace_steps=trace_steps,
             )
         )
 
@@ -694,6 +859,10 @@ def chat_stream(
     短期记忆：history 提供最近 6 轮对话上下文。
     长期记忆：召回与问题相关的历史沉淀，回答后自动提炼沉淀。
     """
+    trace_id = str(uuid.uuid4())
+    trace_steps: List[Dict] = []
+    trace_steps.append(_make_input_step(question, history))
+
     # 先让前端收到状态，避免长期记忆召回阻塞时界面长时间无响应
     yield {"type": "status", "content": "正在思考..."}
 
@@ -733,6 +902,7 @@ def chat_stream(
 
     messages.append({"role": "user", "content": question})
     messages = _apply_reasoning_prompt(messages, enable_reasoning)
+    trace_steps.append(_make_prompt_step(sys, question))
 
     router = get_llm_router()
     full_answer_parts: list[str] = []
@@ -746,13 +916,21 @@ def chat_stream(
     from app.core.eval_loop import DEFAULT_MAX_ITERATIONS, DEFAULT_THRESHOLD
     max_iterations = int(os.environ.get("CHAT_EVAL_MAX_ITER", DEFAULT_MAX_ITERATIONS))
     threshold = float(os.environ.get("CHAT_EVAL_THRESHOLD", DEFAULT_THRESHOLD))
-    # 日常对话默认关闭评估闭环：避免每次问答都显示"质量评估中"并推送飞书
-    enable_eval = os.environ.get("CHAT_EVAL_ENABLED", "0") != "0"
+    # 日常对话默认开启评估闭环，让 EvalCenter 能看到 AI 底座评分
+    enable_eval = os.environ.get("CHAT_EVAL_ENABLED", "1") != "0"
 
     try:
         # 深度思考模式用稍高的 temperature，让回答更愿意展开；普通模式保持较低温度
         temperature = 0.6 if enable_reasoning else 0.7
-        for event in router.chat_stream(messages, task_type="fast_chat", temperature=temperature, enable_reasoning=enable_reasoning, **extra_params):
+        for event in router.chat_stream(
+            messages,
+            task_type="fast_chat",
+            temperature=temperature,
+            enable_reasoning=enable_reasoning,
+            trace_id=trace_id,
+            trace_steps=trace_steps,
+            **extra_params,
+        ):
             if not isinstance(event, dict):
                 if not first_token_seen:
                     elapsed = time.perf_counter() - start_time
@@ -839,6 +1017,8 @@ def chat_stream(
                 enable_reasoning=enable_reasoning,
                 model=_model_name,
                 latency_ms=_run_latency,
+                trace_id=trace_id,
+                trace_steps=trace_steps,
             )
         )
 
