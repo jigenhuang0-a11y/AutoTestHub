@@ -657,8 +657,16 @@ function openLatestReplay() {
 
 function restartAutoRefresh() {
   if (isTracking.value) {
-    stopTracking()
-    startTracking()
+    // 仅重启 timer，不关闭开关状态，避免切换周期时 autoRefresh 被置 false
+    if (trackingTimer) {
+      clearInterval(trackingTimer)
+      trackingTimer = null
+    }
+    demoJudge()
+    trackingTimer = setInterval(() => {
+      if (!isTracking.value) return
+      demoJudge()
+    }, refreshInterval.value * 1000)
   }
 }
 
@@ -672,6 +680,7 @@ function toggleAutoRefresh() {
 
 function startTracking() {
   isTracking.value = true
+  autoRefresh.value = true
   const sec = refreshInterval.value
   const label = sec < 60 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`
   ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次`, duration: 2000 })
