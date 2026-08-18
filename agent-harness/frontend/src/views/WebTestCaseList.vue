@@ -94,7 +94,7 @@
         <!-- 表格 -->
         <template v-if="testCases.length">
           <el-table :data="testCases" class="data-table" row-key="id">
-            <el-table-column prop="id" label="ID" width="60" sortable />
+            <el-table-column prop="id" label="ID" width="120" sortable align="center" show-overflow-tooltip />
             <el-table-column prop="title" label="标题" min-width="160" sortable show-overflow-tooltip />
             <el-table-column prop="target_url" label="目标 URL" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
