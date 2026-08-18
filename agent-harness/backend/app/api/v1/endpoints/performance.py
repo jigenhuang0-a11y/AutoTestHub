@@ -141,6 +141,26 @@ async def perf_execution_diagnose(exec_id: str, _: None = Depends(require_auth))
     return {"ok": True, "exec_id": exec_id, "diagnosis": "模拟诊断：未发现明显瓶颈"}
 
 
+@router.get("/{pp_id}/executions/")
+async def get_perf_testcase_executions(
+    pp_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _: None = Depends(require_auth),
+):
+    """获取某个性能测试计划的历史执行记录。"""
+    store = get_task_store()
+    rows, total = store.list_perf_executions(
+        test_case=pp_id, page=page, page_size=page_size
+    )
+    return {
+        "results": [r.to_dict() for r in rows],
+        "count": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.get("/{pp_id}/")
 async def get_plan(pp_id: str, _: None = Depends(require_auth)):
     store = get_task_store()
