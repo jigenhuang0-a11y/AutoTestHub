@@ -79,104 +79,12 @@
         </el-row>
       </el-card>
 
-      <!-- 用例结果表格 -->
-      <el-card class="cases-card" shadow="never" style="margin-top: 16px">
+      <!-- 执行总结 -->
+      <el-card class="summary-card" shadow="never" style="margin-top: 16px" v-if="execution.summary">
         <template #header>
-          <span>用例执行结果</span>
+          <span>执行总结</span>
         </template>
-
-        <el-table :data="caseResults" stripe border max-height="500">
-          <el-table-column prop="title" label="用例名称" min-width="180" show-overflow-tooltip />
-          <!-- 类型标签 -->
-          <el-table-column label="类型" width="70">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.type === 'web' ? 'warning' : ''">
-                {{ row.type === 'web' ? 'Web' : 'API' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <!-- API 专用列：方法 -->
-          <el-table-column v-if="hasApiCases" label="方法" width="80">
-            <template #default="{ row }">
-              <template v-if="row.type !== 'web'">
-                <el-tag size="small" :type="getMethodType(row.method)">{{ row.method || '-' }}</el-tag>
-              </template>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <!-- Web 专用列：目标URL -->
-          <el-table-column v-if="hasWebCases" label="目标URL" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              <template v-if="row.type === 'web'">
-                <el-link v-if="row.target_url" :href="row.target_url" target="_blank" type="primary" :underline="false">
-                  {{ row.target_url.length > 40 ? row.target_url.substring(0, 40) + '...' : row.target_url }}
-                </el-link>
-                <span v-else>-</span>
-              </template>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <!-- Web 专用列：引擎类型 -->
-          <el-table-column v-if="hasWebCases" label="引擎" width="90">
-            <template #default="{ row }">
-              <template v-if="row.type === 'web'">
-                <el-tag size="small" :type="row.engine === 'ai' ? 'danger' : 'success'">
-                  {{ row.engine === 'ai' ? 'AI(Midscene)' : (row.engine || 'Playwright') }}
-                </el-tag>
-              </template>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <!-- API 专用列：状态码 -->
-          <el-table-column v-if="hasApiCases" label="状态码" width="100">
-            <template #default="{ row }">
-              <template v-if="row.type !== 'web'">
-                <span :style="{ color: row.response_status_code === row.expected_status ? '#67c23a' : '#f56c6c' }">
-                  {{ row.response_status_code || '-' }}
-                </span>
-              </template>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <!-- 执行状态 -->
-          <el-table-column label="状态" width="85">
-            <template #default="{ row }">
-              <el-tag :type="getCaseStatusType(row.status)" size="small">
-                {{ getCaseStatusText(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <!-- 耗时 -->
-          <el-table-column label="耗时" width="75">
-            <template #default="{ row }">{{ row.duration != null ? row.duration + 's' : '-' }}</template>
-          </el-table-column>
-          <!-- 操作列 -->
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ row }">
-              <!-- API 失败详情 -->
-              <el-button
-                v-if="row.type !== 'web' && row.status === 'failed'"
-                size="small"
-                link
-                type="danger"
-                @click="expandFailure(row)"
-              >
-                失败详情
-              </el-button>
-              <!-- Web 步骤详情 -->
-              <el-button
-                v-if="row.type === 'web'"
-                size="small"
-                link
-                @click="showWebDetail(row)"
-              >
-                详情
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <el-empty v-if="!caseResults.length" description="暂无用例执行结果" />
+        <div class="summary-body">{{ execution.summary }}</div>
       </el-card>
 
       <!-- 失败详情抽屉（API用例） -->
@@ -350,8 +258,110 @@
             </el-button>
           </div>
         </template>
-        <pre class="log-content">{{ execution.execution_log || '暂无日志' }}</pre>
+        <div class="log-timeline">
+          <div v-for="(log, idx) in executionLog" :key="idx" class="log-entry" :class="`log-level-${log.level}`">
+            <span class="log-time">{{ formatDate(log.time) }}</span>
+            <el-tag size="small" :type="log.level === 'error' ? 'danger' : log.level === 'warning' ? 'warning' : log.level === 'success' ? 'success' : 'info'" class="log-level">
+              {{ log.level.toUpperCase() }}
+            </el-tag>
+            <span class="log-message">{{ log.message }}</span>
+          </div>
+          <el-empty v-if="!executionLog.length" description="暂无日志" />
+        </div>
       </el-card>
+
+      <!-- 用例明细（默认折叠） -->
+      <el-collapse v-model="activeCollapse" style="margin-top: 16px">
+        <el-collapse-item title="查看用例执行明细" name="cases">
+          <el-card class="cases-card" shadow="never" v-if="caseResults.length">
+            <el-table :data="caseResults" stripe border max-height="500">
+              <el-table-column label="用例名称" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ row.title || row.case_title || row.case_id || '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="70">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.type === 'web' ? 'warning' : ''">
+                    {{ row.type === 'web' ? 'Web' : 'API' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="hasApiCases" label="方法" width="80">
+                <template #default="{ row }">
+                  <template v-if="row.type !== 'web'">
+                    <el-tag size="small" :type="getMethodType(row.method)">{{ row.method || '-' }}</el-tag>
+                  </template>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="hasWebCases" label="目标URL" min-width="160" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <template v-if="row.type === 'web'">
+                    <el-link v-if="row.target_url" :href="row.target_url" target="_blank" type="primary" :underline="false">
+                      {{ row.target_url.length > 40 ? row.target_url.substring(0, 40) + '...' : row.target_url }}
+                    </el-link>
+                    <span v-else>-</span>
+                  </template>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="hasWebCases" label="引擎" width="90">
+                <template #default="{ row }">
+                  <template v-if="row.type === 'web'">
+                    <el-tag size="small" :type="row.engine === 'ai' ? 'danger' : 'success'">
+                      {{ row.engine === 'ai' ? 'AI(Midscene)' : (row.engine || 'Playwright') }}
+                    </el-tag>
+                  </template>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="hasApiCases" label="状态码" width="100">
+                <template #default="{ row }">
+                  <template v-if="row.type !== 'web'">
+                    <span :style="{ color: row.response_status_code === row.expected_status ? '#67c23a' : '#f56c6c' }">
+                      {{ row.response_status_code || '-' }}
+                    </span>
+                  </template>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="85">
+                <template #default="{ row }">
+                  <el-tag :type="getCaseStatusType(row.status)" size="small">
+                    {{ getCaseStatusText(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="耗时" width="75">
+                <template #default="{ row }">{{ row.duration != null ? row.duration + 's' : '-' }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    v-if="row.type !== 'web' && row.status === 'failed'"
+                    size="small"
+                    link
+                    type="danger"
+                    @click="expandFailure(row)"
+                  >
+                    失败详情
+                  </el-button>
+                  <el-button
+                    v-if="row.type === 'web'"
+                    size="small"
+                    link
+                    @click="showWebDetail(row)"
+                  >
+                    详情
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+          <el-empty v-else description="暂无用例执行结果" />
+        </el-collapse-item>
+      </el-collapse>
     </template>
 
     <el-empty v-else-if="!loading" description="未找到执行记录" />
@@ -378,20 +388,37 @@ const selectedCase = ref(null)
 const webDetailVisible = ref(false)
 const selectedWebCase = ref(null)
 
+// 折叠面板：用例明细默认收起
+const activeCollapse = ref([])
+
 // 用例执行结果
 const caseResults = computed(() => {
   if (!execution.value || !execution.value.execution_results) return []
   return execution.value.execution_results
 })
 
-// 是否包含 API 用例（用于控制列显隐）
-const hasApiCases = computed(() => {
-  return caseResults.value.some(r => r.type !== 'web')
-})
-
-// 是否包含 Web 用例（用于控制列显隐）
-const hasWebCases = computed(() => {
-  return caseResults.value.some(r => r.type === 'web')
+// 根据执行结果生成执行日志
+const executionLog = computed(() => {
+  if (!execution.value) return []
+  const logs = []
+  const started = execution.value.started_at || execution.value.created_at
+  logs.push({ time: started, level: 'info', message: `开始执行：${execution.value.name || execution.value.id}` })
+  if (execution.value.summary) {
+    logs.push({ time: started, level: 'info', message: `执行摘要：${execution.value.summary}` })
+  }
+  caseResults.value.forEach((r, idx) => {
+    const name = r.title || r.case_title || r.case_id || `用例 #${idx + 1}`
+    const statusText = getCaseStatusText(r.status)
+    const duration = r.duration != null ? `${r.duration}s` : (r.duration_ms != null ? `${(r.duration_ms / 1000).toFixed(1)}s` : '-')
+    const level = r.status === 'failed' ? 'error' : r.status === 'skipped' ? 'warning' : 'success'
+    logs.push({ time: r.created_at || started, level, message: `[${statusText}] ${name}（耗时 ${duration}）` })
+    if (r.error_message) {
+      logs.push({ time: r.created_at || started, level: 'error', message: `失败原因：${r.error_message}` })
+    }
+  })
+  const ended = execution.value.ended_at || execution.value.created_at
+  logs.push({ time: ended, level: 'info', message: `执行结束：共 ${execution.value.total_cases || caseResults.value.length} 条，通过 ${execution.value.passed_cases || 0}，失败 ${execution.value.failed_cases || 0}，跳过 ${execution.value.skipped_cases || 0}` })
+  return logs
 })
 
 // 加载执行详情
@@ -492,8 +519,8 @@ const handleExport = async (format) => {
 
 // 复制日志
 const copyLog = () => {
-  const text = execution.value?.execution_log || ''
-  navigator.clipboard.writeText(text).then(() => {
+  const text = executionLog.value.map(l => `${formatDate(l.time)} [${l.level.toUpperCase()}] ${l.message}`).join('\n')
+  navigator.clipboard.writeText(text || '暂无日志').then(() => {
     ElMessage.success('日志已复制到剪贴板')
   }).catch(() => {
     ElMessage.error('复制失败')
@@ -655,16 +682,55 @@ onMounted(() => {
   word-break: break-all;
 }
 
-.log-content {
-  padding: 16px;
-  margin: 0;
-  max-height: 400px;
-  overflow-y: auto;
-  font-size: 12px;
-  line-height: 1.6;
+.summary-body {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #475569;
   white-space: pre-wrap;
   word-break: break-all;
-  background: #f5f7fa;
-  border-radius: 4px;
+}
+
+.log-timeline {
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.log-entry:nth-child(odd) {
+  background: #f8fafc;
+}
+
+.log-time {
+  color: #64748b;
+  font-family: monospace;
+  font-size: 12px;
+  min-width: 140px;
+  flex-shrink: 0;
+}
+
+.log-level {
+  flex-shrink: 0;
+  min-width: 50px;
+  text-align: center;
+}
+
+.log-message {
+  color: #334155;
+  word-break: break-all;
+}
+
+.log-level-error .log-message {
+  color: #dc2626;
 }
 </style>
