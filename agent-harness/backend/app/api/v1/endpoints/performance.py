@@ -100,7 +100,7 @@ async def list_perf_executions(
         )
         return {
             "results": [r.to_dict() for r in rows],
-            "total": total,
+            "count": total,
             "page": page,
             "page_size": page_size,
         }
@@ -111,7 +111,13 @@ async def list_perf_executions(
 
 @router.get("/executions/{exec_id}/")
 async def get_perf_execution(exec_id: str, _: None = Depends(require_auth)):
-    raise HTTPException(status_code=404, detail="执行记录不存在")
+    store = get_task_store()
+    rec = store.get_perf_execution(exec_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+    if hasattr(rec, "to_dict"):
+        return rec.to_dict()
+    return rec
 
 
 @router.delete("/executions/{exec_id}/")

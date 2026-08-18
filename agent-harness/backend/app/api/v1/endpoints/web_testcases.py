@@ -59,7 +59,7 @@ async def list_web_testcases(
         status=status or None,
         keyword=keyword or None,
     )
-    return {"results": rows, "total": total, "page": page, "page_size": page_size}
+    return {"results": rows, "count": total, "page": page, "page_size": page_size}
 
 
 @router.post("/")

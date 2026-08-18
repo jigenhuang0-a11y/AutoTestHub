@@ -82,7 +82,7 @@ async def list_executions(
     store = get_task_store()
     rows, total = store.list_executions(
         page=page, page_size=page_size, status=status or None)
-    return {"items": rows, "total": total,
+    return {"results": rows, "count": total,
             "page": page, "page_size": page_size}
 
 

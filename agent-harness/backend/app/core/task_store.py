@@ -3564,8 +3564,22 @@ class TaskStore:
                     params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
                 sql += " ORDER BY started_at DESC"
                 rows = [self._row_to_record(r, PerfExecutionRecord) for r in conn.execute(sql, params).fetchall()]
+                for r in rows:
+                    r.id = r.exec_id or r.id
                 page_rows, total = self._paginate(rows, page, page_size)
                 return page_rows, total
+
+    def get_perf_execution(self, exec_id: str) -> Optional[dict]:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM perf_executions WHERE exec_id = ?", (exec_id,)
+                ).fetchone()
+                if not row:
+                    return None
+                rec = self._row_to_record(row, PerfExecutionRecord)
+                rec.id = rec.exec_id or rec.id
+                return rec.to_dict()
 
     # ============================================================
     # 测试执行报告：真实 SQLite 查询
@@ -3630,7 +3644,11 @@ class TaskStore:
                     params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
                 sql += " ORDER BY created_at DESC"
                 rows = conn.execute(sql, params).fetchall()
-                items = [dict(r) for r in rows]
+                items = []
+                for r in rows:
+                    d = dict(r)
+                    d["id"] = d.get("exec_id") or d.get("id")
+                    items.append(d)
                 page_rows, total = self._paginate(items, page, page_size)
                 return page_rows, total
 
