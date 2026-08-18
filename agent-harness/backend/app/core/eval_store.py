@@ -89,10 +89,10 @@ class EvalStore:
         if feature:
             records = [r for r in records if r.get("feature") == feature]
         if hours:
-            cutoff = datetime.now() - timedelta(hours=hours)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
             records = [
                 r for r in records
-                if _parse_iso(r.get("created_at", "1970-01-01T00:00:00")) >= cutoff
+                if _parse_iso(r.get("created_at", "1970-01-01T00:00:00+00:00")) >= cutoff
             ]
         return records[offset : offset + limit]
 
