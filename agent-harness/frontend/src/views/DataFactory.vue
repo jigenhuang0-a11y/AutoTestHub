@@ -1329,7 +1329,7 @@ const loadLLMDatasetRecords = async (dataset) => {
     console.log('[DEBUG] Loading LLM dataset records for dataset ID:', dataset.id, 'Name:', dataset.name)
     
     const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-    const response = await fetch(`/api/data-factory/datasets/${dataset.id}/records/?page_size=1000`, {
+    const response = await fetch(`/api/v1/data-factory/datasets/${dataset.id}/records/?page_size=1000`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -1550,7 +1550,7 @@ const loadDatasetRecords = async (dataset) => {
     console.log('[DEBUG] Loading records for dataset ID:', dataset.id, 'Type:', dataset.dataset_type)
 
     const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-    const response = await fetch(`/api/data-factory/datasets/${dataset.id}/records/?page_size=1000`, {
+    const response = await fetch(`/api/v1/data-factory/datasets/${dataset.id}/records/?page_size=1000`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -1695,7 +1695,7 @@ const generateStructuredData = async () => {
 
     console.log('[DEBUG] Structured data request:', JSON.stringify(requestBody, null, 2))
 
-    const response = await fetch('/api/data-factory/datasets/generate_structured/', {
+    const response = await fetch('/api/v1/data-factory/datasets/generate_structured/', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -2032,7 +2032,7 @@ const generateLLMDataset = async () => {
     console.log('[DEBUG] Request body:', JSON.stringify(requestBody, null, 2))
     console.log('[DEBUG] Selected dataset before API call - ID:', selectedDataset.value?.id, 'Name:', selectedDataset.value?.name)
 
-    const response = await fetch('/api/data-factory/datasets/generate_llm_dataset/', {
+    const response = await fetch('/api/v1/data-factory/datasets/generate_llm_dataset/', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -2641,7 +2641,7 @@ const loadPresetTemplates = async () => {
     }
     
     // 调用真实API获取预置模板列表
-    const response = await fetch('/api/data-factory/preset-templates/', {
+    const response = await fetch('/api/v1/data-factory/preset-templates/', {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
