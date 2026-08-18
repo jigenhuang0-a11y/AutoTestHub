@@ -527,8 +527,13 @@ function normalizeEventToRecord(ev) {
   }
 }
 
+function isLegacyRecordId(id) {
+  return id && (id.startsWith('local-') || id.startsWith('rec-'))
+}
+
 async function openDetail(row) {
-  if (row.event_id) {
+  // local-/rec- 开头的 ID 来自旧 EvalStore 记录，不是事件存储里的真实 AI 调用事件，直接展示本行数据
+  if (row.event_id && !isLegacyRecordId(row.event_id)) {
     try {
       const ev = await evalCenterAPI.event(row.event_id)
       detail.value = normalizeEventToRecord(ev)
