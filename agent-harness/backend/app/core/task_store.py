@@ -612,14 +612,30 @@ class PerfExecutionRecord:
     engine: str = "locust"
     exec_summary: str = ""
     created_at: str = ""
+    target_url: str = ""
+    request_method: str = ""
+    users: int = 0
+    min_response_time: float = 0.0
+    p50_response_time: float = 0.0
+    p99_response_time: float = 0.0
+    finished_at: str = ""
+    test_type: str = "baseline"
+    thresholds_passed: int = 1
+    threshold_errors: str = "[]"
+    execution_log: str = ""
+    metrics_timeline: str = "[]"
+
+    def _json_field(self, value, default=None):
+        if not value:
+            return default if default is not None else {}
+        if isinstance(value, (list, dict)):
+            return value
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else {}
 
     def to_dict(self):
-        summary = {}
-        if self.exec_summary:
-            try:
-                summary = json.loads(self.exec_summary)
-            except (json.JSONDecodeError, TypeError):
-                summary = {}
         return {
             "id": self.id,
             "exec_id": self.exec_id,
@@ -637,8 +653,20 @@ class PerfExecutionRecord:
             "p95_response_time": self.p95_response_time,
             "error_rate": self.error_rate,
             "engine": self.engine,
-            "exec_summary": summary,
+            "exec_summary": self._json_field(self.exec_summary, {}),
             "created_at": self.created_at,
+            "target_url": self.target_url,
+            "request_method": self.request_method,
+            "users": self.users,
+            "min_response_time": self.min_response_time,
+            "p50_response_time": self.p50_response_time,
+            "p99_response_time": self.p99_response_time,
+            "finished_at": self.finished_at,
+            "test_type": self.test_type,
+            "thresholds_passed": bool(self.thresholds_passed),
+            "threshold_errors": self._json_field(self.threshold_errors, []),
+            "execution_log": self.execution_log or "",
+            "metrics_timeline": self._json_field(self.metrics_timeline, []),
         }
 
 
@@ -1107,7 +1135,19 @@ class TaskStore:
                     error_rate REAL NOT NULL DEFAULT 0,
                     engine TEXT NOT NULL DEFAULT 'locust',
                     exec_summary TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL DEFAULT ''
+                    created_at TEXT NOT NULL DEFAULT '',
+                    target_url TEXT NOT NULL DEFAULT '',
+                    request_method TEXT NOT NULL DEFAULT '',
+                    users INTEGER NOT NULL DEFAULT 0,
+                    min_response_time REAL NOT NULL DEFAULT 0,
+                    p50_response_time REAL NOT NULL DEFAULT 0,
+                    p99_response_time REAL NOT NULL DEFAULT 0,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    test_type TEXT NOT NULL DEFAULT 'baseline',
+                    thresholds_passed INTEGER NOT NULL DEFAULT 1,
+                    threshold_errors TEXT NOT NULL DEFAULT '[]',
+                    execution_log TEXT NOT NULL DEFAULT '',
+                    metrics_timeline TEXT NOT NULL DEFAULT '[]'
                 );
 
                 -- 知识库表
@@ -1168,6 +1208,8 @@ class TaskStore:
             self._migrate_test_mgmt_columns(conn)
             # 迁移：知识库表补充统计列、创建文档表（旧 schema 可能没有）
             self._migrate_knowledge_base_columns(conn)
+            # 迁移：性能执行记录补充日志/曲线/阈值等新列
+            self._migrate_perf_executions_columns(conn)
 
     def _migrate_test_mgmt_columns(self, conn):
         """兼容旧 schema：为 testsuites / testcases / perf_plans 补齐新列。"""
@@ -1237,6 +1279,30 @@ class TaskStore:
             conn.commit()
         except Exception as e:
             logger.warning(f"[TaskStore] 迁移知识库表列失败: {e}")
+
+    def _migrate_perf_executions_columns(self, conn):
+        """为 perf_executions 补充曲线、日志、阈值等前端展示所需字段。"""
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(perf_executions)").fetchall()}
+            for col, ddl in [
+                ("target_url", "TEXT NOT NULL DEFAULT ''"),
+                ("request_method", "TEXT NOT NULL DEFAULT ''"),
+                ("users", "INTEGER NOT NULL DEFAULT 0"),
+                ("min_response_time", "REAL NOT NULL DEFAULT 0"),
+                ("p50_response_time", "REAL NOT NULL DEFAULT 0"),
+                ("p99_response_time", "REAL NOT NULL DEFAULT 0"),
+                ("finished_at", "TEXT NOT NULL DEFAULT ''"),
+                ("test_type", "TEXT NOT NULL DEFAULT 'baseline'"),
+                ("thresholds_passed", "INTEGER NOT NULL DEFAULT 1"),
+                ("threshold_errors", "TEXT NOT NULL DEFAULT '[]'"),
+                ("execution_log", "TEXT NOT NULL DEFAULT ''"),
+                ("metrics_timeline", "TEXT NOT NULL DEFAULT '[]'"),
+            ]:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE perf_executions ADD COLUMN {col} {ddl}")
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[TaskStore] 迁移 perf_executions 列失败: {e}")
 
     def _migrate_datafactory_columns(self, conn):
         """若 datafactory_datasets 表缺少 status/error 列，则 ALTER 补齐。"""
@@ -1711,32 +1777,171 @@ class TaskStore:
         # 种子性能测试执行记录
         if conn.execute("SELECT COUNT(*) FROM perf_executions").fetchone()[0] == 0:
             base = datetime.now(timezone.utc)
-            perf_rows = [
-                ("perf-exec-0001", "perf-1", "登录接口基准测试",
-                 "completed", (base - timedelta(hours=1)).isoformat(),
-                 "admin", "张伟", 300, 15000, 45, 498.3, 212.5, 380.0, 0.003, "locust",
-                 '{"score": 92, "summary": "登录接口在 300 并发下平均响应 212ms，满足 SLA。"}'),
-                ("perf-exec-0002", "perf-2", "商品列表查询压测",
-                 "completed", (base - timedelta(hours=4)).isoformat(),
-                 "tester01", "李娜", 600, 42000, 320, 690.1, 540.8, 1180.0, 0.0076, "locust",
-                 '{"score": 81, "summary": "商品列表在 600 并发下 P95 达 1.18s，需优化索引。"}'),
-                ("perf-exec-0003", "perf-3", "下单链路全链路压测",
-                 "failed", (base - timedelta(days=1, hours=2)).isoformat(),
-                 "admin", "张伟", 300, 8800, 1240, 112.4, 1850.0, 3200.0, 0.141, "locust",
-                 '{"score": 35, "summary": "下单链路口碑熔断，错误率 14%，数据库成为瓶颈。"}'),
-                ("perf-exec-0004", "perf-4", "首页静态资源加载",
-                 "completed", (base - timedelta(days=2, hours=6)).isoformat(),
-                 "tester01", "李娜", 120, 96000, 60, 800.0, 95.2, 210.0, 0.0006, "locust",
-                 '{"score": 95, "summary": "首页 CDN 命中率高，120 并发下响应极快。"}'),
+
+            def _build_metrics(duration, base_qps, base_avg, failures_total, users):
+                points = []
+                fail_budget = failures_total
+                fail_stride = max(1, duration // max(1, failures_total)) if failures_total else duration + 1
+                for i in range(duration):
+                    t = i + 1
+                    noise = (i % 7 - 3) * 0.03
+                    rps = max(0, round(base_qps * (1 + noise), 1))
+                    avg = max(1, round(base_avg * (1 + (i % 11 - 5) * 0.02), 1))
+                    p95 = round(avg * (1.6 + (i % 5) * 0.05), 1)
+                    p99 = round(p95 * 1.25, 1)
+                    fail = 0
+                    if fail_budget > 0 and i > duration * 0.3 and i % fail_stride == 0:
+                        fail = min(fail_budget, max(1, failures_total // 10))
+                        fail_budget -= fail
+                    points.append({
+                        "timestamp": t, "rps": rps, "avg": avg,
+                        "p95": p95, "p99": p99, "failures": fail,
+                        "users": users,
+                    })
+                return points
+
+            perf_defs = [
+                {
+                    "exec_id": "perf-exec-0001",
+                    "test_case": "perf-1",
+                    "name": "登录接口基准测试",
+                    "started_at": base - timedelta(hours=1),
+                    "duration": 300,
+                    "users": 300,
+                    "total": 15000,
+                    "failures": 45,
+                    "qps": 498.3,
+                    "avg": 212.5,
+                    "min": 35.0,
+                    "p95": 380.0,
+                    "p99": 510.0,
+                    "error_rate": 0.003,
+                    "url": "/api/v1/auth/login",
+                    "method": "POST",
+                    "passed": False,
+                    "errors": ["P95 响应时间 380ms 超过阈值 200ms", "失败率 0.3% 超过阈值 0.1%"],
+                    "log": [
+                        "[2026-08-18 00:31:10] INFO  启动 Locust 压测: 300 并发用户",
+                        "[2026-08-18 00:31:12] INFO  目标接口: POST /api/v1/auth/login",
+                        "[2026-08-18 00:32:45] WARNING  P95 响应时间达到 210ms，接近阈值 200ms",
+                        "[2026-08-18 00:34:20] ERROR  出现 45 次登录失败，错误码 500",
+                        "[2026-08-18 00:35:20] ERROR  数据库连接池等待超时，失败数上升",
+                        "[2026-08-18 00:36:10] INFO  压测结束，总请求 15000，失败 45，QPS 498.3",
+                    ],
+                    "summary": '{"score": 62, "summary": "登录接口在 300 并发下 P95 达到 380ms，超过 SLA；存在 45 次 500 错误。", "issues": [{"severity": "error", "title": "P95 超限", "desc": "P95 响应时间 380ms 超过阈值 200ms", "suggestion": "优化数据库查询与连接池配置"}, {"severity": "warning", "title": "失败率偏高", "desc": "失败率 0.3% 超过阈值 0.1%", "suggestion": "检查登录服务稳定性与超时设置"}], "recommendations": ["增加数据库连接池大小", "启用登录接口缓存", "优化慢 SQL"]}',
+                },
+                {
+                    "exec_id": "perf-exec-0002",
+                    "test_case": "perf-2",
+                    "name": "商品列表查询压测",
+                    "started_at": base - timedelta(hours=4),
+                    "duration": 300,
+                    "users": 600,
+                    "total": 42000,
+                    "failures": 320,
+                    "qps": 690.1,
+                    "avg": 540.8,
+                    "min": 80.0,
+                    "p95": 1180.0,
+                    "p99": 1650.0,
+                    "error_rate": 0.0076,
+                    "url": "/api/v1/products",
+                    "method": "GET",
+                    "passed": False,
+                    "errors": ["P95 响应时间 1180ms 超过阈值 500ms"],
+                    "log": [
+                        "[2026-08-17 20:31:10] INFO  启动商品列表查询压测: 600 并发",
+                        "[2026-08-17 20:31:15] INFO  目标接口: GET /api/v1/products",
+                        "[2026-08-17 20:33:00] WARNING  数据库 CPU 升高至 78%，部分查询变慢",
+                        "[2026-08-17 20:35:30] ERROR  出现 320 次查询超时",
+                        "[2026-08-17 20:36:10] INFO  压测结束，总请求 42000，失败 320，QPS 690.1",
+                    ],
+                    "summary": '{"score": 68, "summary": "商品列表在 600 并发下 P95 达 1.18s，需优化索引与缓存。", "issues": [{"severity": "error", "title": "P95 超限", "desc": "P95 响应时间 1180ms 超过阈值 500ms", "suggestion": "为列表查询加索引与缓存"}], "recommendations": ["优化分页 SQL", "引入 Redis 缓存"]}',
+                },
+                {
+                    "exec_id": "perf-exec-0003",
+                    "test_case": "perf-3",
+                    "name": "下单链路全链路压测",
+                    "started_at": base - timedelta(days=1, hours=2),
+                    "duration": 300,
+                    "users": 300,
+                    "total": 8800,
+                    "failures": 1240,
+                    "qps": 112.4,
+                    "avg": 1850.0,
+                    "min": 120.0,
+                    "p95": 3200.0,
+                    "p99": 4500.0,
+                    "error_rate": 0.141,
+                    "url": "/api/v1/orders",
+                    "method": "POST",
+                    "passed": False,
+                    "errors": ["平均响应 1850ms 超过阈值 500ms", "失败率 14.1% 超过阈值 1%", "P95 3200ms 超过阈值 1000ms"],
+                    "log": [
+                        "[2026-08-17 18:31:10] INFO  启动下单链路全链路压测: 300 并发",
+                        "[2026-08-17 18:31:15] INFO  目标接口: POST /api/v1/orders",
+                        "[2026-08-17 18:33:00] ERROR  数据库 CPU 飙升至 95%，查询超时",
+                        "[2026-08-17 18:34:30] ERROR  失败率突破 10%，触发熔断保护",
+                        "[2026-08-17 18:35:00] WARNING  应用服务出现 OOM 风险，GC 时间占比 35%",
+                        "[2026-08-17 18:36:10] ERROR  压测结束，失败 1240/8800，错误率 14.1%",
+                    ],
+                    "summary": '{"score": 28, "summary": "下单链路在 300 并发下严重不达标，数据库成为瓶颈，建议立即优化。", "issues": [{"severity": "error", "title": "数据库瓶颈", "desc": "平均响应 1850ms，P95 3200ms", "suggestion": "加索引、缓存与读写分离"}, {"severity": "error", "title": "失败率过高", "desc": "失败率 14.1%", "suggestion": "熔断降级并排查慢查询"}], "recommendations": ["为订单表加索引", "引入消息队列削峰", "读写分离"]}',
+                },
+                {
+                    "exec_id": "perf-exec-0004",
+                    "test_case": "perf-4",
+                    "name": "首页静态资源加载",
+                    "started_at": base - timedelta(days=2, hours=6),
+                    "duration": 120,
+                    "users": 120,
+                    "total": 96000,
+                    "failures": 60,
+                    "qps": 800.0,
+                    "avg": 95.2,
+                    "min": 12.0,
+                    "p95": 210.0,
+                    "p99": 350.0,
+                    "error_rate": 0.0006,
+                    "url": "/home/static/*",
+                    "method": "GET",
+                    "passed": True,
+                    "errors": [],
+                    "log": [
+                        "[2026-08-16 18:31:10] INFO  启动首页静态资源加载压测: 120 并发",
+                        "[2026-08-16 18:31:12] INFO  CDN 命中率 98.5%",
+                        "[2026-08-16 18:33:10] INFO  压测结束，总请求 96000，失败 60，QPS 800",
+                    ],
+                    "summary": '{"score": 95, "summary": "首页 CDN 命中率高，120 并发下响应极快。", "issues": [], "recommendations": ["保持当前 CDN 策略"]}',
+                },
             ]
+
+            perf_rows = []
+            for d in perf_defs:
+                metrics = _build_metrics(d["duration"], d["qps"], d["avg"], d["failures"], d["users"])
+                finished = d["started_at"] + timedelta(seconds=d["duration"])
+                started_by = "admin" if d["exec_id"] in ("perf-exec-0001", "perf-exec-0003") else "tester01"
+                started_by_name = "张伟" if d["exec_id"] in ("perf-exec-0001", "perf-exec-0003") else "李娜"
+                perf_rows.append((
+                    d["exec_id"], d["test_case"], d["name"], d.get("status", "completed"),
+                    d["started_at"].isoformat(), started_by, started_by_name,
+                    d["duration"], d["total"], d["failures"], d["qps"], d["avg"], d["p95"],
+                    d["error_rate"], "locust", d["summary"], base.isoformat(),
+                    d["url"], d["method"], d["users"], d["min"],
+                    d["avg"] * 0.9, d["p99"], finished.isoformat(), "baseline",
+                    1 if d["passed"] else 0, json.dumps(d["errors"], ensure_ascii=False),
+                    "\n".join(d["log"]), json.dumps(metrics, ensure_ascii=False),
+                ))
+
             conn.executemany(
                 """INSERT INTO perf_executions
                 (exec_id, test_case, test_case_name, status, started_at,
                  started_by, started_by_name, duration, total_requests, failures,
                  requests_per_second, avg_response_time, p95_response_time, error_rate,
-                 engine, exec_summary, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                [(r + (base.isoformat(),)) for r in perf_rows],
+                 engine, exec_summary, created_at, target_url, request_method, users,
+                 min_response_time, p50_response_time, p99_response_time, finished_at,
+                 test_type, thresholds_passed, threshold_errors, execution_log, metrics_timeline)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                perf_rows,
             )
             conn.commit()
             logger.info(f"[TaskStore] 已写入 {len(perf_rows)} 条种子性能执行记录")
