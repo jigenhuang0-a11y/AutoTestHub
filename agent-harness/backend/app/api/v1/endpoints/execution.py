@@ -124,7 +124,7 @@ async def get_execution(exec_id: str, _: None = Depends(require_auth)):
                     r[k] = json.loads(v)
                 except Exception:
                     pass
-    return {**rec, "results": results}
+    return {**rec.to_dict(), "results": results}
 
 
 @router.post("/{exec_id}/rerun/")
