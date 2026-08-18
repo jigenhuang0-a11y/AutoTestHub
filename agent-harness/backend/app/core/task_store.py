@@ -3652,13 +3652,17 @@ class TaskStore:
                 page_rows, total = self._paginate(items, page, page_size)
                 return page_rows, total
 
-    def get_execution(self, exec_id: str) -> dict | None:
+    def get_execution(self, exec_id: str):
         with self._lock:
             with self._get_conn() as conn:
                 row = conn.execute(
                     "SELECT * FROM executions WHERE exec_id = ?", (exec_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                if not row:
+                    return None
+                d = dict(row)
+                d["id"] = d.get("exec_id") or d.get("id")
+                return _StubRecord(**d)
 
     def list_execution_results(self, exec_id: str):
         with self._lock:

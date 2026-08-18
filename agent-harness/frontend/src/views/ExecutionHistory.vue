@@ -146,7 +146,7 @@
               @selection-change="handleSelectionChange"
             >
         <el-table-column type="selection" width="45" />
-        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="id" label="ID" width="160" align="center" show-overflow-tooltip />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.__type === 'web'" size="small" type="success">

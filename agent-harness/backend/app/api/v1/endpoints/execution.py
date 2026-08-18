@@ -124,7 +124,7 @@ async def get_execution(exec_id: str, _: None = Depends(require_auth)):
                     r[k] = json.loads(v)
                 except Exception:
                     pass
-    return {**rec.to_dict(), "results": results}
+    return {**rec, "results": results}
 
 
 @router.post("/{exec_id}/rerun/")
@@ -133,12 +133,9 @@ async def rerun(exec_id: str, _: None = Depends(require_auth)):
     rec = store.get_execution(exec_id)
     if not rec:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    ids = rec.test_case_ids
-    if isinstance(ids, str):
-        try:
-            ids = json.loads(ids)
-        except Exception:
-            ids = []
+    ids = list({r.get("case_id") for r in store.list_execution_results(exec_id) if r.get("case_id")})
+    if not ids:
+        raise HTTPException(status_code=400, detail="无可重跑的用例")
     new_rec = _run_simulation(store, ids)
     return {"ok": True, "execution": new_rec}
 
