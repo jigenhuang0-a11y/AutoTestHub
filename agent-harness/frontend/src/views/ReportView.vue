@@ -302,7 +302,19 @@ const loadAll = async () => {
   await loadReports()
 }
 
-const goExecute = () => router.push('/testsuites')
+const goExecute = async () => {
+  try {
+    loading.value = true
+    await reportAPI.generate()
+    ElMessage.success('报告生成成功')
+    await loadAll()
+  } catch (error) {
+    console.error('Generate report error:', error)
+    ElMessage.error(error?.response?.data?.detail || '生成报告失败')
+  } finally {
+    loading.value = false
+  }
+}
 
 const statusTag = (status) => {
   if (!status) return 'info'

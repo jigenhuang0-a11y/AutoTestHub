@@ -1741,6 +1741,69 @@ class TaskStore:
             conn.commit()
             logger.info(f"[TaskStore] 已写入 {len(perf_rows)} 条种子性能执行记录")
 
+        # 种子测试报告（汇总上述 Web/UI、性能、接口、套件数据）
+        if conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0] == 0:
+            base = datetime.now(timezone.utc)
+            exec_rows = [
+                (
+                    "exec-report-0001",
+                    f"全平台测试报告 {base.strftime('%Y-%m-%d %H:%M')}",
+                    "completed", 15, 12, 2, 1,
+                    245.6, "manual",
+                    "全平台汇总：Web 5 条、性能 4 条、接口 6 条、套件 6 条；通过率 80.00%，失败率 13.33%，跳过率 6.67%。",
+                    (base - timedelta(hours=1)).isoformat(),
+                    (base - timedelta(hours=1)).isoformat(),
+                ),
+                (
+                    "exec-report-0002",
+                    f"全平台测试报告 {(base - timedelta(days=1)).strftime('%Y-%m-%d %H:%M')}",
+                    "completed", 10, 8, 1, 1,
+                    198.4, "scheduled",
+                    "全平台汇总：Web 3 条、性能 3 条、接口 4 条、套件 4 条；通过率 80.00%，失败率 10.00%，跳过率 10.00%。",
+                    (base - timedelta(days=1)).isoformat(),
+                    (base - timedelta(days=1)).isoformat(),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO executions
+                (exec_id, name, status, total_cases, passed_cases, failed_cases, skipped_cases,
+                 duration, trigger_type, summary, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                exec_rows,
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(exec_rows)} 条种子测试报告")
+
+            # 报告明细
+            result_rows = [
+                ("exec-report-0001", "web-0001", "Web 自动化执行 #1", "passed", 4200, ""),
+                ("exec-report-0001", "web-0002", "Web 自动化执行 #2", "failed", 6800, "元素定位超时: .add-to-cart-btn"),
+                ("exec-report-0001", "web-0003", "Web 自动化执行 #3", "passed", 5100, ""),
+                ("exec-report-0001", "web-0004", "Web 自动化执行 #4", "failed", 2300, "上传接口 500 错误"),
+                ("exec-report-0001", "web-0005", "Web 自动化执行 #5", "passed", 3900, ""),
+                ("exec-report-0001", "perf-0001", "性能测试执行 #1", "passed", 300000, ""),
+                ("exec-report-0001", "perf-0002", "性能测试执行 #2", "passed", 600000, ""),
+                ("exec-report-0001", "perf-0003", "性能测试执行 #3", "failed", 300000, "错误率 14.1%，数据库成为瓶颈"),
+                ("exec-report-0001", "perf-0004", "性能测试执行 #4", "passed", 120000, ""),
+                ("exec-report-0001", "api-0001", "接口用例汇总", "passed", 0, ""),
+                ("exec-report-0001", "api-0002", "接口用例汇总", "passed", 0, ""),
+                ("exec-report-0001", "suite-0001", "测试套件汇总", "passed", 0, ""),
+                ("exec-report-0001", "suite-0002", "测试套件汇总", "failed", 0, ""),
+                ("exec-report-0002", "web-0001", "Web 自动化执行 #1", "passed", 4200, ""),
+                ("exec-report-0002", "web-0002", "Web 自动化执行 #2", "passed", 6800, ""),
+                ("exec-report-0002", "perf-0001", "性能测试执行 #1", "passed", 300000, ""),
+                ("exec-report-0002", "api-0001", "接口用例汇总", "passed", 0, ""),
+                ("exec-report-0002", "suite-0001", "测试套件汇总", "passed", 0, ""),
+            ]
+            conn.executemany(
+                """INSERT INTO execution_results
+                (exec_id, case_id, case_title, status, duration_ms, error_message, created_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                [(r + (base.isoformat(),)) for r in result_rows],
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(result_rows)} 条种子报告明细")
+
     @staticmethod
     def _build_sample_tasks() -> dict:
         """构建种子任务数据（初次启动用）"""

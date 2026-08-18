@@ -158,6 +158,7 @@ export const reportAPI = {
   get: (id) => api.get(`/reports/${id}/`),
   summary: () => api.get('/reports/summary/'),
   health: (data) => api.post('/reports/health/', data),
+  generate: () => api.post('/reports/generate/'),
 }
 
 // 测试套件API
