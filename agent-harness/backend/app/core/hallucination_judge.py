@@ -27,7 +27,7 @@ JUDGE_PROVIDER = os.getenv("HALLUCINATION_JUDGE_PROVIDER", "deepseek")
 
 DIMENSIONS = ["hallucination", "consistency", "completeness", "executability", "safety"]
 
-JUDGE_PROMPT_TEMPLATE = """你是一名严谨的 AI 生成内容质量评估专家。请对下面的输入和生成输出进行多维度评分。
+JUDGE_PROMPT_TEMPLATE = """你是一名严谨的 AI 生成内容质量评估专家。请对下面的输入和生成输出进行多维度评分，并对出现的问题（尤其是 AI 幻觉）做**根因定位与修改建议**，像"实时流水线记录仪"一样指出：错在哪一步、哪一段检索/事实、具体哪个陈述。
 
 【评分维度】（每项 0-100 分，越高越好；其中 hallucination 越低越好，即幻觉越少分越高）
 1. hallucination（幻觉率）: 生成内容是否包含与输入/参考事实不符的编造。无幻觉=100，严重幻觉=0。
@@ -39,7 +39,7 @@ JUDGE_PROMPT_TEMPLATE = """你是一名严谨的 AI 生成内容质量评估专�
 【输入】
 {input_text}
 
-【参考材料】（可能为空）
+【参考材料 / RAG 检索片段】（可能为空，若为空表示本次回答未使用检索）
 {reference_text}
 
 【生成输出】
@@ -53,7 +53,23 @@ JUDGE_PROMPT_TEMPLATE = """你是一名严谨的 AI 生成内容质量评估专�
   "executability": 分数,
   "safety": 分数,
   "overall": 总分,
-  "reason": "50字以内简要说明"
+  "reason": "50字以内简要说明",
+  "issues": [
+    {{
+      "severity": "high | medium | low",
+      "dimension": "hallucination | consistency | completeness | executability | safety",
+      "location": "问题所在的步骤/段落的简短描述（如：答案第2条、检索片段#1、测试用例步骤3）",
+      "claim": "被判定有问题的具体陈述原文或改写",
+      "evidence": "支撑判定的事实依据，引用参考材料或指出'参考材料无此内容'",
+      "suggestion": "如何修改该陈述的具体建议"
+    }}
+  ],
+  "retrieval_gaps": [
+    "描述本次回答缺失的关键检索内容（如：未检索到 XX 限制条款；若无需此项可为空数组）"
+  ],
+  "recommendations": [
+    "面向工程的整体优化建议（如：补充 XX 知识库文档、在 prompt 中强制要求引用来源、增加事实校验步骤）"
+  ]
 }}
 """
 
@@ -70,6 +86,10 @@ class JudgeResult:
     raw: str = ""
     trace_id: Optional[str] = None
     dimension_scores: Dict[str, float] = field(default_factory=dict)
+    # 结构化根因分析（类似实时流水线记录仪）
+    issues: List[Dict[str, Any]] = field(default_factory=list)
+    retrieval_gaps: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -82,6 +102,9 @@ class JudgeResult:
             "reason": self.reason,
             "trace_id": self.trace_id,
             "dimension_scores": self.dimension_scores,
+            "issues": self.issues,
+            "retrieval_gaps": self.retrieval_gaps,
+            "recommendations": self.recommendations,
         }
 
 
@@ -204,6 +227,26 @@ def judge_output(
         "安全性": result.safety,
     }
 
+    # 结构化根因分析：兼容旧格式（缺字段时给空/兜底）
+    raw_issues = parsed.get("issues", []) or []
+    if isinstance(raw_issues, list):
+        for it in raw_issues:
+            if isinstance(it, dict):
+                result.issues.append({
+                    "severity": str(it.get("severity", "medium")),
+                    "dimension": str(it.get("dimension", "hallucination")),
+                    "location": str(it.get("location", ""))[:200],
+                    "claim": str(it.get("claim", ""))[:500],
+                    "evidence": str(it.get("evidence", ""))[:500],
+                    "suggestion": str(it.get("suggestion", ""))[:500],
+                })
+    rg = parsed.get("retrieval_gaps", []) or []
+    if isinstance(rg, list):
+        result.retrieval_gaps = [str(x)[:300] for x in rg if str(x).strip()]
+    rec = parsed.get("recommendations", []) or []
+    if isinstance(rec, list):
+        result.recommendations = [str(x)[:300] for x in rec if str(x).strip()]
+
     # 把分数挂到 Langfuse
     if trace_id:
         try:
@@ -225,6 +268,14 @@ def judge_output(
                     trace_id=trace_id,
                     name=f"{label}_score",
                     value=getattr(result, dim) / 100.0,
+                    metadata={"feature": feature},
+                )
+            if result.issues:
+                score_trace(
+                    trace_id=trace_id,
+                    name="issue_count",
+                    value=float(len(result.issues)),
+                    comment="结构化问题数",
                     metadata={"feature": feature},
                 )
         except Exception as e:

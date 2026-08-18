@@ -305,6 +305,41 @@
           <p>{{ detail.reason || '（无说明）' }}</p>
         </div>
 
+        <!-- 实时流水线记录仪：幻觉根因定位 + 修改建议 -->
+        <template v-if="(detail.issues && detail.issues.length) || (detail.retrieval_gaps && detail.retrieval_gaps.length) || (detail.recommendations && detail.recommendations.length)">
+          <el-divider content-position="left">
+            <span class="recorder-title">🔍 幻觉/问题定位记录仪</span>
+          </el-divider>
+
+          <div v-if="detail.issues && detail.issues.length" class="issue-list">
+            <div class="recorder-subtitle">问题定位清单（{{ detail.issues.length }}）</div>
+            <div v-for="(iss, i) in detail.issues" :key="i" class="issue-card" :class="'sev-' + (iss.severity || 'medium')">
+              <div class="issue-head">
+                <el-tag :type="sevTag(iss.severity)" size="small">{{ sevLabel(iss.severity) }}</el-tag>
+                <el-tag size="small" effect="plain">{{ dimLabel(iss.dimension) }}</el-tag>
+                <span class="issue-loc">{{ iss.location || '未标注位置' }}</span>
+              </div>
+              <div class="issue-row"><span class="issue-key">问题陈述</span><span class="issue-claim">{{ iss.claim }}</span></div>
+              <div class="issue-row"><span class="issue-key">事实依据</span><span class="issue-evi">{{ iss.evidence || '—' }}</span></div>
+              <div class="issue-row issue-fix"><span class="issue-key">修改建议</span><span class="issue-sug">{{ iss.suggestion || '—' }}</span></div>
+            </div>
+          </div>
+
+          <div v-if="detail.retrieval_gaps && detail.retrieval_gaps.length" class="gap-block">
+            <div class="recorder-subtitle">检索缺口（RAG 漏召回）</div>
+            <ul class="gap-list">
+              <li v-for="(g, i) in detail.retrieval_gaps" :key="i">{{ g }}</li>
+            </ul>
+          </div>
+
+          <div v-if="detail.recommendations && detail.recommendations.length" class="rec-block">
+            <div class="recorder-subtitle">工程优化建议</div>
+            <ul class="rec-list">
+              <li v-for="(r, i) in detail.recommendations" :key="i">{{ r }}</li>
+            </ul>
+          </div>
+        </template>
+
         <el-divider>输入输出原文</el-divider>
         <div class="io-block">
           <div class="io-label">用户提问</div>
@@ -513,24 +548,74 @@ async function loadLangfuseConfig() {
   }
 }
 
+// 离线演示用的结构化根因样例（后端不可达时也能展示"问题定位记录仪"）
+function buildOfflineDemo() {
+  return {
+    hallucination: 20, consistency: 70, completeness: 60, executability: 70, safety: 90, overall: 62,
+    reason: '生成内容包含多处与参考材料不符的幻觉信息，如到账时间、无理由秒退和优惠券补偿。',
+    dimension_scores: { 幻觉率: 20, 一致性: 70, 完整性: 60, 可执行性: 70, 安全性: 90 },
+    issues: [
+      { severity: 'high', dimension: 'hallucination', location: '答案第2条',
+        claim: '退款将在 24 小时内到账',
+        evidence: "参考材料明确说明'审核通过后 1-3 个工作日到账'，24 小时与 1-3 个工作日不符。",
+        suggestion: "改为'审核通过后 1-3 个工作日到账'。" },
+      { severity: 'high', dimension: 'hallucination', location: '答案第3条',
+        claim: '平台还支持无理由秒退——用户无需任何理由可在 7 天内一键全额退款',
+        evidence: "参考材料明确说明'不支持无理由秒退'，且不应编造 7 天无理由退货政策。",
+        suggestion: "删除该句，或改为'平台不支持无理由秒退'。" },
+      { severity: 'medium', dimension: 'hallucination', location: '答案第3条',
+        claim: '退款会额外赠送 5% 的优惠券作为补偿',
+        evidence: '参考材料中无任何关于优惠券补偿的信息。',
+        suggestion: '删除该句，或补充相关事实依据。' },
+    ],
+    retrieval_gaps: [
+      '未检索到关于退款到账时间的准确表述（1-3 个工作日）',
+      '未检索到关于无理由秒退的限制条款',
+    ],
+    recommendations: [
+      '在知识库中补充退款政策的详细说明，包括到账时间、无理由退货限制等。',
+      '在生成流程中增加事实校验步骤，确保输出与检索内容一致。',
+      '在 prompt 中强制要求模型引用参考材料的具体条款，避免编造。',
+    ],
+  }
+}
+
 async function demoJudge() {
+  const req = {
+    input_text: '我们的会员系统支持哪些退款方式？退款多久到账？',
+    output_text: '根据知识库：本平台支持原路退回和余额退回两种方式。退款将在 24 小时内到账。' +
+      '此外，平台还支持"无理由秒退"——用户无需任何理由可在 7 天内一键全额退款，' +
+      '并且退款会额外赠送 5% 的优惠券作为补偿。',
+    reference: '会员退款规则：支持原路退回、余额退回。审核通过后 1-3 个工作日到账。不支持无理由秒退。',
+    feature: 'rag_qa',
+  }
+  let payload = null
   try {
-    const req = {
-      input_text: '为电商订单系统生成 3 条测试用例，覆盖下单、取消、库存扣减。',
-      output_text: '1. 用户选择商品并点击下单，系统应创建订单并扣减库存。\n2. 用户取消订单，系统应恢复库存。\n3. 库存不足时，系统应提示缺品并阻止下单。',
-      reference: '订单系统需求：支持下单、取消、库存校验。',
-      feature: 'ai_testcase',
-    }
     const data = await evalCenterAPI.judge(req)
-    const payload = data.success === true ? data.data : data
-    if (payload && payload.overall !== undefined) {
-      ElMessage.success('样例评测完成，综合分：' + payload.overall)
-      loadDashboard()
-    } else {
-      ElMessage.error(data.message || '评测失败')
-    }
+    payload = data.success === true ? data.data : data
   } catch (e) {
-    ElMessage.error('评测请求失败：' + (e.message || e))
+    // 后端不可达（如未登录/无 token）→ 用离线样例展示渲染效果
+    payload = buildOfflineDemo()
+    ElMessage.warning('后端评测不可用，已用离线样例展示定位效果')
+  }
+  if (payload && payload.overall !== undefined) {
+    ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
+    detail.value = {
+      ...payload,
+      input_text: req.input_text,
+      output_text: req.output_text,
+      retrieved_docs: [{ source: '会员退款规则.md', score: 0.91, content: req.reference }],
+      feature: req.feature,
+      created_at: new Date().toISOString(),
+      trace_id: payload.trace_id || ('demo-' + Date.now()),
+      model: 'deepseek-chat',
+      latency_ms: 0,
+      token_usage: 0,
+    }
+    detailVisible.value = true
+    loadDashboard()
+  } else {
+    ElMessage.error('评测失败')
   }
 }
 
@@ -544,6 +629,19 @@ function scoreTag(score) {
   if (score >= 85) return 'success'
   if (score >= 60) return 'warning'
   return 'danger'
+}
+
+function sevLabel(sev) {
+  return { high: '严重', medium: '中等', low: '轻微' }[sev] || '中等'
+}
+function sevTag(sev) {
+  return { high: 'danger', medium: 'warning', low: 'info' }[sev] || 'warning'
+}
+function dimLabel(dim) {
+  return {
+    hallucination: '幻觉', consistency: '一致性', completeness: '完整性',
+    executability: '可执行性', safety: '安全性',
+  }[dim] || dim || '其他'
 }
 
 function barColor(score) {
@@ -802,6 +900,25 @@ onUnmounted(() => {
 .score-excellent { color: #4ade80; }
 .score-good { color: #fbbf24; }
 .score-poor { color: #f87171; }
+.recorder-title { color: #f0abfc; font-weight: 600; }
+.recorder-subtitle { font-size: 12px; color: #c4b5fd; margin: 10px 0 6px; font-weight: 600; }
+.issue-list { display: flex; flex-direction: column; gap: 8px; }
+.issue-card { background: rgba(15,23,42,0.55); border: 1px solid rgba(148,163,184,0.18); border-left-width: 4px; border-radius: 8px; padding: 10px 12px; }
+.issue-card.sev-high { border-left-color: #f87171; }
+.issue-card.sev-medium { border-left-color: #fbbf24; }
+.issue-card.sev-low { border-left-color: #60a5fa; }
+.issue-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.issue-loc { font-size: 12px; color: #94a3b8; }
+.issue-row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.6; margin-bottom: 4px; }
+.issue-key { flex: 0 0 64px; color: #818cf8; font-weight: 600; }
+.issue-claim { color: #fca5a5; flex: 1; }
+.issue-evi { color: #e2e8f0; flex: 1; }
+.issue-fix .issue-sug { color: #86efac; flex: 1; }
+.gap-block, .rec-block { margin-top: 6px; }
+.gap-list, .rec-list { margin: 0; padding-left: 18px; }
+.gap-list li, .rec-list li { font-size: 12.5px; line-height: 1.7; color: #e2e8f0; }
+.gap-list li { color: #fcd34d; }
+.rec-list li { color: #a5f3fc; }
 </style>
 
 <style scoped>
