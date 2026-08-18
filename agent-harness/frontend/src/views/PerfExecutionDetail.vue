@@ -3,7 +3,7 @@
     <!-- 顶部工具栏 -->
     <div class="top-bar">
       <div class="top-bar-left">
-        <el-button @click="$router.back()" :icon="'ArrowLeft'">
+        <el-button class="back-btn" @click="$router.back()">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
@@ -988,7 +988,21 @@ const statusTagType = (s) => {
 .page-title {
   font-size: 18px;
   font-weight: 600;
-  color: #303133;
+  color: #ffffff;
+}
+.back-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+.back-btn:hover,
+.back-btn:focus {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+.back-btn :deep(.el-icon) {
+  color: #ffffff;
 }
 .info-card {
   margin-bottom: 0;

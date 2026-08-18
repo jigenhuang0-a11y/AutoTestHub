@@ -3,7 +3,7 @@
     <template v-if="execution">
       <!-- 顶部操作栏 -->
       <div class="action-bar">
-        <el-page-header @back="goBack" :title="'返回'" />
+        <el-page-header class="detail-page-header" @back="goBack" :title="'返回'" />
         <div class="action-buttons">
           <el-button type="primary" @click="rerunExecution">
             <el-icon><Refresh /></el-icon> 重新执行
@@ -607,6 +607,18 @@ onMounted(() => {
 .action-buttons {
   display: flex;
   gap: 8px;
+}
+
+.detail-page-header {
+  color: #ffffff;
+}
+.detail-page-header :deep(.el-page-header__left),
+.detail-page-header :deep(.el-page-header__title),
+.detail-page-header :deep(.el-page-header__icon) {
+  color: #ffffff;
+}
+.detail-page-header :deep(.el-page-header__left:hover) {
+  color: #e2e8f0;
 }
 
 .overview-card :deep(.el-card__body) {
