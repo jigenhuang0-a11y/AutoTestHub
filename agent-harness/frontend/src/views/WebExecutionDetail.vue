@@ -3,7 +3,7 @@
     <template v-if="execution">
       <!-- 顶部操作栏 -->
       <div class="action-bar">
-        <el-page-header @back="goBack" :title="'返回'" />
+        <el-page-header class="detail-page-header" @back="goBack" :title="'返回'" />
         <div class="action-buttons">
           <el-button type="danger" @click="handleDelete">
             <el-icon><Delete /></el-icon> 删除记录
@@ -418,6 +418,18 @@ const formatJson = (data) => JSON.stringify(data, null, 2)
   margin-bottom: 16px;
 }
 .action-bar .action-buttons { display: flex; gap: 10px; }
+
+.detail-page-header {
+  color: #ffffff;
+}
+.detail-page-header :deep(.el-page-header__left),
+.detail-page-header :deep(.el-page-header__title),
+.detail-page-header :deep(.el-page-header__icon) {
+  color: #ffffff;
+}
+.detail-page-header :deep(.el-page-header__left:hover) {
+  color: #e2e8f0;
+}
 
 .exec-title {
   margin: 0 0 14px 0;
