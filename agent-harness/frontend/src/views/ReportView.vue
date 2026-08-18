@@ -1045,8 +1045,9 @@ onMounted(() => {
 .meta-line {
   display: flex;
   justify-content: space-between;
-  font-size: 14px;
-  color: #cbd5e1;
+  font-size: 16px;
+  color: #f8fafc;
+  font-weight: 500;
 }
 
 .meta-value {
