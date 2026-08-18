@@ -33,7 +33,7 @@
             <el-option label="近 30 天" :value="720" />
           </el-select>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
-          <el-button type="success" :icon="VideoPlay" @click="demoJudge">触发样例评测</el-button>
+          <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="demoJudge">触发样例评测</el-button>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
           <el-dropdown @command="onExport" :disabled="!records.length">
             <el-button :icon="Download">导出</el-button>
@@ -399,6 +399,7 @@ const records = ref([])
 const recordsLoading = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
+const demoLoading = ref(false)
 const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
 
@@ -581,6 +582,8 @@ function buildOfflineDemo() {
 }
 
 async function demoJudge() {
+  demoLoading.value = true
+  ElMessage.info('样例评测请求已发送，请稍候…')
   const req = {
     input_text: '我们的会员系统支持哪些退款方式？退款多久到账？',
     output_text: '根据知识库：本平台支持原路退回和余额退回两种方式。退款将在 24 小时内到账。' +
@@ -597,6 +600,8 @@ async function demoJudge() {
     // 后端不可达（如未登录/无 token）→ 用离线样例展示渲染效果
     payload = buildOfflineDemo()
     ElMessage.warning('后端评测不可用，已用离线样例展示定位效果')
+  } finally {
+    demoLoading.value = false
   }
   if (payload && payload.overall !== undefined) {
     ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
@@ -1254,6 +1259,32 @@ onUnmounted(() => {
 
 .chart-card :deep(.el-table__empty-text) {
   color: #64748b;
+}
+
+/* 抽屉：减少遮罩雾化，增加内容对比度 */
+:global(.el-overlay) {
+  background-color: rgba(0, 0, 0, 0.55) !important;
+}
+:global(.el-drawer) {
+  background: #0f172a !important;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.55);
+}
+:global(.el-drawer__header) {
+  color: #f8fafc !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  margin-bottom: 0;
+  padding: 18px 20px;
+  font-weight: 600;
+}
+:global(.el-drawer__body) {
+  padding: 20px;
+  color: #e2e8f0;
+}
+:global(.el-drawer__close-btn) {
+  color: #94a3b8;
+}
+:global(.el-drawer__close-btn:hover) {
+  color: #f8fafc;
 }
 
 @media (max-width: 768px) {
