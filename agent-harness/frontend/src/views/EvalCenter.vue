@@ -33,7 +33,16 @@
             <el-option label="近 30 天" :value="720" />
           </el-select>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
-          <el-button :type="isTracking ? 'warning' : 'success'" :icon="isTracking ? RefreshLeft : VideoPlay" :loading="demoLoading" @click="toggleTracking">链路追踪回放</el-button>
+          <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="openLatestReplay">查看最新结果</el-button>
+          <el-tooltip content="开启后按设定周期自动刷新面板数据，持续追踪最新链路">
+            <el-switch v-model="autoRefresh" active-text="自动追踪" inline-prompt inactive-text="自动追踪" style="margin-left: 8px;" @change="toggleAutoRefresh" />
+          </el-tooltip>
+          <el-select v-if="autoRefresh" v-model="refreshInterval" size="default" style="width: 110px; margin-left: 8px;" @change="restartAutoRefresh">
+            <el-option label="1 分钟" :value="60" />
+            <el-option label="5 分钟" :value="300" />
+            <el-option label="10 分钟" :value="600" />
+            <el-option label="30 分钟" :value="1800" />
+          </el-select>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
           <el-dropdown @command="onExport" :disabled="!records.length">
             <el-button :icon="Download">导出</el-button>
@@ -401,6 +410,8 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const demoLoading = ref(false)
 const isTracking = ref(false)
+const autoRefresh = ref(false)
+const refreshInterval = ref(300)
 let trackingTimer = null
 const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
@@ -625,29 +636,50 @@ async function demoJudge() {
   }
 }
 
-function toggleTracking() {
+function openLatestReplay() {
+  if (detail.value && detail.value.overall !== undefined) {
+    detailVisible.value = true
+    return
+  }
+  // 还没有结果时，先执行一次再打开
+  demoLoading.value = true
+  demoJudge().then(() => {
+    demoLoading.value = false
+    if (detail.value && detail.value.overall !== undefined) {
+      detailVisible.value = true
+    }
+  })
+}
+
+function restartAutoRefresh() {
   if (isTracking.value) {
     stopTracking()
-  } else {
     startTracking()
+  }
+}
+
+function toggleAutoRefresh() {
+  if (autoRefresh.value) {
+    startTracking()
+  } else {
+    stopTracking()
   }
 }
 
 function startTracking() {
   isTracking.value = true
-  detailVisible.value = true
-  ElMessage.success('已开启链路追踪回放，每 8 秒自动刷新一次')
-  // 立即执行一次
+  // 静默执行一次并刷新面板
   demoJudge()
-  // 循环追踪
+  // 按选定周期循环刷新
   trackingTimer = setInterval(() => {
     if (!isTracking.value) return
     demoJudge()
-  }, 8000)
+  }, refreshInterval.value * 1000)
 }
 
 function stopTracking() {
   isTracking.value = false
+  autoRefresh.value = false
   if (trackingTimer) {
     clearInterval(trackingTimer)
     trackingTimer = null
@@ -899,6 +931,9 @@ onMounted(() => {
   loadLangfuseConfig()
   loadRecords()
   window.addEventListener('resize', onResize)
+  if (autoRefresh.value) {
+    startTracking()
+  }
 })
 
 onUnmounted(() => {
