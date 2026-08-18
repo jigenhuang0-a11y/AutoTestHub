@@ -100,6 +100,9 @@ async def _run_eval_async(
     task_type: str = "fast_chat",
     temperature: float = 0.7,
     enable_reasoning: bool = False,
+    retrieved_docs: Optional[List[Dict]] = None,
+    model: Optional[str] = None,
+    latency_ms: Optional[int] = None,
 ):
     """
     后台异步执行评估闭环：评分 -> 不达标重生成 -> 通过则沉淀记忆 -> 未通过转人工协同。
@@ -136,6 +139,7 @@ async def _run_eval_async(
                 result=None, question=question, answer=best_answer, reference=reference,
                 feature="knowledge_chat" if mode == "knowledge" else "chat",
                 trace_id=trace_id, user_id=user_id,
+                retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
             )
             return
         if iteration < max_iterations:
@@ -168,6 +172,7 @@ async def _run_eval_async(
         result=None, question=question, answer=best_answer, reference=reference,
         feature="knowledge_chat" if mode == "knowledge" else "chat",
         trace_id=trace_id, user_id=user_id,
+        retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
     )
     try:
         notify_human_review(
@@ -625,6 +630,16 @@ def answer_stream(
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
     if enable_eval:
+        _retrieved_docs = [
+            {
+                "source": h.get("meta", {}).get("filename", "知识库"),
+                "content": h.get("text", ""),
+                "score": round(h.get("score", 0.0), 4),
+            }
+            for h in hits
+        ]
+        _model_name = (get_llm_router().default_model if hasattr(get_llm_router(), "default_model") else None)
+        _run_latency = int((time.perf_counter() - start_time) * 1000)
         _schedule_background_eval(
             _run_eval_async(
                 mode="knowledge",
@@ -636,6 +651,9 @@ def answer_stream(
                 mm=mm,
                 user_id=user_id,
                 prompt_text=prompt,
+                retrieved_docs=_retrieved_docs,
+                model=_model_name,
+                latency_ms=_run_latency,
             )
         )
 
@@ -800,6 +818,8 @@ def chat_stream(
 
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
     if enable_eval:
+        _model_name = (get_llm_router().default_model if hasattr(get_llm_router(), "default_model") else None)
+        _run_latency = int((time.perf_counter() - start_time) * 1000)
         _schedule_background_eval(
             _run_eval_async(
                 mode="chat",
@@ -814,6 +834,8 @@ def chat_stream(
                 task_type="fast_chat",
                 temperature=0.6 if enable_reasoning else 0.7,
                 enable_reasoning=enable_reasoning,
+                model=_model_name,
+                latency_ms=_run_latency,
             )
         )
 

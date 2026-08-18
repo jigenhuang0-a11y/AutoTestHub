@@ -230,6 +230,10 @@ def _run_judge_and_persist(
     trace_id: Optional[str],
     user_id: Optional[str],
     session_id: Optional[str],
+    retrieved_docs: Optional[List[Dict]] = None,
+    model: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+    token_usage: Optional[int] = None,
 ) -> None:
     """对最终答案执行五维 Judge 评分，写入 EvalStore 并回传 Langfuse trace。
 
@@ -249,6 +253,16 @@ def _run_judge_and_persist(
         record["feature"] = feature
         record["input_text"] = question[:1000]
         record["output_text"] = answer[:1000]
+        record["reference"] = (reference or "")[:2000]
+        # 链路追踪增强字段（RAG 回放 / 调用开销）
+        if retrieved_docs:
+            record["retrieved_docs"] = retrieved_docs[:10]
+        if model:
+            record["model"] = model
+        if latency_ms is not None:
+            record["latency_ms"] = latency_ms
+        if token_usage is not None:
+            record["token_usage"] = token_usage
         record_id = get_eval_store().save(record)
         # result 可能来自后台异步路径（None），仅在非空时回填
         if result is not None:

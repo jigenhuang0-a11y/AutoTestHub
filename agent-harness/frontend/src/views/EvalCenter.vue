@@ -35,7 +35,16 @@
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
           <el-button type="success" :icon="VideoPlay" @click="demoJudge">触发样例评测</el-button>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
-          <el-button :icon="Download" @click="exportReport" :disabled="!dashboard.total_records">导出报告</el-button>
+          <el-dropdown @command="onExport" :disabled="!records.length">
+            <el-button :icon="Download">导出</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="txt">文本报告</el-dropdown-item>
+                <el-dropdown-item command="csv">CSV 明细</el-dropdown-item>
+                <el-dropdown-item command="json">JSON 原始</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </div>
@@ -165,28 +174,79 @@
           <template #header>
             <div class="card-header">
               <span>最近评测记录</span>
-              <el-tag size="small" type="info">{{ dashboard.recent_records.length }} 条</el-tag>
+              <div class="header-actions">
+                <el-tag size="small" type="info">{{ records.length }} 条</el-tag>
+                <el-button size="small" link type="primary" @click="loadRecords">刷新</el-button>
+              </div>
             </div>
           </template>
-          <el-table :data="dashboard.recent_records" size="default" max-height="100%" stripe>
-            <el-table-column prop="overall" label="综合" width="80" align="center">
+          <el-table :data="records" size="default" max-height="340" stripe @row-click="openDetail">
+            <el-table-column prop="feature" label="模块" width="120" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain">{{ featureLabel(row.feature) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="综合" width="70" align="center">
               <template #default="{ row }">
                 <el-tag :type="scoreTag(row.overall)" size="small">{{ row.overall }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="hallucination" label="幻觉" width="80" align="center" />
-            <el-table-column prop="reason" label="说明" show-overflow-tooltip />
-            <el-table-column label="操作" width="90" align="center">
+            <el-table-column label="幻觉" width="70" align="center">
               <template #default="{ row }">
-                <el-button v-if="row.trace_id && langfuse?.enabled" link type="primary" size="small" @click="openTrace(row.trace_id)">
-                  Trace
-                </el-button>
+                <span :class="scoreClass(row.hallucination)">{{ row.hallucination }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="Judge 结论" show-overflow-tooltip />
+            <el-table-column label="操作" width="140" align="center">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
+                <el-button v-if="row.trace_id && langfuse?.enabled" link type="info" size="small" @click.stop="openTrace(row.trace_id)">Trace</el-button>
               </template>
             </el-table-column>
           </el-table>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 待优化样本队列 -->
+    <el-card shadow="never" class="queue-card">
+      <template #header>
+        <div class="card-header">
+          <span>🎯 待优化样本队列（低分自动归集）</span>
+          <el-tag size="small" type="danger">{{ lowScoreRecords.length }} 条待复核</el-tag>
+        </div>
+      </template>
+      <el-table :data="lowScoreRecords" size="default" max-height="320" stripe empty-text="暂无低分样本，质量良好 🎉">
+        <el-table-column prop="feature" label="模块" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain">{{ featureLabel(row.feature) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="综合" width="70" align="center">
+          <template #default="{ row }"><el-tag :type="scoreTag(row.overall)" size="small">{{ row.overall }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="幻觉" width="70" align="center">
+          <template #default="{ row }"><span :class="scoreClass(row.hallucination)">{{ row.hallucination }}</span></template>
+        </el-table-column>
+        <el-table-column prop="reason" label="Judge 结论" show-overflow-tooltip />
+        <el-table-column label="问题归类" width="180">
+          <template #default="{ row }">
+            <el-select v-model="row.annotation" size="small" placeholder="标记问题" @change="onAnnotate(row)" @click.stop>
+              <el-option label="检索片段缺失" value="retrieval_missing" />
+              <el-option label="模型幻觉" value="hallucination" />
+              <el-option label="问题模糊" value="ambiguous_input" />
+              <el-option label="参考答案错误" value="bad_reference" />
+              <el-option label="已修复" value="resolved" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <!-- 说明 -->
     <el-card shadow="never" class="info-card">
@@ -201,6 +261,66 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 评测详情抽屉：RAG 链路回放 -->
+    <el-drawer v-model="detailVisible" title="评测详情 · 链路回放" size="46%" :destroy-on-close="true">
+      <div v-if="detail" class="detail-wrap">
+        <div class="detail-head">
+          <el-tag effect="plain">{{ featureLabel(detail.feature) }}</el-tag>
+          <el-tag :type="scoreTag(detail.overall)">综合 {{ detail.overall }}</el-tag>
+          <el-tag type="info">{{ formatTime(detail.created_at) }}</el-tag>
+          <el-button v-if="detail.trace_id && langfuse?.enabled" size="small" type="info" @click="openTrace(detail.trace_id)">在 Langfuse 打开</el-button>
+        </div>
+
+        <el-divider>执行链路</el-divider>
+        <el-steps :active="3" align-center finish-status="success" class="trace-steps">
+          <el-step title="用户提问" :description="truncate(detail.input_text, 60)" />
+          <el-step title="RAG 检索" :description="(detail.retrieved_docs || []).length + ' 个片段'" />
+          <el-step title="Judge 评分" :description="'综合 ' + detail.overall" />
+        </el-steps>
+
+        <el-divider>检索上下文（RAG 引用）</el-divider>
+        <div v-if="(detail.retrieved_docs || []).length" class="doc-list">
+          <div v-for="(doc, i) in detail.retrieved_docs" :key="i" class="doc-item">
+            <div class="doc-meta">
+              <span class="doc-idx">#{{ i + 1 }}</span>
+              <span class="doc-src">{{ doc.source || '知识库' }}</span>
+              <span class="doc-score">相关度 {{ doc.score ?? '—' }}</span>
+            </div>
+            <div class="doc-content">{{ doc.content }}</div>
+          </div>
+        </div>
+        <el-empty v-else description="该记录无检索上下文（非 RAG 路径）" :image-size="60" />
+
+        <el-divider>Judge 评分明细</el-divider>
+        <div class="dim-bars">
+          <div v-for="d in dimList" :key="d.key" class="dim-bar-item">
+            <span class="dim-bar-name">{{ d.label }}</span>
+            <el-progress :percentage="detail[d.key] || 0" :stroke-width="12" :show-text="false" :color="barColor(detail[d.key] || 0)" />
+            <span class="dim-bar-val" :class="scoreClass(detail[d.key] || 0)">{{ detail[d.key] }}</span>
+          </div>
+        </div>
+        <div class="reason-box">
+          <div class="reason-title">Judge 结论</div>
+          <p>{{ detail.reason || '（无说明）' }}</p>
+        </div>
+
+        <el-divider>输入输出原文</el-divider>
+        <div class="io-block">
+          <div class="io-label">用户提问</div>
+          <pre class="io-text">{{ detail.input_text || '—' }}</pre>
+        </div>
+        <div class="io-block">
+          <div class="io-label">AI 回答</div>
+          <pre class="io-text">{{ detail.output_text || '—' }}</pre>
+        </div>
+        <div v-if="detail.model || detail.latency_ms || detail.token_usage" class="meta-line">
+          <el-tag size="small" v-if="detail.model">模型 {{ detail.model }}</el-tag>
+          <el-tag size="small" v-if="detail.latency_ms">耗时 {{ detail.latency_ms }}ms</el-tag>
+          <el-tag size="small" v-if="detail.token_usage">Tokens {{ detail.token_usage }}</el-tag>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -210,6 +330,24 @@ import { ElMessage } from 'element-plus'
 import { Refresh, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
+
+const featureLabels = {
+  ai_testcase: 'AI 用例生成',
+  data_factory: '数据工厂',
+  knowledge_chat: 'RAG 知识问答',
+  chat: '智能对话',
+  agent_loop: 'Agent 循环',
+  unknown: '未分类',
+}
+const featureLabel = (f) => featureLabels[f] || f || '未分类'
+const truncate = (s, n) => (s && s.length > n ? s.slice(0, n) + '…' : (s || ''))
+function formatTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+  if (isNaN(d.getTime())) return iso
+  const pad = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 const hours = ref(24)
 const loading = ref(false)
@@ -222,6 +360,101 @@ const dashboard = ref({
   recent_records: [],
 })
 const langfuse = ref({ enabled: false, host: '', traces_url: '' })
+const records = ref([])
+const recordsLoading = ref(false)
+const detailVisible = ref(false)
+const detail = ref(null)
+const LOW_OVERALL = 70
+const LOW_HALLUCINATION = 60
+
+const lowScoreRecords = computed(() =>
+  records.value.filter(r =>
+    (r.overall !== undefined && r.overall < LOW_OVERALL) ||
+    (r.hallucination !== undefined && r.hallucination < LOW_HALLUCINATION)
+  )
+)
+
+async function loadRecords() {
+  recordsLoading.value = true
+  try {
+    const data = await evalCenterAPI.records({ hours: 720, limit: 100 })
+    records.value = Array.isArray(data) ? data : (data.records || [])
+  } catch (e) {
+    ElMessage.error('记录加载失败：' + (e.message || e))
+  } finally {
+    recordsLoading.value = false
+  }
+}
+
+function openDetail(row) {
+  detail.value = row
+  detailVisible.value = true
+}
+
+const annotations = ref({})  // trace_id -> 标注
+function onAnnotate(row) {
+  if (row.trace_id) {
+    annotations.value[row.trace_id] = row.annotation
+  }
+  ElMessage.success('已标记：' + (row.annotation || ''))
+}
+
+function exportReport() {
+  const d = dashboard.value
+  const lines = [
+    '全链路评测中心 · 测试报告',
+    `统计周期：近 ${hours.value} 小时`,
+    `生成时间：${new Date().toLocaleString()}`,
+    '',
+    `评测样本总数：${d.total_records}`,
+    `覆盖业务模块：${Object.keys(d.by_feature).length}`,
+    '',
+    '【多维度平均分】',
+    ...dimList.map(x => `  ${x.label}：${scoreOf(x.key)}`),
+    '',
+    '【各模块评测分布】',
+    ...Object.entries(d.by_feature).map(([k, v]) => `  ${featureLabel(k)}：样本 ${v.count} | 平均分 ${v.avg_overall}`),
+    '',
+    '【最近评测记录】',
+    ...records.value.slice(0, 50).map(r => `  [${r.overall}] ${featureLabel(r.feature)} - ${r.reason || '（无说明）'}`),
+  ]
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `eval-report-${new Date().toISOString().slice(0, 10)}.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('报告已导出')
+}
+
+function exportCSV() {
+  const header = ['时间', '模块', '综合', '幻觉率', '一致性', '完整性', '可执行性', '安全性', 'Trace', 'Judge结论']
+  const rows = records.value.map(r => [
+    formatTime(r.created_at), featureLabel(r.feature), r.overall, r.hallucination,
+    r.consistency, r.completeness, r.executability, r.safety, r.trace_id || '', (r.reason || '').replace(/[\n,]/g, ' '),
+  ])
+  const csv = [header, ...rows].map(row => row.map(c => `"${c}"`).join(',')).join('\n')
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `eval-records-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('CSV 已导出')
+}
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(records.value, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `eval-records-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('JSON 已导出')
+}
 
 const isTrendEmpty = computed(() => !(dashboard.value.trend || []).length)
 const isFeatureEmpty = computed(() => !Object.keys(dashboard.value.by_feature || {}).length)
@@ -539,6 +772,12 @@ function openLangfuse() {
   }
 }
 
+function onExport(cmd) {
+  if (cmd === 'csv') return exportCSV()
+  if (cmd === 'json') return exportJSON()
+  return exportReport()
+}
+
 function openTrace(traceId) {
   if (langfuse.value.host) {
     window.open(`${langfuse.value.host}/traces/${traceId}`, '_blank')
@@ -554,6 +793,7 @@ function onResize() {
 onMounted(() => {
   loadDashboard()
   loadLangfuseConfig()
+  loadRecords()
   window.addEventListener('resize', onResize)
 })
 
@@ -564,6 +804,34 @@ onUnmounted(() => {
   featureChart?.dispose()
 })
 </script>
+
+<style scoped>
+.detail-wrap { color: #e2e8f0; }
+.detail-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+.trace-steps { margin: 8px 0 4px; }
+.doc-list { display: flex; flex-direction: column; gap: 10px; }
+.doc-item { background: rgba(148,163,184,0.08); border: 1px solid rgba(148,163,184,0.18); border-radius: 10px; padding: 10px 12px; }
+.doc-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+.doc-idx { background: #6366f1; color: #fff; border-radius: 6px; padding: 0 6px; font-weight: 700; }
+.doc-score { color: #34d399; }
+.doc-content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; color: #cbd5e1; }
+.dim-bars { display: flex; flex-direction: column; gap: 10px; }
+.dim-bar-item { display: flex; align-items: center; gap: 12px; }
+.dim-bar-name { width: 80px; font-size: 13px; color: #cbd5e1; flex-shrink: 0; }
+.dim-bar-item :deep(.el-progress) { flex: 1; }
+.dim-bar-val { width: 40px; text-align: right; font-weight: 700; }
+.reason-box { margin-top: 14px; background: rgba(99,102,241,0.10); border-left: 3px solid #6366f1; border-radius: 8px; padding: 10px 12px; }
+.reason-title { font-size: 13px; color: #a5b4fc; margin-bottom: 6px; font-weight: 600; }
+.reason-box p { margin: 0; font-size: 13px; line-height: 1.6; color: #e2e8f0; white-space: pre-wrap; }
+.io-block { margin-bottom: 12px; }
+.io-label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+.io-text { background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.15); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin: 0; }
+.meta-line { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.score-excellent { color: #4ade80; }
+.score-good { color: #fbbf24; }
+.score-poor { color: #f87171; }
+</style>
 
 <style scoped>
 .eval-center {
