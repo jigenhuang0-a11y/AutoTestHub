@@ -36,7 +36,7 @@
           <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="openLatestReplay">查看最新结果</el-button>
           <el-tooltip content="开启后按设定周期自动刷新面板数据，持续追踪最新链路">
             <span class="track-wrap">
-              <el-switch v-model="autoRefresh" active-text="自动追踪" inline-prompt inactive-text="自动追踪" style="margin-left: 8px;" @change="toggleAutoRefresh" />
+              <el-switch v-model="autoRefresh" class="track-switch" active-text="自动追踪" inline-prompt inactive-text="自动追踪" style="margin-left: 8px;" @change="toggleAutoRefresh" />
               <span v-if="isTracking" class="track-dot" :title="'自动追踪中，每 ' + (refreshInterval < 60 ? refreshInterval + ' 秒' : Math.round(refreshInterval / 60) + ' 分钟')"></span>
             </span>
           </el-tooltip>
@@ -1092,6 +1092,22 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   margin-left: 2px;
+}
+
+/* 自动追踪 switch：未开启时提高对比度，避免在深色背景下太暗 */
+:deep(.track-switch .el-switch__core) {
+  border-color: rgba(148, 163, 184, 0.5);
+  background-color: rgba(30, 41, 59, 0.8);
+}
+:deep(.track-switch .el-switch__label) {
+  color: #e2e8f0;
+}
+:deep(.track-switch.is-checked .el-switch__core) {
+  border-color: #22c55e;
+  background-color: #22c55e;
+}
+:deep(.track-switch.is-checked .el-switch__label) {
+  color: #fff;
 }
 
 .track-dot {
