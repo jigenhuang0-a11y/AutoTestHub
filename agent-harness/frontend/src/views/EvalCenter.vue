@@ -35,13 +35,16 @@
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
           <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="openLatestReplay">查看最新结果</el-button>
           <el-tooltip content="开启后按设定周期自动刷新面板数据，持续追踪最新链路">
-            <el-switch v-model="autoRefresh" active-text="自动追踪" inline-prompt inactive-text="自动追踪" style="margin-left: 8px;" @change="toggleAutoRefresh" />
+            <span class="track-wrap">
+              <el-switch v-model="autoRefresh" active-text="自动追踪" inline-prompt inactive-text="自动追踪" style="margin-left: 8px;" @change="toggleAutoRefresh" />
+              <span v-if="isTracking" class="track-dot" :title="'自动追踪中，每 ' + (refreshInterval < 60 ? refreshInterval + ' 秒' : Math.round(refreshInterval / 60) + ' 分钟')"></span>
+            </span>
           </el-tooltip>
-          <el-select v-if="autoRefresh" v-model="refreshInterval" size="default" style="width: 110px; margin-left: 8px;" @change="restartAutoRefresh">
+          <el-select v-if="autoRefresh" v-model="refreshInterval" size="default" style="width: 120px; margin-left: 8px;" @change="restartAutoRefresh">
+            <el-option label="10 秒" :value="10" />
+            <el-option label="30 秒" :value="30" />
             <el-option label="1 分钟" :value="60" />
             <el-option label="5 分钟" :value="300" />
-            <el-option label="10 分钟" :value="600" />
-            <el-option label="30 分钟" :value="1800" />
           </el-select>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
           <el-dropdown @command="onExport" :disabled="!records.length">
@@ -411,7 +414,7 @@ const detail = ref(null)
 const demoLoading = ref(false)
 const isTracking = ref(false)
 const autoRefresh = ref(false)
-const refreshInterval = ref(300)
+const refreshInterval = ref(30)
 let trackingTimer = null
 const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
@@ -628,6 +631,7 @@ async function demoJudge() {
       token_usage: 0,
     }
     loadDashboard()
+    // 追踪模式下静默执行（尤其 10/30 秒短周期，避免 toast 刷屏）；仅手动触发时提示
     if (!isTracking.value) {
       ElMessage.success('样例评测完成，综合分：' + payload.overall + '（含幻觉定位）')
     }
@@ -668,6 +672,9 @@ function toggleAutoRefresh() {
 
 function startTracking() {
   isTracking.value = true
+  const sec = refreshInterval.value
+  const label = sec < 60 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`
+  ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次`, duration: 2000 })
   // 静默执行一次并刷新面板
   demoJudge()
   // 按选定周期循环刷新
@@ -1079,6 +1086,28 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.track-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.track-dot {
+  width: 9px;
+  height: 9px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  animation: track-pulse 1.4s infinite;
+}
+
+@keyframes track-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+  70% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
 }
 
 .metric-row {
