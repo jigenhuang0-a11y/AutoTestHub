@@ -33,7 +33,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -537,6 +537,61 @@ class WebExecutionRecord:
 
 
 @dataclass
+class WebTestCaseRecord:
+    """Web/UI 自动化测试用例"""
+    id: Optional[int] = None
+    tc_id: str = ""
+    title: str = ""
+    description: str = ""
+    priority: str = "P2"
+    target_url: str = ""
+    engine: str = "playwright"
+    status: str = "active"
+    ai_prompt: str = ""
+    steps: Any = field(default_factory=list)
+    assertions: Any = field(default_factory=list)
+    browser_type: str = "chromium"
+    browser_config: Any = field(default_factory=dict)
+    cookies: Any = field(default_factory=list)
+    screenshot_enabled: bool = True
+    record_video: bool = False
+    full_page_screenshot: bool = False
+    tags: Any = field(default_factory=list)
+    created_by: str = ""
+    created_by_username: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self):
+        return {
+            "id": self.tc_id,
+            "tc_id": self.tc_id,
+            "title": self.title,
+            "description": self.description,
+            "priority": self.priority,
+            "target_url": self.target_url,
+            "page_url": self.target_url,
+            "engine": self.engine,
+            "status": self.status,
+            "ai_prompt": self.ai_prompt,
+            "steps": self.steps if isinstance(self.steps, list) else json.loads(self.steps or "[]"),
+            "assertions": self.assertions if isinstance(self.assertions, list) else json.loads(self.assertions or "[]"),
+            "assertion_rules": self.assertions if isinstance(self.assertions, list) else json.loads(self.assertions or "[]"),
+            "browser_type": self.browser_type,
+            "browser_config": self.browser_config if isinstance(self.browser_config, dict) else json.loads(self.browser_config or "{}"),
+            "cookies": self.cookies if isinstance(self.cookies, list) else json.loads(self.cookies or "[]"),
+            "screenshot_enabled": self.screenshot_enabled,
+            "record_video": self.record_video,
+            "full_page_screenshot": self.full_page_screenshot,
+            "tags": self.tags if isinstance(self.tags, list) else json.loads(self.tags or "[]"),
+            "created_by": self.created_by,
+            "created_by_username": self.created_by_username,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
 class PerfExecutionRecord:
     """性能测试执行记录"""
     id: Optional[int] = None
@@ -639,8 +694,10 @@ class TaskStore:
     # ── 数据库初始化 ──
 
     def _init_db(self):
-        """建表 + 索引"""
+        """建表 + 索引；对之前未实现真实存储的表做简单迁移"""
         with self._get_conn() as conn:
+            # web_testcases 表在旧版本不存在或为占位空表结构；此处直接重建以应用最新 schema
+            conn.execute("DROP TABLE IF EXISTS web_testcases")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -986,6 +1043,32 @@ class TaskStore:
                     updated_at TEXT NOT NULL DEFAULT ''
                 );
 
+                -- Web/UI 自动化测试用例表
+                CREATE TABLE IF NOT EXISTS web_testcases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tc_id TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    priority TEXT NOT NULL DEFAULT 'P2',
+                    target_url TEXT NOT NULL DEFAULT '',
+                    engine TEXT NOT NULL DEFAULT 'playwright',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    ai_prompt TEXT NOT NULL DEFAULT '',
+                    steps TEXT NOT NULL DEFAULT '[]',
+                    assertions TEXT NOT NULL DEFAULT '[]',
+                    browser_type TEXT NOT NULL DEFAULT 'chromium',
+                    browser_config TEXT NOT NULL DEFAULT '{}',
+                    cookies TEXT NOT NULL DEFAULT '[]',
+                    screenshot_enabled INTEGER NOT NULL DEFAULT 1,
+                    record_video INTEGER NOT NULL DEFAULT 0,
+                    full_page_screenshot INTEGER NOT NULL DEFAULT 0,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_by_username TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+
                 -- Web/UI 自动化执行记录表
                 CREATE TABLE IF NOT EXISTS web_executions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1001,6 +1084,7 @@ class TaskStore:
                     error_message TEXT NOT NULL DEFAULT '',
                     steps_total INTEGER NOT NULL DEFAULT 0,
                     steps_passed INTEGER NOT NULL DEFAULT 0,
+                    result_data TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT ''
                 );
 
@@ -1445,32 +1529,180 @@ class TaskStore:
             conn.commit()
             logger.info(f"[TaskStore] 已写入 {len(plan_rows)} 条种子性能计划")
 
+        # 种子 Web/UI 自动化测试用例
+        if conn.execute("SELECT COUNT(*) FROM web_testcases").fetchone()[0] == 0:
+            base = datetime.now(timezone.utc)
+            web_tc_rows = [
+                (
+                    "tc-web-0001", "登录页_正确账号登录", "验证使用有效账号密码可正常登录系统",
+                    "P0", "https://example.com/login", "playwright", "active", "",
+                    json.dumps([
+                        {"action": "open", "selector": "", "value": "https://example.com/login"},
+                        {"action": "fill", "selector": "#username", "value": "admin"},
+                        {"action": "fill", "selector": "#password", "value": "password123"},
+                        {"action": "click", "selector": "button[type=submit]"},
+                        {"action": "waitForSelector", "selector": ".dashboard-header"},
+                    ], ensure_ascii=False),
+                    json.dumps([
+                        {"type": "urlContains", "target": "/dashboard", "expected": "true"},
+                        {"type": "elementExists", "target": ".user-name", "expected": "true"},
+                    ], ensure_ascii=False),
+                    "chromium", json.dumps({"headless": True}, ensure_ascii=False),
+                    json.dumps([], ensure_ascii=False),
+                    1, 0, 0,
+                    json.dumps(["登录", "冒烟", "P0"], ensure_ascii=False),
+                    "ai-base", "admin", base.isoformat(), base.isoformat(),
+                ),
+                (
+                    "tc-web-0002", "购物车_添加商品", "选择商品 SKU 后加入购物车，验证购物车数量更新",
+                    "P1", "https://example.com/products", "playwright", "active", "",
+                    json.dumps([
+                        {"action": "open", "selector": "", "value": "https://example.com/products"},
+                        {"action": "click", "selector": ".product-card:first-child"},
+                        {"action": "click", "selector": "button[data-action='add-to-cart']"},
+                        {"action": "waitForSelector", "selector": ".toast-success"},
+                        {"action": "click", "selector": "a[href='/cart']"},
+                        {"action": "waitForSelector", "selector": ".cart-item"},
+                    ], ensure_ascii=False),
+                    json.dumps([
+                        {"type": "elementTextContains", "target": ".cart-count", "expected": "1"},
+                        {"type": "elementExists", "target": ".cart-item-title", "expected": "true"},
+                    ], ensure_ascii=False),
+                    "chromium", json.dumps({"headless": True}, ensure_ascii=False),
+                    json.dumps([], ensure_ascii=False),
+                    1, 0, 0,
+                    json.dumps(["购物车", "核心流程"], ensure_ascii=False),
+                    "ai-base", "admin", base.isoformat(), base.isoformat(),
+                ),
+                (
+                    "tc-web-0003", "订单结算_优惠券抵扣", "结算页选择优惠券后，验证应付金额正确扣减",
+                    "P1", "https://example.com/checkout", "playwright", "active", "",
+                    json.dumps([
+                        {"action": "open", "selector": "", "value": "https://example.com/checkout?order_id=ORD12345"},
+                        {"action": "click", "selector": ".coupon-item:first-child"},
+                        {"action": "waitForTimeout", "selector": "", "value": "500"},
+                        {"action": "click", "selector": "button[data-action='place-order']"},
+                        {"action": "waitForSelector", "selector": ".order-success"},
+                    ], ensure_ascii=False),
+                    json.dumps([
+                        {"type": "elementTextContains", "target": ".final-amount", "expected": "89.00"},
+                        {"type": "elementExists", "target": ".order-success", "expected": "true"},
+                    ], ensure_ascii=False),
+                    "chromium", json.dumps({"headless": True}, ensure_ascii=False),
+                    json.dumps([], ensure_ascii=False),
+                    1, 0, 0,
+                    json.dumps(["订单", "优惠", "结算"], ensure_ascii=False),
+                    "ai-base", "admin", base.isoformat(), base.isoformat(),
+                ),
+                (
+                    "tc-web-0004", "个人中心_修改头像", "上传合法图片后，验证头像预览更新成功",
+                    "P2", "https://example.com/profile", "playwright", "draft", "",
+                    json.dumps([
+                        {"action": "open", "selector": "", "value": "https://example.com/profile"},
+                        {"action": "click", "selector": "#avatar-upload"},
+                        {"action": "uploadFile", "selector": "input[type=file]", "value": "/tmp/avatar.png"},
+                        {"action": "click", "selector": "button[data-action='save-avatar']"},
+                        {"action": "waitForSelector", "selector": ".avatar-preview[src]"},
+                    ], ensure_ascii=False),
+                    json.dumps([
+                        {"type": "elementExists", "target": ".avatar-preview[src]", "expected": "true"},
+                    ], ensure_ascii=False),
+                    "chromium", json.dumps({"headless": True}, ensure_ascii=False),
+                    json.dumps([], ensure_ascii=False),
+                    1, 0, 0,
+                    json.dumps(["个人中心", "上传"], ensure_ascii=False),
+                    "ai-base", "admin", base.isoformat(), base.isoformat(),
+                ),
+                (
+                    "tc-web-0005", "搜索_关键词联想", "在搜索框输入关键词，验证下拉联想结果非空",
+                    "P2", "https://example.com/search", "selenium", "active", "",
+                    json.dumps([
+                        {"action": "open", "selector": "", "value": "https://example.com/search"},
+                        {"action": "fill", "selector": "#search-input", "value": "手机"},
+                        {"action": "waitForTimeout", "selector": "", "value": "800"},
+                    ], ensure_ascii=False),
+                    json.dumps([
+                        {"type": "elementExists", "target": ".suggest-item", "expected": "true"},
+                        {"type": "elementCountGreaterThan", "target": ".suggest-item", "expected": "0"},
+                    ], ensure_ascii=False),
+                    "chrome", json.dumps({"headless": True}, ensure_ascii=False),
+                    json.dumps([], ensure_ascii=False),
+                    1, 0, 0,
+                    json.dumps(["搜索", "Selenium"], ensure_ascii=False),
+                    "ai-base", "admin", base.isoformat(), base.isoformat(),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO web_testcases
+                (tc_id, title, description, priority, target_url, engine, status, ai_prompt,
+                 steps, assertions, browser_type, browser_config, cookies,
+                 screenshot_enabled, record_video, full_page_screenshot, tags,
+                 created_by, created_by_username, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                web_tc_rows,
+            )
+            conn.commit()
+            logger.info(f"[TaskStore] 已写入 {len(web_tc_rows)} 条种子 Web 用例")
+
         # 种子 Web/UI 自动化执行记录（独立于套件/用例/计划，表空即补）
         if conn.execute("SELECT COUNT(*) FROM web_executions").fetchone()[0] == 0:
             base = datetime.now(timezone.utc)
             web_rows = [
-                ("web-exec-0001", "1001", "登录页_正确账号登录",
+                ("web-exec-0001", "tc-web-0001", "登录页_正确账号登录",
                  "passed", (base - timedelta(hours=2)).isoformat(),
-                 "admin", "张伟", 4200, "login_pass.png", "", 5, 5),
-                ("web-exec-0002", "1002", "购物车_添加商品",
+                 "admin", "张伟", 4200, "login_pass.png", "", 5, 5,
+                 json.dumps({"steps_results": [
+                     {"step": 1, "action": "open", "status": "completed"},
+                     {"step": 2, "action": "fill username", "status": "completed"},
+                     {"step": 3, "action": "fill password", "status": "completed"},
+                     {"step": 4, "action": "click submit", "status": "completed"},
+                     {"step": 5, "action": "assert dashboard", "status": "completed"},
+                 ]}, ensure_ascii=False)),
+                ("web-exec-0002", "tc-web-0002", "购物车_添加商品",
                  "failed", (base - timedelta(hours=5)).isoformat(),
-                 "admin", "张伟", 6800, "cart_fail.png", "元素定位超时: .add-to-cart-btn", 6, 4),
-                ("web-exec-0003", "1003", "订单结算_优惠券抵扣",
+                 "admin", "张伟", 6800, "cart_fail.png", "元素定位超时: .add-to-cart-btn", 6, 4,
+                 json.dumps({"steps_results": [
+                     {"step": 1, "action": "open products", "status": "completed"},
+                     {"step": 2, "action": "click product card", "status": "completed"},
+                     {"step": 3, "action": "click add-to-cart", "status": "failed", "error": "Timeout 3000ms exceeded"},
+                     {"step": 4, "action": "wait toast", "status": "skipped"},
+                     {"step": 5, "action": "go cart", "status": "completed"},
+                     {"step": 6, "action": "assert cart item", "status": "failed"},
+                 ]}, ensure_ascii=False)),
+                ("web-exec-0003", "tc-web-0003", "订单结算_优惠券抵扣",
                  "passed", (base - timedelta(days=1, hours=3)).isoformat(),
-                 "tester01", "李娜", 5100, "checkout_pass.png", "", 7, 7),
-                ("web-exec-0004", "1004", "个人中心_修改头像",
+                 "tester01", "李娜", 5100, "checkout_pass.png", "", 7, 7,
+                 json.dumps({"steps_results": [
+                     {"step": 1, "action": "open checkout", "status": "completed"},
+                     {"step": 2, "action": "select coupon", "status": "completed"},
+                     {"step": 3, "action": "wait update", "status": "completed"},
+                     {"step": 4, "action": "place order", "status": "completed"},
+                     {"step": 5, "action": "assert success", "status": "completed"},
+                 ]}, ensure_ascii=False)),
+                ("web-exec-0004", "tc-web-0004", "个人中心_修改头像",
                  "error", (base - timedelta(days=1, hours=8)).isoformat(),
-                 "tester01", "李娜", 2300, "", "上传接口 500 错误", 4, 2),
-                ("web-exec-0005", "1005", "搜索_关键词联想",
+                 "tester01", "李娜", 2300, "", "上传接口 500 错误", 4, 2,
+                 json.dumps({"steps_results": [
+                     {"step": 1, "action": "open profile", "status": "completed"},
+                     {"step": 2, "action": "click upload", "status": "completed"},
+                     {"step": 3, "action": "upload file", "status": "completed"},
+                     {"step": 4, "action": "save avatar", "status": "failed", "error": "POST /api/upload 500"},
+                 ]}, ensure_ascii=False)),
+                ("web-exec-0005", "tc-web-0005", "搜索_关键词联想",
                  "passed", (base - timedelta(days=2, hours=1)).isoformat(),
-                 "admin", "张伟", 3900, "search_pass.png", "", 5, 5),
+                 "admin", "张伟", 3900, "search_pass.png", "", 5, 5,
+                 json.dumps({"steps_results": [
+                     {"step": 1, "action": "open search", "status": "completed"},
+                     {"step": 2, "action": "input keyword", "status": "completed"},
+                     {"step": 3, "action": "wait suggest", "status": "completed"},
+                 ]}, ensure_ascii=False)),
             ]
             conn.executemany(
                 """INSERT INTO web_executions
                 (exec_id, test_case, test_case_title, status, executed_at,
                  executed_by, executed_by_username, duration_ms, screenshot,
-                 error_message, steps_total, steps_passed, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 error_message, steps_total, steps_passed, result_data, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [(r + (base.isoformat(),)) for r in web_rows],
             )
             conn.commit()
@@ -3015,6 +3247,216 @@ class TaskStore:
                 page_rows, total = self._paginate(rows, page, page_size)
                 return page_rows, total
 
+    def create_web_testcase(self, data: dict, created_by: str = "", created_by_username: str = "") -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        tc_id = data.get("id") or ("tc-web-" + str(uuid.uuid4())[:8])
+        steps = data.get("steps", [])
+        if isinstance(steps, list):
+            steps = json.dumps(steps, ensure_ascii=False)
+        assertions = data.get("assertions", [])
+        if isinstance(assertions, list):
+            assertions = json.dumps(assertions, ensure_ascii=False)
+        browser_config = data.get("browser_config", {})
+        if isinstance(browser_config, dict):
+            browser_config = json.dumps(browser_config, ensure_ascii=False)
+        cookies = data.get("cookies", [])
+        if isinstance(cookies, list):
+            cookies = json.dumps(cookies, ensure_ascii=False)
+        tags = data.get("tags", [])
+        if isinstance(tags, list):
+            tags = json.dumps(tags, ensure_ascii=False)
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO web_testcases
+                    (tc_id, title, description, priority, target_url, engine, status, ai_prompt,
+                     steps, assertions, browser_type, browser_config, cookies,
+                     screenshot_enabled, record_video, full_page_screenshot, tags,
+                     created_by, created_by_username, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        tc_id,
+                        data.get("title", ""),
+                        data.get("description", ""),
+                        data.get("priority", "P2"),
+                        data.get("target_url", ""),
+                        data.get("engine", "playwright"),
+                        data.get("status", "active"),
+                        data.get("ai_prompt", ""),
+                        steps,
+                        assertions,
+                        data.get("browser_type", "chromium"),
+                        browser_config,
+                        cookies,
+                        int(bool(data.get("screenshot_enabled", True))),
+                        int(bool(data.get("record_video", False))),
+                        int(bool(data.get("full_page_screenshot", False))),
+                        tags,
+                        created_by,
+                        created_by_username,
+                        now, now,
+                    ),
+                )
+                conn.commit()
+        return self.get_web_testcase(tc_id)
+
+    def get_web_testcase(self, tc_id: str) -> Optional[dict]:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM web_testcases WHERE tc_id = ?", (tc_id,)
+                ).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                for k in ("steps", "assertions", "browser_config", "cookies", "tags"):
+                    v = d.get(k)
+                    if isinstance(v, str):
+                        try:
+                            d[k] = json.loads(v)
+                        except Exception:
+                            d[k] = [] if k != "browser_config" else {}
+                d["id"] = d["tc_id"]
+                return d
+
+    def update_web_testcase(self, tc_id: str, data: dict) -> Optional[dict]:
+        existing = self.get_web_testcase(tc_id)
+        if not existing:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        sets = []
+        params = []
+        for key in (
+            "title", "description", "priority", "target_url", "engine", "status",
+            "ai_prompt", "browser_type", "screenshot_enabled", "record_video", "full_page_screenshot",
+        ):
+            if key in data:
+                sets.append(f"{key} = ?")
+                params.append(data[key])
+        for key in ("steps", "assertions", "browser_config", "cookies", "tags"):
+            if key in data:
+                sets.append(f"{key} = ?")
+                v = data[key]
+                if isinstance(v, (list, dict)):
+                    v = json.dumps(v, ensure_ascii=False)
+                params.append(v)
+        sets.append("updated_at = ?")
+        params.append(now)
+        params.append(tc_id)
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    f"UPDATE web_testcases SET {', '.join(sets)} WHERE tc_id = ?",
+                    params,
+                )
+                conn.commit()
+        return self.get_web_testcase(tc_id)
+
+    def delete_web_testcase(self, tc_id: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM web_testcases WHERE tc_id = ?", (tc_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
+    def list_web_testcases(self, status=None, engine=None, keyword=None, page=1, page_size=20):
+        with self._lock:
+            with self._get_conn() as conn:
+                sql = "SELECT * FROM web_testcases WHERE 1=1"
+                params = []
+                if status:
+                    sql += " AND status = ?"; params.append(status)
+                if engine:
+                    sql += " AND engine = ?"; params.append(engine)
+                if keyword:
+                    sql += " AND (title LIKE ? OR target_url LIKE ? OR description LIKE ?)"
+                    params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+                sql += " ORDER BY created_at DESC"
+                rows = conn.execute(sql, params).fetchall()
+                items = []
+                for r in rows:
+                    d = dict(r)
+                    for k in ("steps", "assertions", "browser_config", "cookies", "tags"):
+                        v = d.get(k)
+                        if isinstance(v, str):
+                            try:
+                                d[k] = json.loads(v)
+                            except Exception:
+                                d[k] = [] if k != "browser_config" else {}
+                    d["id"] = d["tc_id"]
+                    items.append(d)
+                total = len(items)
+                start = (page - 1) * page_size
+                end = start + page_size
+                return items[start:end], total
+
+    def create_web_execution(self, data: dict) -> dict:
+        exec_id = data.get("exec_id") or ("exec-web-" + str(uuid.uuid4())[:8])
+        now = datetime.now(timezone.utc).isoformat()
+        result_data = data.get("result_data", {})
+        if isinstance(result_data, dict):
+            result_data = json.dumps(result_data, ensure_ascii=False)
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO web_executions
+                    (exec_id, test_case, test_case_title, status, executed_at, executed_by,
+                     executed_by_username, duration_ms, screenshot, error_message,
+                     steps_total, steps_passed, result_data, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        exec_id,
+                        data.get("test_case", ""),
+                        data.get("test_case_title", ""),
+                        data.get("status", "passed"),
+                        data.get("executed_at") or now,
+                        data.get("executed_by", ""),
+                        data.get("executed_by_username", ""),
+                        data.get("duration_ms", 0),
+                        data.get("screenshot", ""),
+                        data.get("error_message", ""),
+                        data.get("steps_total", 0),
+                        data.get("steps_passed", 0),
+                        result_data,
+                        now,
+                    ),
+                )
+                conn.commit()
+        return {"exec_id": exec_id, "id": exec_id}
+
+    def get_web_execution(self, exec_id: str) -> Optional[dict]:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM web_executions WHERE exec_id = ?", (exec_id,)
+                ).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                v = d.get("result_data")
+                if isinstance(v, str):
+                    try:
+                        d["result_data"] = json.loads(v)
+                    except Exception:
+                        d["result_data"] = {}
+                d["id"] = d["exec_id"]
+                return d
+
+    def delete_web_execution(self, exec_id: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM web_executions WHERE exec_id = ?", (exec_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
     def list_web_executions(self, status=None, keyword=None, test_case=None, page=1, page_size=20):
         with self._lock:
             with self._get_conn() as conn:
@@ -3028,9 +3470,22 @@ class TaskStore:
                     sql += " AND (test_case_title LIKE ? OR executed_by_username LIKE ? OR error_message LIKE ?)"
                     params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
                 sql += " ORDER BY executed_at DESC"
-                rows = [self._row_to_record(r, WebExecutionRecord) for r in conn.execute(sql, params).fetchall()]
-                page_rows, total = self._paginate(rows, page, page_size)
-                return page_rows, total
+                rows = conn.execute(sql, params).fetchall()
+                items = []
+                for r in rows:
+                    d = dict(r)
+                    v = d.get("result_data")
+                    if isinstance(v, str):
+                        try:
+                            d["result_data"] = json.loads(v)
+                        except Exception:
+                            d["result_data"] = {}
+                    d["id"] = d["exec_id"]
+                    items.append(d)
+                total = len(items)
+                start = (page - 1) * page_size
+                end = start + page_size
+                return items[start:end], total
 
     def list_perf_executions(self, status=None, keyword=None, test_case=None, page=1, page_size=20):
         with self._lock:
