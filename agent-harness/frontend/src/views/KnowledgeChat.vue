@@ -829,6 +829,9 @@ const toggleTheme = () => {
   applyTheme()
 }
 
+// 已处理完的 task_id 集合，防止页面重连/后端重放 done 事件导致重复追加同一条回答
+const finishedTaskIds = new Set()
+
 // ========== Skill 相关状态 ==========
 const skills = ref([])
 const activeSkill = ref(null) // 当前激活的 Skill
@@ -3228,8 +3231,14 @@ const sendMessage = async () => {
             case 'done':
               // 流式完成：若已处理过则忽略，避免后端/网络重发导致重复渲染
               stopContentIdleCheck()
+              const doneTaskId = data.task_id || currentTaskId.value
               currentTaskId.value = ''
               try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+              if (doneTaskId && finishedTaskIds.has(doneTaskId)) {
+                console.log('[SSE] 忽略已处理过的 done 事件，task:', doneTaskId)
+                break
+              }
+              if (doneTaskId) finishedTaskIds.add(doneTaskId)
               if (!streamDone) {
                 streamDone = true
                 fullAnswer = data.full_answer || answerBuffer.value || streamingText.value || fullAnswer
@@ -3415,8 +3424,14 @@ function handleReconnectBlock(block) {
           }
           break
         case 'done':
+          const reconnectDoneTaskId = data.task_id || currentTaskId.value
           currentTaskId.value = ''
           try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+          if (reconnectDoneTaskId && finishedTaskIds.has(reconnectDoneTaskId)) {
+            console.log('[Reconnect] 忽略已处理过的 done 事件，task:', reconnectDoneTaskId)
+            break
+          }
+          if (reconnectDoneTaskId) finishedTaskIds.add(reconnectDoneTaskId)
           const finalAnswer = data.full_answer || answerBuffer.value || streamingText.value || ''
           const ctx = data.context_docs || []
           const rt = data.response_time || elapsedTime.value * 1000
