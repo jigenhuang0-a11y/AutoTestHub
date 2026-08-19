@@ -409,31 +409,34 @@
           </div>
         </el-dialog>
 
-        <el-divider>检索上下文（RAG 引用）</el-divider>
-        <div v-if="(detail.retrieved_docs || []).length" class="doc-list">
-          <div v-for="(doc, i) in detail.retrieved_docs" :key="i" class="doc-item">
-            <div class="doc-meta">
-              <span class="doc-idx">#{{ i + 1 }}</span>
-              <span class="doc-src">{{ doc.source || '知识库' }}</span>
-              <span class="doc-score">相关度 {{ doc.score ?? '—' }}</span>
+        <template v-if="(detail.retrieved_docs || []).length">
+          <el-divider>检索上下文（RAG 引用）</el-divider>
+          <div class="doc-list">
+            <div v-for="(doc, i) in detail.retrieved_docs" :key="i" class="doc-item">
+              <div class="doc-meta">
+                <span class="doc-idx">#{{ i + 1 }}</span>
+                <span class="doc-src">{{ doc.source || '知识库' }}</span>
+                <span class="doc-score">相关度 {{ doc.score ?? '—' }}</span>
+              </div>
+              <div class="doc-content">{{ doc.content }}</div>
             </div>
-            <div class="doc-content">{{ doc.content }}</div>
           </div>
-        </div>
-        <el-empty v-else description="该记录无检索上下文（非 RAG 路径）" :image-size="60" />
+        </template>
 
-        <el-divider>Judge 评分明细</el-divider>
-        <div class="dim-bars">
-          <div v-for="d in dimList" :key="d.key" class="dim-bar-item">
-            <span class="dim-bar-name">{{ d.label }}</span>
-            <el-progress :percentage="detail[d.key] || 0" :stroke-width="12" :show-text="false" :color="barColor(detail[d.key] || 0)" />
-            <span class="dim-bar-val" :class="scoreClass(detail[d.key] || 0)">{{ detail[d.key] }}</span>
+        <template v-if="detail.metadata?.hasScore">
+          <el-divider>Judge 评分明细</el-divider>
+          <div class="dim-bars">
+            <div v-for="d in dimList" :key="d.key" class="dim-bar-item">
+              <span class="dim-bar-name">{{ d.label }}</span>
+              <el-progress :percentage="detail[d.key] || 0" :stroke-width="12" :show-text="false" :color="barColor(detail[d.key] || 0)" />
+              <span class="dim-bar-val" :class="scoreClass(detail[d.key] || 0)">{{ detail[d.key] }}</span>
+            </div>
           </div>
-        </div>
-        <div class="reason-box">
-          <div class="reason-title">Judge 结论</div>
-          <p>{{ detail.reason || '（无说明）' }}</p>
-        </div>
+          <div class="reason-box">
+            <div class="reason-title">Judge 结论</div>
+            <p>{{ detail.reason || '（无说明）' }}</p>
+          </div>
+        </template>
 
         <!-- 实时流水线记录仪：幻觉根因定位 + 修改建议 -->
         <template v-if="(detail.issues && detail.issues.length) || (detail.retrieval_gaps && detail.retrieval_gaps.length) || (detail.recommendations && detail.recommendations.length)">
@@ -607,6 +610,7 @@ function normalizeEventToRecord(ev) {
   const judge = ev.judge_output || ev.judge || {}
   const dims = judge.dimension_scores || ev.dimension_scores || {}
   const overall = judge.overall ?? dims['综合分'] ?? dims.overall ?? 0
+  const hasScore = overall > 0 || Object.values(dims).some(v => Number(v) > 0)
   return {
     event_id: ev.event_id,
     feature: ev.feature,
@@ -629,7 +633,7 @@ function normalizeEventToRecord(ev) {
     created_at: ev.timestamp,
     status: ev.status,
     trace_steps: ev.trace_steps || [],
-    metadata: ev.metadata || {},
+    metadata: { ...(ev.metadata || {}), hasScore },
     _raw: ev,
   }
 }
