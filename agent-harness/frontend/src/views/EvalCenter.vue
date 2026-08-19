@@ -1163,20 +1163,22 @@ function initRadar() {
 
 // 后端 hour 字段是 UTC（day 聚合: "2026-08-18"；hour 聚合: "2026-08-18T13"）。
 // 这里按浏览器本地时区解析并格式化为短标签。
-function formatTrendLabel(hour) {
+function formatTrendLabel(item) {
+  const hour = typeof item === 'string' ? item : (item?.hour || '')
+  const latestAt = typeof item === 'string' ? null : item?.latest_at
   if (!hour) return ''
   // 月度聚合："2026-08"
   if (/^\d{4}-\d{2}$/.test(hour)) {
     return hour
   }
-  // 周聚合：key 为该周周一日期 "2026-08-18"，显示为 "08.18" 当周标识
-  if (/^\d{4}-\d{2}-\d{2}$/.test(hour) && !hour.includes('T')) {
-    const d = new Date(`${hour}T00:00:00Z`)
+  // 周/月聚合：用桶内最新记录时间的本地日期做标签
+  const useLocalDate = dashboard.value.granularity === 'week' || dashboard.value.granularity === 'month'
+  if (useLocalDate && latestAt) {
+    const d = new Date(latestAt)
     if (!isNaN(d.getTime())) {
       const pad = n => String(n).padStart(2, '0')
       return `${pad(d.getMonth() + 1)}.${pad(d.getDate())}`
     }
-    return hour
   }
   const hasTime = hour.includes('T')
   const iso = hasTime ? `${hour}:00:00Z` : `${hour}T00:00:00Z`
