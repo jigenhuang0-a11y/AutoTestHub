@@ -1194,9 +1194,14 @@ function initTrend() {
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
   const points = x.length
-  // 根据点数智能稀疏 X 轴标签，避免小时视图拥挤
-  const axisInterval = points <= 12 ? 0 : points <= 24 ? 2 : points <= 48 ? 4 : Math.ceil(points / 12)
-  const axisRotate = points > 12 ? 35 : 0
+  const dataIndices = count.map((c, i) => (c > 0 ? i : -1)).filter(i => i >= 0)
+  // 有数据的时间点必须显示标签；其余按基数稀疏，避免小时视图拥挤
+  const baseInterval = points <= 12 ? 1 : points <= 24 ? 3 : points <= 48 ? 6 : Math.ceil(points / 10)
+  const axisRotate = points > 10 ? 35 : 0
+  const xAxisInterval = index => {
+    if (dataIndices.includes(index)) return false
+    return index % baseInterval !== 0
+  }
 
   const series = [
     {
@@ -1209,12 +1214,14 @@ function initTrend() {
       symbol: 'circle',
       symbolSize: isSinglePoint.value ? 22 : 7,
       itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: isSinglePoint.value ? 3 : 0 },
+      // 单点或数据非常稀疏时才显示折线标签，避免与柱状图数字重叠
       label: {
-        show: true,
+        show: isSinglePoint.value || dataIndices.length <= 3,
         position: 'top',
         color: '#e2e8f0',
         fontSize: isSinglePoint.value ? 14 : 12,
         formatter: p => (p.value == null ? '' : p.value),
+        distance: 8,
       },
     },
   ]
@@ -1229,9 +1236,10 @@ function initTrend() {
       barMaxWidth: points > 48 ? 12 : 24,
       label: {
         show: true,
-        position: 'top',
+        position: 'insideTop',
         color: '#e2e8f0',
         formatter: p => (p.value > 0 ? p.value : ''),
+        offset: [0, 2],
       },
     })
   }
@@ -1262,7 +1270,7 @@ function initTrend() {
     xAxis: {
       type: 'category',
       data: x,
-      axisLabel: { interval: axisInterval, rotate: axisRotate, color: '#94a3b8' },
+      axisLabel: { interval: xAxisInterval, rotate: axisRotate, color: '#94a3b8' },
       axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } },
     },
     yAxis: [
