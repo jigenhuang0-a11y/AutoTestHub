@@ -333,8 +333,18 @@
                 <div class="trace-flow-title">{{ step.title }}</div>
                 <el-tag v-if="isProblemStep(step, detail)" size="small" type="danger" effect="dark" class="trace-flow-warn">异常</el-tag>
               </div>
-              <div class="trace-flow-output" :title="stepOutputText(step)">
-                {{ truncate(stepOutputText(step), 90) }}
+              <div class="trace-flow-body">
+                <div v-if="stepInputText(step)" class="trace-flow-line trace-flow-input-line" :title="stepInputText(step)">
+                  <span class="trace-flow-label">输入</span>
+                  <span class="trace-flow-text">{{ truncate(stepInputText(step), 70) }}</span>
+                </div>
+                <div v-if="stepOutputText(step)" class="trace-flow-line trace-flow-output-line" :title="stepOutputText(step)">
+                  <span class="trace-flow-label">输出</span>
+                  <span class="trace-flow-text">{{ truncate(stepOutputText(step), 90) }}</span>
+                </div>
+                <div v-if="!stepInputText(step) && !stepOutputText(step)" class="trace-flow-line trace-flow-empty">
+                  暂无输入输出详情
+                </div>
               </div>
               <div class="trace-flow-meta">
                 <template v-if="step.type === 'route'">
@@ -387,6 +397,11 @@
             </div>
 
             <el-divider />
+
+            <div v-if="stepInputText(selectedStep)" class="step-detail-section">
+              <div class="step-detail-label">节点输入</div>
+              <pre class="step-detail-output">{{ stepInputText(selectedStep) }}</pre>
+            </div>
 
             <div class="step-detail-section">
               <div class="step-detail-label">节点输出</div>
@@ -1013,11 +1028,24 @@ function stepIcon(step) {
   return stepIconMap[step.type] || CircleCheck
 }
 
+function stepInputText(step) {
+  if (step.input) return step.input
+  if (step.type === 'input') return step.detail || ''
+  if (step.type === 'route') return (step.metadata?.task_type) || ''
+  return ''
+}
+
 function stepOutputText(step) {
   if (step.output) return step.output
   if (step.type === 'input') return step.detail || ''
-  if (step.type === 'route') return (step.metadata?.model) || ''
-  if (step.type === 'llm') return (step.metadata?.route_reason) || ''
+  if (step.type === 'route') return (step.metadata?.reason) || (step.metadata?.model) || ''
+  if (step.type === 'llm') return step.detail || (step.metadata?.route_reason) || ''
+  if (step.type === 'retrieve') {
+    const hit = step.metadata?.hit_count || 0
+    const top = step.metadata?.top_score
+    return `命中 ${hit} 条${top != null ? '，最高分 ' + top.toFixed(3) : ''}`
+  }
+  if (step.type === 'judge') return `综合 ${step.metadata?.overall || 0}`
   return step.detail || ''
 }
 
@@ -1489,15 +1517,54 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.trace-flow-output {
-  min-height: 38px;
+.trace-flow-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.trace-flow-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px 10px;
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.45);
-  color: #cbd5e1;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.trace-flow-line.trace-flow-input-line {
+  border-left: 2px solid rgba(56, 189, 248, 0.5);
+}
+
+.trace-flow-line.trace-flow-output-line {
+  border-left: 2px solid rgba(34, 197, 94, 0.5);
+}
+
+.trace-flow-line.trace-flow-empty {
+  color: #64748b;
+  font-style: italic;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.25);
+}
+
+.trace-flow-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 30px;
+  margin-top: 1px;
+}
+
+.trace-flow-text {
+  flex: 1;
+  color: #cbd5e1;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
