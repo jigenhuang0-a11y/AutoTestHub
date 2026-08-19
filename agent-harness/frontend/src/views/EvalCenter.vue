@@ -88,47 +88,76 @@
       </div>
     </el-card>
 
-    <!-- 功能流水线概览：一眼看清哪个功能出问题（幻觉率/Token/耗时） -->
-    <el-card shadow="never" class="feat-card">
+    <!-- 功能流水线概览：默认折叠为一行摘要，点击展开完整卡片 -->
+    <el-card shadow="never" class="feat-card compact">
       <template #header>
-        <div class="card-header">
-          <span>AI 功能链路概览</span>
-          <span class="card-sub">按功能聚合 · 红色=幻觉率偏高需关注</span>
+        <div class="card-header" @click="pipelineExpanded = !pipelineExpanded" style="cursor: pointer;">
+          <div class="header-left">
+            <span>AI 功能链路概览</span>
+            <span class="card-sub">按功能聚合 · 红色=幻觉率偏高需关注</span>
+          </div>
+          <div class="header-right">
+            <span class="pipeline-summary">
+              <span
+                v-for="f in featureStatsList.slice(0, 6)"
+                :key="f.feature"
+                class="ps-item"
+                :class="{ 'ps-warn': f.avg_hallucination > 60 }"
+              >
+                {{ f.label }}<template v-if="f.count"> {{ f.count }}</template>
+              </span>
+              <span v-if="featureStatsList.length > 6" class="ps-more">+{{ featureStatsList.length - 6 }}</span>
+            </span>
+            <el-icon class="expand-icon" :class="{ expanded: pipelineExpanded }"><ArrowDown /></el-icon>
+          </div>
         </div>
       </template>
-      <div class="feat-grid">
-        <div
-          v-for="f in featureStatsList"
-          :key="f.feature"
-          class="feat-item"
-          :class="{ 'feat-warn': f.avg_hallucination > 60, 'feat-active': f.feature === activeFeature }"
-          @click="toggleFeatureFilter(f.feature)"
-        >
-          <div class="feat-top">
-            <span class="feat-name">{{ f.label }}</span>
-            <span class="feat-count">{{ f.count }} 次</span>
+      <el-collapse-transition>
+        <div v-show="pipelineExpanded" class="feat-grid compact">
+          <div
+            v-for="f in featureStatsList"
+            :key="f.feature"
+            class="feat-item compact"
+            :class="{ 'feat-warn': f.avg_hallucination > 60, 'feat-active': f.feature === activeFeature }"
+            @click="toggleFeatureFilter(f.feature)"
+          >
+            <div class="feat-top compact">
+              <span class="feat-name">{{ f.label }}</span>
+              <span class="feat-count">{{ f.count }} 次</span>
+            </div>
+            <div class="feat-metrics compact">
+              <div class="feat-metric">
+                <span class="fm-label">幻觉率</span>
+                <span class="fm-value" :class="scoreClass(f.avg_hallucination)">{{ f.avg_hallucination || '—' }}</span>
+              </div>
+              <div class="feat-metric">
+                <span class="fm-label">综合分</span>
+                <span class="fm-value" :class="scoreClass(f.avg_score)">{{ f.avg_score || '—' }}</span>
+              </div>
+              <div class="feat-metric">
+                <span class="fm-label">均 Token</span>
+                <span class="fm-value">{{ f.avg_tokens || '—' }}</span>
+              </div>
+              <div class="feat-metric">
+                <span class="fm-label">均耗时</span>
+                <span class="fm-value">{{ f.avg_latency_ms ? (f.avg_latency_ms / 1000).toFixed(1) + 's' : '—' }}</span>
+              </div>
+            </div>
+            <!-- AI 底座链路支撑标签 -->
+            <div class="feat-infra">
+              <el-tag
+                v-for="infra in infraChainOf(f.feature)"
+                :key="infra"
+                size="small"
+                effect="dark"
+                type="warning"
+                class="infra-chip"
+              >{{ featureLabel(infra) }}</el-tag>
+            </div>
+            <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="4" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
           </div>
-          <div class="feat-metrics">
-            <div class="feat-metric">
-              <span class="fm-label">幻觉率</span>
-              <span class="fm-value" :class="scoreClass(f.avg_hallucination)">{{ f.avg_hallucination || '—' }}</span>
-            </div>
-            <div class="feat-metric">
-              <span class="fm-label">综合分</span>
-              <span class="fm-value" :class="scoreClass(f.avg_score)">{{ f.avg_score || '—' }}</span>
-            </div>
-            <div class="feat-metric">
-              <span class="fm-label">均 Token</span>
-              <span class="fm-value">{{ f.avg_tokens || '—' }}</span>
-            </div>
-            <div class="feat-metric">
-              <span class="fm-label">均耗时</span>
-              <span class="fm-value">{{ f.avg_latency_ms ? (f.avg_latency_ms / 1000).toFixed(1) + 's' : '—' }}</span>
-            </div>
-          </div>
-          <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="6" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
         </div>
-      </div>
+      </el-collapse-transition>
     </el-card>
 
     <!-- 图表区 -->
@@ -230,7 +259,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download, ArrowDown } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -296,6 +325,19 @@ function normalizeFeature(f) {
   return aliasMap[f] || f
 }
 const truncate = (s, n) => (s && s.length > n ? s.slice(0, n) + '…' : (s || ''))
+// 各业务功能典型的 AI 底座链路支撑（用于功能卡片展示）
+const FEATURE_INFRA_CHAIN = {
+  requirement_review: ['llm_router', 'llm_call'],
+  ai_testcase: ['llm_router', 'llm_call', 'tool_call'],
+  data_factory: ['llm_router', 'llm_call', 'db_query'],
+  api_test: ['llm_router', 'tool_call'],
+  ui_auto: ['llm_router', 'tool_call'],
+  perf_test: ['llm_router', 'tool_call'],
+  test_execution: ['llm_router', 'tool_call', 'db_query'],
+  quality_eval: ['llm_router', 'llm_call', 'judge'],
+  knowledge_chat: ['llm_router', 'vector_search', 'llm_call'],
+}
+const infraChainOf = (feature) => FEATURE_INFRA_CHAIN[feature] || []
 function formatTime(iso) {
   if (!iso) return '—'
   const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
@@ -331,6 +373,7 @@ const LOW_HALLUCINATION = 60
 const lastEventMs = ref(0)
 const pollLoading = ref(false)
 const showInfraEvents = ref(false)  // 默认只看业务功能事件，避免底座事件淹没列表
+const pipelineExpanded = ref(false)  // AI 功能链路概览默认折叠，节省首屏空间
 
 const lowScoreRecords = computed(() =>
   records.value.filter(r =>
@@ -1704,9 +1747,74 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
+.feat-card.compact {
+  margin-bottom: 12px;
+}
+
+.feat-card.compact :deep(.el-card__body) {
+  padding: 0 16px 12px;
+}
+
 .feat-card :deep(.el-card__header) {
-  padding: 14px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.feat-card.compact :deep(.el-card__header) {
+  padding: 10px 14px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pipeline-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+  max-width: 520px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ps-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ps-item::after {
+  content: '·';
+  margin-left: 6px;
+  color: #64748b;
+}
+
+.ps-item:last-child::after {
+  content: none;
+}
+
+.ps-warn {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.ps-more {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.expand-icon {
+  font-size: 14px;
+  color: #94a3b8;
+  transition: transform 0.25s ease;
+}
+
+.expand-icon.expanded {
+  transform: rotate(180deg);
 }
 
 .card-sub {
@@ -1720,7 +1828,13 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
-  padding: 4px 2px 2px;
+  padding: 12px 2px 2px;
+}
+
+.feat-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  padding-top: 10px;
 }
 
 .feat-item {
@@ -1730,6 +1844,10 @@ onUnmounted(() => {
   padding: 10px 12px 10px;
   cursor: pointer;
   transition: all 0.18s ease;
+}
+
+.feat-item.compact {
+  padding: 8px 10px;
 }
 
 .feat-item:hover {
@@ -1787,6 +1905,43 @@ onUnmounted(() => {
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1.2;
+}
+
+.feat-item.compact .feat-top.compact {
+  margin-bottom: 4px;
+}
+
+.feat-item.compact .feat-name {
+  font-size: 12px;
+}
+
+.feat-item.compact .feat-count {
+  font-size: 10px;
+}
+
+.feat-item.compact .feat-metrics.compact {
+  margin-bottom: 6px;
+}
+
+.feat-item.compact .fm-label {
+  font-size: 9px;
+}
+
+.feat-item.compact .fm-value {
+  font-size: 12px;
+}
+
+.feat-infra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.infra-chip {
+  font-size: 9px !important;
+  padding: 0 5px;
+  height: 16px;
 }
 
 .dim-card {
