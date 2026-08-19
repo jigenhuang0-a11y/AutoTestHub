@@ -92,8 +92,8 @@
     <el-card shadow="never" class="feat-card">
       <template #header>
         <div class="card-header">
-          <span>AI 功能链路概览</span>
-          <span class="card-sub">按功能聚合 · 红色=幻觉率偏高需关注</span>
+          <span>AI 功能 & 底座链路概览</span>
+          <span class="card-sub">上层=业务功能 · 下层=AI 底座链路 · 红色=异常需关注</span>
         </div>
       </template>
       <div class="feat-grid">
@@ -130,6 +130,37 @@
             >{{ featureLabel(infra) }}</el-tag>
           </div>
           <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="4" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
+        </div>
+      </div>
+
+      <div class="infra-layer-title">AI 底座链路层</div>
+      <div class="feat-grid infra">
+        <div
+          v-for="f in infraStatsList"
+          :key="f.feature"
+          class="feat-item infra-item"
+          :class="{ 'feat-warn': f.error_count > 0, 'feat-active': f.feature === activeFeature }"
+          @click="toggleFeatureFilter(f.feature)"
+        >
+          <div class="feat-top">
+            <span class="feat-name">{{ f.label }}</span>
+            <span class="feat-count">{{ f.count }} 次</span>
+          </div>
+          <div class="feat-metrics">
+            <div class="feat-metric">
+              <span class="fm-label">失败</span>
+              <span class="fm-value" :class="f.error_count > 0 ? 'score-bad' : ''">{{ f.error_count || '—' }}</span>
+            </div>
+            <div class="feat-metric">
+              <span class="fm-label">均耗时</span>
+              <span class="fm-value">{{ f.avg_latency_ms ? (f.avg_latency_ms / 1000).toFixed(1) + 's' : '—' }}</span>
+            </div>
+          </div>
+          <div class="feat-infra">
+            <el-tag size="small" effect="dark" type="warning" class="infra-chip">底座</el-tag>
+            <el-tag v-if="f.avg_tokens" size="small" effect="dark" type="info" class="infra-chip">{{ f.avg_tokens }} token</el-tag>
+          </div>
+          <el-progress :percentage="Math.min(100, (f.error_count / Math.max(f.count, 1)) * 100 || 0)" :stroke-width="4" :show-text="false" :color="f.error_count > 0 ? '#f56c6c' : '#3b82f6'" />
         </div>
       </div>
     </el-card>
@@ -361,6 +392,60 @@ const featureStatsList = computed(() => {
     }
   })
   return Object.values(merged).sort((a, b) => (b.avg_hallucination || 0) - (a.avg_hallucination || 0))
+})
+
+// AI 底座链路层聚合统计（LLM 路由 / LLM 生成 / 向量检索 / 工具调用 / 数据库 / Judge）
+const infraStatsList = computed(() => {
+  const safeStats = featureStats.value && typeof featureStats.value === 'object' && !Array.isArray(featureStats.value)
+    ? featureStats.value
+    : {}
+  const merged = {}
+  // 优先从后端聚合数据取
+  Object.entries(safeStats).forEach(([rawKey, val]) => {
+    const key = normalizeFeature(rawKey)
+    if (!INFRA_FEATURES.includes(key)) return
+    const cur = merged[key]
+    if (!cur) {
+      merged[key] = { ...val, feature: key, label: featureLabel(key), error_count: 0 }
+      return
+    }
+    const total = (cur.count || 0) + (val.count || 0)
+    const weightA = cur.count || 0
+    const weightB = val.count || 0
+    merged[key] = {
+      feature: key,
+      label: featureLabel(key),
+      count: total,
+      avg_hallucination: total ? Math.round(((cur.avg_hallucination || 0) * weightA + (val.avg_hallucination || 0) * weightB) / total) : 0,
+      avg_score: total ? Math.round(((cur.avg_score || 0) * weightA + (val.avg_score || 0) * weightB) / total) : 0,
+      avg_tokens: total ? Math.round(((cur.avg_tokens || 0) * weightA + (val.avg_tokens || 0) * weightB) / total) : 0,
+      avg_latency_ms: total ? Math.round(((cur.avg_latency_ms || 0) * weightA + (val.avg_latency_ms || 0) * weightB) / total) : 0,
+      error_count: (cur.error_count || 0) + (val.error_count || 0),
+    }
+  })
+  // 兜底从 records 里实时统计
+  if (!Object.keys(merged).length && records.value.length) {
+    records.value.forEach((r) => {
+      const key = normalizeFeature(r.feature)
+      if (!INFRA_FEATURES.includes(key)) return
+      if (!merged[key]) {
+        merged[key] = { feature: key, label: featureLabel(key), count: 0, avg_hallucination: 0, avg_score: 0, avg_tokens: 0, avg_latency_ms: 0, error_count: 0 }
+      }
+      const m = merged[key]
+      m.count += 1
+      const total = m.count
+      m.avg_latency_ms = Math.round(((m.avg_latency_ms || 0) * (total - 1) + (r.latency_ms || 0)) / total)
+      m.avg_tokens = Math.round(((m.avg_tokens || 0) * (total - 1) + (r.tokens || 0)) / total)
+      if (r.status === 'error') m.error_count += 1
+    })
+  }
+  // 补零展示，确保始终能看到全部 AI 底座链路
+  INFRA_FEATURES.forEach((key) => {
+    if (!merged[key]) {
+      merged[key] = { feature: key, label: featureLabel(key), count: 0, avg_hallucination: 0, avg_score: 0, avg_tokens: 0, avg_latency_ms: 0, error_count: 0 }
+    }
+  })
+  return Object.values(merged).sort((a, b) => (b.count || 0) - (a.count || 0))
 })
 
 async function loadFeatureStats() {
@@ -1628,6 +1713,14 @@ onUnmounted(() => {
   margin-left: 10px;
 }
 
+.infra-layer-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 14px 0 6px;
+  padding-left: 2px;
+}
+
 .feat-grid {
   display: flex;
   flex-wrap: nowrap;
@@ -1644,6 +1737,10 @@ onUnmounted(() => {
 .feat-grid::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.3);
   border-radius: 3px;
+}
+
+.feat-grid.infra {
+  padding-top: 4px;
 }
 
 .feat-item {
