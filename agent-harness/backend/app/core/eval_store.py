@@ -112,7 +112,7 @@ class EvalStore:
         if total == 0:
             return {
                 "total_records": 0,
-                "granularity": "hour",
+                "granularity": granularity if granularity != "auto" else "hour",
                 "avg_scores": {"overall": 0, "hallucination": 0, "consistency": 0,
                                "completeness": 0, "executability": 0, "safety": 0},
                 "by_feature": {},
@@ -138,14 +138,16 @@ class EvalStore:
             )
             del by_feature[feat]["overall_sum"]
 
-        # 智能粒度：auto 时，若窗口内只有 1 个时间点，退化为按天聚合
+        # 智能粒度：auto 时根据窗口长度选择 hour/day/month
         effective_gran = granularity
         if effective_gran == "auto":
-            hour_map: Dict[str, int] = {}
-            for r in records:
-                hour = r.get("created_at", "")[:13]
-                hour_map[hour] = hour_map.get(hour, 0) + 1
-            effective_gran = "day" if len(hour_map) <= 1 else "hour"
+            window_days = hours / 24
+            if window_days > 60:
+                effective_gran = "month"
+            elif window_days > 1:
+                effective_gran = "day"
+            else:
+                effective_gran = "hour"
 
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=hours)
@@ -153,7 +155,9 @@ class EvalStore:
         # 按粒度聚合趋势（只统计窗口内的记录）
         trend_map: Dict[str, Dict[str, Any]] = {}
         for r in records:
-            if effective_gran == "day":
+            if effective_gran == "month":
+                key = r.get("created_at", "")[:7]         # '2026-08'
+            elif effective_gran == "day":
                 key = r.get("created_at", "")[:10]        # '2026-08-16'
             else:
                 key = r.get("created_at", "")[:13]        # '2026-08-16T14'
@@ -162,9 +166,25 @@ class EvalStore:
             trend_map[key]["count"] += 1
             trend_map[key]["overall_sum"] += r.get("overall", 0)
 
-        # 填充完整时间窗口，空桶补 0，让 X 轴连续且时间正确
+        # 填充完整时间窗口，空桶补 None，让 X 轴连续且时间正确
         filled_trend: List[Dict[str, Any]] = []
-        if effective_gran == "day":
+        if effective_gran == "month":
+            def _months_between(a: datetime, b: datetime) -> int:
+                return (b.year - a.year) * 12 + (b.month - a.month)
+
+            months = max(1, _months_between(cutoff, now) + 1)
+            cur = cutoff.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            for _ in range(months):
+                key = cur.strftime("%Y-%m")
+                bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
+                bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
+                filled_trend.append(bucket)
+                # 下个月
+                if cur.month == 12:
+                    cur = cur.replace(year=cur.year + 1, month=1)
+                else:
+                    cur = cur.replace(month=cur.month + 1)
+        elif effective_gran == "day":
             days = max(1, hours // 24)
             cur = cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
             for _ in range(days + 1):

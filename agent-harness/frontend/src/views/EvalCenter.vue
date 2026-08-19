@@ -31,6 +31,7 @@
             <el-option label="近 24 小时" :value="24" />
             <el-option label="近 7 天" :value="168" />
             <el-option label="近 30 天" :value="720" />
+            <el-option label="近 90 天" :value="2160" />
           </el-select>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadDashboard">刷新</el-button>
           <el-button type="success" :icon="VideoPlay" :loading="demoLoading" @click="openLatestReplay">查看最新结果</el-button>
@@ -156,11 +157,12 @@
         <el-card shadow="never" class="chart-card trend-card">
           <template #header>
             <div class="card-header">
-              <span>综合分趋势（近 {{ hours }}h · {{ dashboard.granularity === 'day' ? '按天' : '按小时' }}）</span>
+              <span>综合分趋势（近 {{ hours }}h · {{ granularityText }}）</span>
               <div class="trend-header-actions">
                 <el-radio-group v-model="granularity" size="small" @change="loadDashboard">
                   <el-radio-button label="按小时" value="hour" />
                   <el-radio-button label="按天" value="day" />
+                  <el-radio-button label="按月" value="month" />
                 </el-radio-group>
                 <el-tag size="small" type="info">{{ dashboard.trend.length }} 个时间点</el-tag>
               </div>
@@ -721,6 +723,10 @@ const isTrendEmpty = computed(() => !(dashboard.value.trend || []).length)
 const isFeatureEmpty = computed(() => !Object.keys(dashboard.value.by_feature || {}).length)
 // 单点兜底：趋势只有 1 个时间点时，隐藏柱状图、放大圆点并提示
 const isSinglePoint = computed(() => (dashboard.value.trend || []).length === 1)
+const granularityText = computed(() => {
+  const map = { hour: '按小时', day: '按天', month: '按月' }
+  return map[dashboard.value.granularity] || map[granularity.value] || '按小时'
+})
 
 const radarRef = ref(null)
 const trendRef = ref(null)
@@ -1159,6 +1165,10 @@ function initRadar() {
 // 这里按浏览器本地时区解析并格式化为短标签。
 function formatTrendLabel(hour) {
   if (!hour) return ''
+  // 月度聚合："2026-08"
+  if (/^\d{4}-\d{2}$/.test(hour)) {
+    return hour
+  }
   const hasTime = hour.includes('T')
   const iso = hasTime ? `${hour}:00:00Z` : `${hour}T00:00:00Z`
   const d = new Date(iso)
@@ -1178,9 +1188,15 @@ function initTrend() {
   trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
   const trend = dashboard.value.trend || []
   const x = trend.map(t => formatTrendLabel(t.hour))
-  const avg = trend.map(t => Number(t.avg_overall) || 0)
+  const rawHours = trend.map(t => t.hour)
+  // 空桶用 null 表示，避免折线把无数据点连成平线
+  const avg = trend.map(t => (t.avg_overall == null ? null : Number(t.avg_overall)))
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
+  const points = x.length
+  // 根据点数智能稀疏 X 轴标签，避免小时视图拥挤
+  const axisInterval = points <= 12 ? 0 : points <= 24 ? 2 : points <= 48 ? 4 : Math.ceil(points / 12)
+  const axisRotate = points > 12 ? 35 : 0
 
   const series = [
     {
@@ -1188,11 +1204,18 @@ function initTrend() {
       type: 'line',
       data: avg,
       smooth: true,
+      connectNulls: false,
       lineStyle: { width: isSinglePoint.value ? 0 : 3 },
       symbol: 'circle',
-      symbolSize: isSinglePoint.value ? 22 : 8,
+      symbolSize: isSinglePoint.value ? 22 : 7,
       itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: isSinglePoint.value ? 3 : 0 },
-      label: { show: true, position: 'top', color: '#e2e8f0', fontSize: isSinglePoint.value ? 14 : 12, formatter: '{c}' },
+      label: {
+        show: true,
+        position: 'top',
+        color: '#e2e8f0',
+        fontSize: isSinglePoint.value ? 14 : 12,
+        formatter: p => (p.value == null ? '' : p.value),
+      },
     },
   ]
   // 单点时不画柱状图，避免遮挡折线；多点时才叠加评测次数柱状
@@ -1203,8 +1226,13 @@ function initTrend() {
       yAxisIndex: 1,
       data: count,
       itemStyle: { borderRadius: [4, 4, 0, 0], color: 'rgba(52,211,153,0.55)' },
-      barMaxWidth: 24,
-      label: { show: true, position: 'top', color: '#e2e8f0', formatter: '{c}' },
+      barMaxWidth: points > 48 ? 12 : 24,
+      label: {
+        show: true,
+        position: 'top',
+        color: '#e2e8f0',
+        formatter: p => (p.value > 0 ? p.value : ''),
+      },
     })
   }
 
@@ -1215,10 +1243,28 @@ function initTrend() {
       backgroundColor: 'rgba(15,23,42,0.95)',
       borderColor: 'rgba(148,163,184,0.2)',
       textStyle: { color: '#e2e8f0' },
+      formatter: params => {
+        const idx = params[0].dataIndex
+        const time = rawHours[idx] || params[0].name
+        let html = `<div style="font-weight:600;margin-bottom:4px">${time}</div>`
+        params.forEach(p => {
+          if (p.value == null) return
+          html += `<div style="display:flex;align-items:center;gap:6px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>
+            <span>${p.seriesName}：${p.value}</span>
+          </div>`
+        })
+        return html
+      },
     },
     legend: { data: isSinglePoint.value ? ['平均综合分'] : ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 30, left: 40, right: 50, bottom: 40, containLabel: true },
-    xAxis: { type: 'category', data: x, axisLabel: { rotate: 0, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
+    grid: { top: 30, left: 40, right: 50, bottom: 50, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: x,
+      axisLabel: { interval: axisInterval, rotate: axisRotate, color: '#94a3b8' },
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } },
+    },
     yAxis: [
       { type: 'value', name: '分数', min: 0, max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
       { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false }, show: !isSinglePoint.value },
