@@ -65,7 +65,7 @@ def run_judge(req: JudgeRequest):
 @router.get("/dashboard")
 def get_dashboard(
     hours: int = Query(24, ge=1, le=2160),
-    granularity: str = Query("auto", pattern="^(auto|hour|day|month)$"),
+    granularity: str = Query("auto", pattern="^(auto|hour|week|month)$"),
 ):
     """获取评测聚合数据。
 

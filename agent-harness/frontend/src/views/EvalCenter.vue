@@ -161,7 +161,7 @@
               <div class="trend-header-actions">
                 <el-radio-group v-model="granularity" size="small" @change="loadDashboard">
                   <el-radio-button label="按小时" value="hour" />
-                  <el-radio-button label="按天" value="day" />
+                  <el-radio-button label="按周" value="week" />
                   <el-radio-button label="按月" value="month" />
                 </el-radio-group>
                 <el-tag size="small" type="info">{{ dashboard.trend.length }} 个时间点</el-tag>
@@ -719,12 +719,12 @@ function exportJSON() {
   ElMessage.success('JSON 已导出')
 }
 
-const isTrendEmpty = computed(() => !(dashboard.value.trend || []).length)
+const isTrendEmpty = computed(() => !(dashboard.value.trend || []).some(t => (t.count || 0) > 0))
 const isFeatureEmpty = computed(() => !Object.keys(dashboard.value.by_feature || {}).length)
-// 单点兜底：趋势只有 1 个时间点时，隐藏柱状图、放大圆点并提示
-const isSinglePoint = computed(() => (dashboard.value.trend || []).length === 1)
+// 单点兜底：非空趋势点只有 1 个时，放大圆点并特殊显示
+const isSinglePoint = computed(() => (dashboard.value.trend || []).filter(t => (t.count || 0) > 0).length === 1)
 const granularityText = computed(() => {
-  const map = { hour: '按小时', day: '按天', month: '按月' }
+  const map = { hour: '按小时', week: '按周', month: '按月' }
   return map[dashboard.value.granularity] || map[granularity.value] || '按小时'
 })
 
@@ -1169,6 +1169,15 @@ function formatTrendLabel(hour) {
   if (/^\d{4}-\d{2}$/.test(hour)) {
     return hour
   }
+  // 周聚合：key 为该周周一日期 "2026-08-18"，显示为 "08.18" 当周标识
+  if (/^\d{4}-\d{2}-\d{2}$/.test(hour) && !hour.includes('T')) {
+    const d = new Date(`${hour}T00:00:00Z`)
+    if (!isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0')
+      return `${pad(d.getMonth() + 1)}.${pad(d.getDate())}`
+    }
+    return hour
+  }
   const hasTime = hour.includes('T')
   const iso = hasTime ? `${hour}:00:00Z` : `${hour}T00:00:00Z`
   const d = new Date(iso)
@@ -1181,27 +1190,20 @@ function formatTrendLabel(hour) {
 function initTrend() {
   if (!trendRef.value) return
   trendChart?.dispose()
-  if (isTrendEmpty.value) {
+  // 只保留有数据的坐标点，让标签正好落在数据正下方
+  const trend = (dashboard.value.trend || []).filter(t => (t.count || 0) > 0)
+  if (trend.length === 0) {
     trendChart = null
     return
   }
   trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
-  const trend = dashboard.value.trend || []
   const x = trend.map(t => formatTrendLabel(t.hour))
   const rawHours = trend.map(t => t.hour)
-  // 空桶用 null 表示，避免折线把无数据点连成平线
   const avg = trend.map(t => (t.avg_overall == null ? null : Number(t.avg_overall)))
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
-  const points = x.length
-  const dataIndices = count.map((c, i) => (c > 0 ? i : -1)).filter(i => i >= 0)
-  // 有数据的时间点必须显示标签；其余按基数稀疏，避免小时视图拥挤
-  const baseInterval = points <= 12 ? 1 : points <= 24 ? 3 : points <= 48 ? 6 : Math.ceil(points / 10)
-  const axisRotate = points > 10 ? 35 : 0
-  const xAxisInterval = index => {
-    if (dataIndices.includes(index)) return false
-    return index % baseInterval !== 0
-  }
+  const single = trend.length === 1
+  const rotate = x.length > 6 ? 35 : 0
 
   const series = [
     {
@@ -1209,31 +1211,27 @@ function initTrend() {
       type: 'line',
       data: avg,
       smooth: true,
-      connectNulls: false,
-      lineStyle: { width: isSinglePoint.value ? 0 : 3 },
+      lineStyle: { width: single ? 0 : 3 },
       symbol: 'circle',
-      symbolSize: isSinglePoint.value ? 22 : 7,
-      itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: isSinglePoint.value ? 3 : 0 },
-      // 单点或数据非常稀疏时才显示折线标签，避免与柱状图数字重叠
+      symbolSize: single ? 22 : 8,
+      itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: single ? 3 : 0 },
+      // 分数标签放在柱子上方，与内部次数标签拉开距离，避免重叠
       label: {
-        show: isSinglePoint.value || dataIndices.length <= 3,
+        show: true,
         position: 'top',
         color: '#e2e8f0',
-        fontSize: isSinglePoint.value ? 14 : 12,
+        fontSize: single ? 14 : 12,
         formatter: p => (p.value == null ? '' : p.value),
-        distance: 8,
+        distance: 18,
       },
     },
-  ]
-  // 单点时不画柱状图，避免遮挡折线；多点时才叠加评测次数柱状
-  if (!isSinglePoint.value) {
-    series.push({
+    {
       name: '评测次数',
       type: 'bar',
       yAxisIndex: 1,
       data: count,
       itemStyle: { borderRadius: [4, 4, 0, 0], color: 'rgba(52,211,153,0.55)' },
-      barMaxWidth: points > 48 ? 12 : 24,
+      barMaxWidth: 32,
       label: {
         show: true,
         position: 'insideTop',
@@ -1241,8 +1239,8 @@ function initTrend() {
         formatter: p => (p.value > 0 ? p.value : ''),
         offset: [0, 2],
       },
-    })
-  }
+    },
+  ]
 
   const option = {
     color: ['#60a5fa', '#34d399'],
@@ -1265,17 +1263,18 @@ function initTrend() {
         return html
       },
     },
-    legend: { data: isSinglePoint.value ? ['平均综合分'] : ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 30, left: 40, right: 50, bottom: 50, containLabel: true },
+    legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
+    grid: { top: 36, left: 40, right: 50, bottom: 42, containLabel: true },
     xAxis: {
       type: 'category',
       data: x,
-      axisLabel: { interval: xAxisInterval, rotate: axisRotate, color: '#94a3b8' },
+      axisTick: { alignWithLabel: true },
+      axisLabel: { interval: 0, rotate, color: '#94a3b8' },
       axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } },
     },
     yAxis: [
       { type: 'value', name: '分数', min: 0, max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
-      { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false }, show: !isSinglePoint.value },
+      { type: 'value', name: '次数', min: 0, max: Math.ceil(maxCount * 1.2), axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
     ],
     series,
   }

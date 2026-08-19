@@ -101,8 +101,8 @@ class EvalStore:
 
         granularity:
           - 'hour': 按小时聚合（默认 24h 窗口内 24 个点，空桶补 0）
-          - 'day' : 按天聚合（适合跨天拉长曲线，空桶补 0）
-          - 'auto': 若指定 hours 窗口内只有 1 个时间点，则自动退化为 'day'，
+          - 'week': 按周聚合（适合跨周拉长曲线，空桶补 0）
+          - 'auto': 若指定 hours 窗口内只有 1 个时间点，则自动退化为 'week'，
                     让趋势曲线更完整；否则用 'hour'。
         """
         records = self.list_records(hours=hours, limit=10000)
@@ -138,27 +138,31 @@ class EvalStore:
             )
             del by_feature[feat]["overall_sum"]
 
-        # 智能粒度：auto 时根据窗口长度选择 hour/day/month
+        # 智能粒度：auto 时根据窗口长度选择 hour/week/month
         effective_gran = granularity
         if effective_gran == "auto":
             window_days = hours / 24
             if window_days > 60:
                 effective_gran = "month"
             elif window_days > 1:
-                effective_gran = "day"
+                effective_gran = "week"
             else:
                 effective_gran = "hour"
 
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=hours)
 
+        def _week_start(dt: datetime) -> datetime:
+            return dt - timedelta(days=dt.isoweekday() - 1)
+
         # 按粒度聚合趋势（只统计窗口内的记录）
         trend_map: Dict[str, Dict[str, Any]] = {}
         for r in records:
             if effective_gran == "month":
                 key = r.get("created_at", "")[:7]         # '2026-08'
-            elif effective_gran == "day":
-                key = r.get("created_at", "")[:10]        # '2026-08-16'
+            elif effective_gran == "week":
+                dt = _parse_iso(r.get("created_at", "1970-01-01T00:00:00+00:00"))
+                key = _week_start(dt).strftime("%Y-%m-%d")  # 该周周一
             else:
                 key = r.get("created_at", "")[:13]        # '2026-08-16T14'
             if key not in trend_map:
@@ -184,15 +188,17 @@ class EvalStore:
                     cur = cur.replace(year=cur.year + 1, month=1)
                 else:
                     cur = cur.replace(month=cur.month + 1)
-        elif effective_gran == "day":
-            days = max(1, hours // 24)
-            cur = cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
-            for _ in range(days + 1):
+        elif effective_gran == "week":
+            start = _week_start(cutoff).replace(hour=0, minute=0, second=0, microsecond=0)
+            end = _week_start(now)
+            weeks = max(1, (end - start).days // 7 + 1)
+            cur = start
+            for _ in range(weeks):
                 key = cur.strftime("%Y-%m-%d")
                 bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
                 bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
                 filled_trend.append(bucket)
-                cur += timedelta(days=1)
+                cur += timedelta(weeks=1)
         else:
             cur = cutoff.replace(minute=0, second=0, microsecond=0)
             for _ in range(hours + 1):
