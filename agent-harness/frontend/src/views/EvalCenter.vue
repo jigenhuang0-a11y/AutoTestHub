@@ -332,22 +332,22 @@
               </div>
               <div class="trace-flow-meta">
                 <template v-if="step.type === 'route'">
-                  <el-tag size="small" type="info">{{ step.metadata?.task_type }}</el-tag>
-                  <el-tag size="small" type="success">{{ step.metadata?.model }}</el-tag>
+                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.task_type }}</el-tag>
+                  <el-tag size="small" effect="dark" type="success">{{ step.metadata?.model }}</el-tag>
                 </template>
                 <template v-else-if="step.type === 'retrieve'">
-                  <el-tag size="small" type="info">{{ step.metadata?.hit_count || 0 }} chunk</el-tag>
+                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.hit_count || 0 }} chunk</el-tag>
                 </template>
                 <template v-else-if="step.type === 'llm'">
-                  <el-tag size="small" type="info">{{ step.metadata?.model }}</el-tag>
-                  <el-tag size="small" type="warning">{{ step.metadata?.latency_ms }}ms</el-tag>
-                  <el-tag size="small" type="success">≈{{ step.metadata?.token_usage }} token</el-tag>
+                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.model }}</el-tag>
+                  <el-tag size="small" effect="dark" type="warning">{{ step.metadata?.latency_ms }}ms</el-tag>
+                  <el-tag size="small" effect="dark" type="success">≈{{ step.metadata?.token_usage }} token</el-tag>
                 </template>
                 <template v-else-if="step.type === 'judge'">
-                  <el-tag size="small" :type="scoreTag(step.metadata?.overall || 0)">综合 {{ step.metadata?.overall || 0 }}</el-tag>
+                  <el-tag size="small" effect="dark" :type="scoreTag(step.metadata?.overall || 0)">综合 {{ step.metadata?.overall || 0 }}</el-tag>
                 </template>
                 <template v-else>
-                  <el-tag size="small" type="info">{{ step.status || 'completed' }}</el-tag>
+                  <el-tag size="small" effect="dark" type="info">{{ step.status || 'completed' }}</el-tag>
                 </template>
               </div>
             </div>
@@ -604,8 +604,8 @@ function normalizeRecordToEvent(rec) {
 
 // 把 EvalEvent 统一成记录表可用的行结构
 function normalizeEventToRecord(ev) {
-  const judge = ev.judge || {}
-  const dims = ev.dimension_scores || judge.dimension_scores || {}
+  const judge = ev.judge_output || ev.judge || {}
+  const dims = judge.dimension_scores || ev.dimension_scores || {}
   const overall = judge.overall ?? dims['综合分'] ?? dims.overall ?? 0
   return {
     event_id: ev.event_id,
@@ -625,7 +625,7 @@ function normalizeEventToRecord(ev) {
     executability: dims['可执行性'] ?? dims.executability ?? 0,
     safety: dims['安全性'] ?? dims.safety ?? 0,
     reason: judge.summary || judge.reason || (ev.status === 'judging' ? 'Judge 中…' : ''),
-    issues: ev.issues || judge.issues || [],
+    issues: judge.issues || ev.issues || [],
     created_at: ev.timestamp,
     status: ev.status,
     trace_steps: ev.trace_steps || [],
@@ -1524,8 +1524,31 @@ onUnmounted(() => {
 }
 
 /* 节点诊断弹窗 */
-.step-detail-dialog :deep(.el-dialog__body) {
-  padding-top: 10px;
+:global(.el-dialog.step-detail-dialog),
+:global(.step-detail-dialog .el-dialog) {
+  background: #0f172a !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6) !important;
+}
+:global(.step-detail-dialog .el-dialog__header) {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15) !important;
+  padding-bottom: 14px !important;
+}
+:global(.step-detail-dialog .el-dialog__title) {
+  color: #f8fafc !important;
+  font-weight: 600 !important;
+}
+:global(.step-detail-dialog .el-dialog__body) {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  padding-top: 10px !important;
+}
+:global(.step-detail-dialog .el-dialog__headerbtn .el-dialog__close) {
+  color: #94a3b8 !important;
+}
+:global(.step-detail-dialog .el-dialog__headerbtn .el-dialog__close:hover) {
+  color: #f8fafc !important;
 }
 
 .step-detail-head {
@@ -1618,14 +1641,14 @@ onUnmounted(() => {
 }
 
 .step-detail-diagnosis {
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.25);
+  background: rgba(69, 26, 26, 0.55);
+  border: 1px solid rgba(248, 113, 113, 0.35);
   color: #fecaca;
 }
 
 .step-detail-solution {
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189,  248, 0.25);
+  background: rgba(12, 74, 110, 0.45);
+  border: 1px solid rgba(56, 189, 248, 0.35);
   color: #bae6fd;
 }
 
