@@ -1167,26 +1167,25 @@ function formatTrendLabel(item) {
   const hour = typeof item === 'string' ? item : (item?.hour || '')
   const latestAt = typeof item === 'string' ? null : item?.latest_at
   if (!hour) return ''
+  function toLocalLabel(iso) {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return null
+    const pad = n => String(n).padStart(2, '0')
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
+  }
   // 月度聚合："2026-08"
   if (/^\d{4}-\d{2}$/.test(hour)) {
     return hour
   }
-  // 周/月聚合：用桶内最新记录时间的本地日期做标签
-  const useLocalDate = dashboard.value.granularity === 'week' || dashboard.value.granularity === 'month'
-  if (useLocalDate && latestAt) {
-    const d = new Date(latestAt)
-    if (!isNaN(d.getTime())) {
-      const pad = n => String(n).padStart(2, '0')
-      return `${pad(d.getMonth() + 1)}.${pad(d.getDate())}`
-    }
+  // 优先用 latest_at（完整 ISO 时间），按本地时区解析
+  if (latestAt) {
+    const label = toLocalLabel(latestAt)
+    if (label) return label
   }
   // 小时聚合：hour 形如 "2026-08-19T00"
   if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(hour)) {
-    const d = new Date(`${hour}:00:00Z`)
-    if (!isNaN(d.getTime())) {
-      const pad = n => String(n).padStart(2, '0')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
-    }
+    const label = toLocalLabel(`${hour}:00:00Z`)
+    if (label) return label
   }
   return hour
 }
