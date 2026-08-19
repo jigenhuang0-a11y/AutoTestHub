@@ -225,6 +225,41 @@
           </div>
         </el-card>
 
+        <!-- 链路级 Judge 概览（agent 路径的综合分） -->
+        <el-card v-if="metricJudge" class="replay-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span><el-icon><Medal /></el-icon> 链路级 Judge 评估</span>
+              <el-tag :type="metricJudge.tagType" size="small">综合 {{ metricJudge.overall }} / 100</el-tag>
+            </div>
+          </template>
+          <div class="dim-bars">
+            <div class="dim-bar-item">
+              <span class="dim-bar-name">幻觉率检测</span>
+              <el-progress
+                :percentage="metricJudge.overall"
+                :color="barColor"
+                :stroke-width="10"
+                :show-text="false"
+              />
+              <span class="dim-bar-val" :class="scoreClass(metricJudge.overall)">{{ metricJudge.overall }}</span>
+            </div>
+          </div>
+          <div v-if="metricJudge.summary" class="reason-box">
+            <div class="reason-title">评估结论</div>
+            <p>{{ metricJudge.summary }}</p>
+          </div>
+          <div v-if="metricJudge.dims.length" class="sub-dims">
+            <el-tag
+              v-for="d in metricJudge.dims"
+              :key="d.name"
+              size="small"
+              :type="scoreTag(d.score)"
+              effect="light"
+            >{{ d.name }}: {{ d.score }}</el-tag>
+          </div>
+        </el-card>
+
         <!-- 问题定位记录仪 -->
         <el-card v-if="(detail.issues || []).length" class="replay-card" shadow="never">
           <template #header>
@@ -413,6 +448,28 @@ function barColor(score) {
   return '#f87171'
 }
 
+function scoreTag(score) {
+  if (score >= 85) return 'success'
+  if (score >= 60) return 'warning'
+  return 'danger'
+}
+
+// 链路级 Judge（agent 路径写入 metrics.hallucination）
+const metricJudge = computed(() => {
+  const m = detail.value?.metrics?.hallucination
+  if (!m || typeof m !== 'object') return null
+  const overall = m.overall_score != null ? m.overall_score : 0
+  if (!overall && !(m.dimensions || []).length) return null
+  return {
+    overall,
+    summary: m.summary || '',
+    tagType: scoreTag(overall),
+    dims: Array.isArray(m.dimensions)
+      ? m.dimensions.filter(d => d && d.name && d.score != null).map(d => ({ name: d.name, score: d.score }))
+      : [],
+  }
+})
+
 function formatTime(t) {
   if (!t) return '—'
   const d = new Date(t)
@@ -422,7 +479,9 @@ function formatTime(t) {
 
 function hasJudge(row) {
   if (!row) return false
-  return row.overall > 0 || Object.values({
+  const m = row.metrics?.hallucination
+  const hasMetricJudge = m && typeof m === 'object' && (m.overall_score != null || (m.dimensions || []).length)
+  return row.overall > 0 || hasMetricJudge || Object.values({
     hallucination: row.hallucination,
     consistency: row.consistency,
     completeness: row.completeness,
@@ -664,6 +723,16 @@ function normalizeEventToRecord(ev) {
   const judge = ev.judge_output || ev.judge || {}
   const dims = judge.dimension_scores || ev.dimension_scores || {}
   const overall = judge.overall ?? dims['综合分'] ?? dims.overall ?? 0
+  // agent 路径（chat_with_tools）的 Judge 评分写入在 metrics.hallucination
+  const mHall = ev.metrics?.hallucination || {}
+  const hasMetricJudge = mHall && typeof mHall === 'object' && (mHall.overall_score != null || (mHall.dimensions || []).length)
+  const metricDims = {}
+  if (hasMetricJudge && Array.isArray(mHall.dimensions)) {
+    for (const d of mHall.dimensions) {
+      if (d && d.name && d.score != null) metricDims[d.name] = d.score
+    }
+  }
+  const metricOverall = mHall.overall_score != null ? mHall.overall_score : (hasMetricJudge ? Object.values(metricDims).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(metricDims).length) : 0)
   return {
     event_id: ev.event_id,
     feature: ev.feature,
@@ -678,13 +747,13 @@ function normalizeEventToRecord(ev) {
     token_usage: ev.token_usage,
     trace_id: ev.trace_id,
     retrieved_docs: ev.retrieved_docs,
-    overall,
-    hallucination: dims['幻觉率'] ?? dims.hallucination ?? 0,
-    consistency: dims['一致性'] ?? dims.consistency ?? 0,
-    completeness: dims['完整性'] ?? dims.completeness ?? 0,
-    executability: dims['可执行性'] ?? dims.executability ?? 0,
-    safety: dims['安全性'] ?? dims.safety ?? 0,
-    reason: judge.summary || judge.reason || '',
+    overall: overall || metricOverall || 0,
+    hallucination: dims['幻觉率'] ?? dims.hallucination ?? metricDims['幻觉率'] ?? metricDims['hallucination'] ?? 0,
+    consistency: dims['一致性'] ?? dims.consistency ?? metricDims['一致性'] ?? metricDims['consistency'] ?? 0,
+    completeness: dims['完整性'] ?? dims.completeness ?? metricDims['完整性'] ?? metricDims['completeness'] ?? 0,
+    executability: dims['可执行性'] ?? dims.executability ?? metricDims['可执行性'] ?? metricDims['executability'] ?? 0,
+    safety: dims['安全性'] ?? dims.safety ?? metricDims['安全性'] ?? metricDims['safety'] ?? 0,
+    reason: judge.summary || judge.reason || mHall.summary || '',
     issues: judge.issues || ev.issues || [],
     created_at: ev.timestamp,
     status: ev.status,

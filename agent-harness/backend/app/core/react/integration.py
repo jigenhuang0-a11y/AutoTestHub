@@ -90,6 +90,7 @@ class ReActIntegration:
             available_tools=available_tools,
             user_id=state.get("user_id"),
             task_id=state.get("task_id"),
+            trace_id=state.get("trace_id"),
         )
 
         # 桥接记忆

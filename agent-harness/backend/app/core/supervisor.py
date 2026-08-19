@@ -29,6 +29,7 @@ from app.core.router import get_llm_router
 from app.core.config import get_available_providers
 from app.core.metrics import supervisor_decisions_total, supervisor_worker_duration_seconds
 from app.core.telemetry import get_tracer
+from app.core.eval_event_store import build_event, get_eval_event_store, TraceContext
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
@@ -311,6 +312,79 @@ class Supervisor:
 # 编排入口：串行驱动器（可被 workflow 包装为流式）
 # ============================================================
 
+def _record_supervisor_event(
+    trace_id: str,
+    user_request: str,
+    analysis,
+    done: list,
+    failed_workers: dict,
+    final_output,
+    overall_status: str,
+    task_id: str,
+    team_id: str,
+    user_id,
+) -> None:
+    """
+    把整条 supervisor 编排落地为一条 EvalCenter 追踪事件。
+    所有 worker 的执行结果归并到同一个 trace_id，使 EvalCenter 能看到
+    "一次用例生成编排"的完整链路，而非零散的事件碎片。
+    """
+    try:
+        steps = []
+        feature_workers = []
+        for r in done:
+            w = r.worker
+            feature_workers.append(w)
+            step_status = "completed" if r.status == "completed" else "failed"
+            out = r.output or {}
+            resp = ""
+            if isinstance(out, dict):
+                resp = out.get("response") or out.get("output") or out.get("final_response") or ""
+                if isinstance(resp, dict):
+                    resp = resp.get("response", "")
+            steps.append({
+                "step_id": f"step-{w}-{uuid.uuid4().hex[:6]}",
+                "type": "tool" if w != "evaluator" else "judge",
+                "title": f"Worker · {w}",
+                "status": step_status,
+                "detail": (r.error or "")[:300] or f"执行完成（{w}）",
+                "input": (out.get("input") if isinstance(out, dict) else None) or None,
+                "output": str(resp)[:500] if resp else None,
+                "metadata": {
+                    "worker": w,
+                    "feature": w,
+                    "status": step_status,
+                    "error": r.error,
+                },
+            })
+
+        event = build_event(
+            event_id=f"evt_supervisor_{uuid.uuid4().hex[:12]}",
+            trace_id=trace_id,
+            feature="ai_testcase" if "generator" in feature_workers else "ai_workflow",
+            task_type="supervisor",
+            input_summary=user_request[:500],
+            output_summary=str(final_output)[:1000] if final_output else "（无输出）",
+            model=model or "auto",
+            provider="supervisor",
+            status=overall_status,
+            trace_steps=steps,
+            metrics={
+                "workers": feature_workers,
+                "failed_workers": sorted(failed_workers.keys()),
+                "worker_count": len(done),
+                "intent": getattr(analysis, "intent", user_request),
+                "complexity": getattr(analysis, "complexity", "unknown"),
+            },
+            user_id=user_id,
+            team_id=team_id,
+        )
+        get_eval_event_store().add_event(event)
+        logger.info(f"[Supervisor] 已落地编排事件 trace={trace_id} workers={feature_workers}")
+    except Exception as e:
+        logger.warning(f"[Supervisor] 记录编排事件失败（不影响主流程）: {e}")
+
+
 def run_supervisor(
     user_request: str,
     task_id: str,
@@ -349,6 +423,11 @@ def run_supervisor(
         team_id=team_id,
         template_id=template_id,
     )
+
+    # 整条 supervisor 编排共享同一 trace_id，让 worker 工具事件归属到同一条追踪
+    trace_id = f"trace_supervisor_{uuid.uuid4().hex[:12]}"
+    state = dict(state)
+    state["trace_id"] = trace_id
 
     def _emit(et, payload):
         if progress_callback:
@@ -446,6 +525,20 @@ def run_supervisor(
             "status": overall_status,
         })
         workflow_total_inc("completed")
+
+        # === 落地到 EvalCenter：把整条 supervisor 编排记录为一条追踪事件 ===
+        _record_supervisor_event(
+            trace_id=trace_id,
+            user_request=user_request,
+            analysis=analysis,
+            done=done,
+            failed_workers=failed_workers,
+            final_output=final_output,
+            overall_status=overall_status,
+            task_id=task_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
 
         return {
             "task_id": task_id,
