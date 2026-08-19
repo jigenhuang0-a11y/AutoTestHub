@@ -425,6 +425,7 @@ export const evalCenterAPI = {
   events: (params) => api.get('/eval-center/events', { params }),
   event: (id) => api.get(`/eval-center/events/${id}`),
   poll: (sinceMs = 0) => api.get('/eval-center/poll', { params: { since_ms: sinceMs } }),
+  featureStats: (hours = 24) => api.get('/eval-center/feature-stats', { params: { hours } }),
   features: () => api.get('/eval-center/features'),
   tracePanorama: (traceId) => api.get(`/eval-center/trace-panorama/${traceId}`),
 }

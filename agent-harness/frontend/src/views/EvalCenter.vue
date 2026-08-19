@@ -114,6 +114,49 @@
       </el-col>
     </el-row>
 
+    <!-- 功能流水线概览：一眼看清哪个功能出问题（幻觉率/Token/耗时） -->
+    <el-card shadow="never" class="feat-card">
+      <template #header>
+        <div class="card-header">
+          <span>AI 功能链路概览</span>
+          <span class="card-sub">按功能聚合 · 红色=幻觉率偏高需关注</span>
+        </div>
+      </template>
+      <div class="feat-grid">
+        <div
+          v-for="f in featureStatsList"
+          :key="f.feature"
+          class="feat-item"
+          :class="{ 'feat-warn': f.avg_hallucination > 60, 'feat-active': f.feature === activeFeature }"
+          @click="toggleFeatureFilter(f.feature)"
+        >
+          <div class="feat-top">
+            <span class="feat-name">{{ f.label }}</span>
+            <span class="feat-count">{{ f.count }} 次</span>
+          </div>
+          <div class="feat-metrics">
+            <div class="feat-metric">
+              <span class="fm-label">幻觉率</span>
+              <span class="fm-value" :class="scoreClass(f.avg_hallucination)">{{ f.avg_hallucination || '—' }}</span>
+            </div>
+            <div class="feat-metric">
+              <span class="fm-label">综合分</span>
+              <span class="fm-value" :class="scoreClass(f.avg_score)">{{ f.avg_score || '—' }}</span>
+            </div>
+            <div class="feat-metric">
+              <span class="fm-label">均 Token</span>
+              <span class="fm-value">{{ f.avg_tokens || '—' }}</span>
+            </div>
+            <div class="feat-metric">
+              <span class="fm-label">均耗时</span>
+              <span class="fm-value">{{ f.avg_latency_ms ? (f.avg_latency_ms / 1000).toFixed(1) + 's' : '—' }}</span>
+            </div>
+          </div>
+          <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="6" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
+        </div>
+      </div>
+    </el-card>
+
     <!-- 维度评分条 -->
     <el-card shadow="never" class="dim-card">
       <template #header>
@@ -200,7 +243,7 @@
               </div>
             </div>
           </template>
-          <el-table :data="records" size="default" max-height="340" stripe @row-click="openDetail">
+          <el-table :data="filteredRecords" size="default" max-height="340" stripe @row-click="openDetail">
             <el-table-column prop="feature" label="模块" width="130" show-overflow-tooltip>
               <template #default="{ row }">
                 <div class="feat-cell">
@@ -364,6 +407,8 @@ const dashboard = ref({
 const langfuse = ref({ enabled: false, host: '', traces_url: '' })
 const records = ref([])
 const recordsLoading = ref(false)
+const featureStats = ref({})  // feature -> {count, avg_hallucination, avg_score, avg_tokens, avg_latency_ms}
+const activeFeature = ref('')  // 点击功能卡筛选记录表
 const demoLoading = ref(false)
 const demoTrace = ref(null)
 const isTracking = ref(false)
@@ -398,11 +443,33 @@ async function loadRecords() {
       list = rows.map(normalizeRecordToEvent)
     }
     records.value = list.map(normalizeEventToRecord)
+    loadFeatureStats()
   } catch (e) {
     ElMessage.error('记录加载失败：' + (e.message || e))
   } finally {
     recordsLoading.value = false
   }
+}
+
+const filteredRecords = computed(() =>
+  activeFeature.value ? records.value.filter(r => r.feature === activeFeature.value) : records.value
+)
+
+// 按功能聚合的流水线概览（幻觉率 / Token / 耗时），来自后端 stats_by_feature
+const featureStatsList = computed(() =>
+  Object.values(featureStats.value || {}).sort((a, b) => (b.avg_hallucination || 0) - (a.avg_hallucination || 0))
+)
+
+async function loadFeatureStats() {
+  try {
+    const data = await evalCenterAPI.featureStats(hours.value)
+    if (data) featureStats.value = data
+  } catch (_) {}
+}
+
+function toggleFeatureFilter(f) {
+  activeFeature.value = activeFeature.value === f ? '' : f
+  loadRecords()
 }
 
 // 把旧 EvalStore 记录统一成 EvalEvent 样式，保证前端只处理一种结构
@@ -1723,6 +1790,100 @@ onUnmounted(() => {
 .score-excellent { color: #4ade80; }
 .score-good { color: #fbbf24; }
 .score-poor { color: #f87171; }
+
+.feat-card {
+  background: #27354d;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.2);
+  color: #e2e8f0;
+  margin-bottom: 16px;
+}
+
+.feat-card :deep(.el-card__header) {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.card-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: #94a3b8;
+  margin-left: 10px;
+}
+
+.feat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  padding: 6px 2px 2px;
+}
+
+.feat-item {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.feat-item:hover {
+  transform: translateY(-2px);
+  border-color: rgba(96, 165, 250, 0.55);
+}
+
+.feat-item.feat-active {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
+}
+
+.feat-item.feat-warn {
+  border-color: rgba(245, 108, 108, 0.6);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.feat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.feat-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.feat-count {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.feat-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.feat-metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.fm-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.fm-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  line-height: 1.2;
+}
 
 .dim-card {
   background: #27354d;

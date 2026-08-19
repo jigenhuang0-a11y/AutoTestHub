@@ -196,13 +196,13 @@ class LLMRouter:
                 token_usage, metrics = self._extract_usage_metrics(used_model, usage, latency_ms)
                 # 对最终答案做一次幻觉/质量 Judge，让 trace 携带真实评分
                 judge_score = self._judge_and_attach(
-                    messages, content, trace_steps, metrics, used_model,
+                    messages, content, trace_steps, metrics, used_model, provider=provider, trace_id=trace_id,
                 )
                 self._record_event(
                     task_type, used_model, provider, messages, content, latency_ms,
                     trace_id=trace_id, trace_steps=trace_steps, route_reason=f"chat_with_tools 显式指定/路由到 {used_model}",
                     temperature=temperature, max_tokens=None, fallback=False,
-                    token_usage=token_usage, metrics=metrics,
+                    token_usage=token_usage, metrics=metrics, judge=judge_score,
                 )
                 result["judge_score"] = judge_score
                 return result
@@ -219,13 +219,13 @@ class LLMRouter:
                     usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
                     token_usage, metrics = self._extract_usage_metrics(fallback.model, usage, latency_ms)
                     judge_score = self._judge_and_attach(
-                        messages, content, trace_steps, metrics, fallback.model,
+                        messages, content, trace_steps, metrics, fallback.model, provider=fallback, trace_id=trace_id,
                     )
                     self._record_event(
                         task_type, fallback.model, fallback, messages, content, latency_ms,
                         trace_id=trace_id, trace_steps=trace_steps, route_reason=f"工具调用失败后降级到 {fallback_model}",
                         temperature=temperature, fallback=True,
-                        token_usage=token_usage, metrics=metrics,
+                        token_usage=token_usage, metrics=metrics, judge=judge_score,
                     )
                     return {"content": content, "tool_calls": None, "model": fallback.model, "usage": usage, "judge_score": judge_score}
                 except Exception as fe:
@@ -322,6 +322,8 @@ class LLMRouter:
         trace_steps: List[Dict],
         metrics: Dict[str, Any],
         used_model: str,
+        provider: Optional[BaseLLMProvider] = None,
+        trace_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         对最终答案跑一次幻觉/质量 Judge，把评分写进 trace_steps（judge 步骤）
@@ -337,19 +339,30 @@ class LLMRouter:
                 str(m.get("content", "")) for m in messages if m.get("role") in ("system", "user", "tool")
             )
             score = judge_output(
-                question=context_text[:2000],
-                answer=content,
-                context=context_text[:4000],
-                task_type="agent",
-                model=used_model,
+                input_text=context_text[:2000],
+                output_text=content,
+                reference=context_text[:4000],
+                feature="agent",
+                trace_id=trace_id,
             )
-            if score and isinstance(score, dict):
-                summary = score.get("summary", "")
-                hallucination_rate = score.get("overall_score", 0)
+            if score and getattr(score, "overall", 0) >= 0:
+                summary = getattr(score, "reason", "")
+                hallucination_rate = getattr(score, "overall", 0)
+                # 完整归因：保留 issues / retrieval_gaps / recommendations / model，
+                # 让前端能下钻"哪个模型问的、为啥幻觉、卡哪个细节点、怎么微调"。
+                issues = getattr(score, "issues", [])
+                retrieval_gaps = getattr(score, "retrieval_gaps", [])
+                recommendations = getattr(score, "recommendations", [])
+                dim_scores = getattr(score, "dimension_scores", {})
                 metrics["hallucination"] = {
-                    "overall_score": hallucination_rate,
+                    "overall": hallucination_rate,
                     "summary": summary,
-                    "dimensions": score.get("dimensions", []),
+                    "dimension_scores": dim_scores,
+                    "model": used_model,
+                    "provider": getattr(provider, "provider_name", "unknown") if provider else "unknown",
+                    "issues": issues,
+                    "retrieval_gaps": retrieval_gaps,
+                    "recommendations": recommendations,
                 }
                 trace_steps.append({
                     "step_id": f"step-judge-{uuid.uuid4().hex[:8]}",
@@ -362,11 +375,20 @@ class LLMRouter:
                     "input": content[:300],
                     "output": summary,
                     "metadata": {
-                        "overall_score": hallucination_rate,
-                        "dimensions": score.get("dimensions", []),
+                        "overall": hallucination_rate,
+                        "dimension_scores": dim_scores,
+                        "model": used_model,
+                        "issues": issues,
+                        "retrieval_gaps": retrieval_gaps,
+                        "recommendations": recommendations,
                     },
                 })
-                return score
+                # 把结构化归因结果回传（标准 to_dict 格式 + model/provider），
+                # 供 _record_event 写入 EvalEvent.judge，前端可下钻展示。
+                judge_payload = score.to_dict()
+                judge_payload["model"] = used_model
+                judge_payload["provider"] = getattr(provider, "provider_name", "unknown") if provider else "unknown"
+                return judge_payload
         except Exception as e:
             logger.warning(f"[LLMRouter] Judge 评分失败（不影响主链路）: {e}")
         return None
@@ -388,6 +410,7 @@ class LLMRouter:
         max_tokens: Optional[int] = None,
         fallback: bool = False,
         metrics: Optional[Dict[str, Any]] = None,
+        judge: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """把一次 LLM 调用记录到 EvalEventStore，供 EvalCenter 事件驱动刷新。"""
         if not is_tracked_feature(task_type):
@@ -468,6 +491,7 @@ class LLMRouter:
                     "messages_summary": self._summarize_messages(messages),
                 },
                 metrics=metrics or {},
+                judge=judge or {},
             )
             get_eval_event_store().add(event)
 

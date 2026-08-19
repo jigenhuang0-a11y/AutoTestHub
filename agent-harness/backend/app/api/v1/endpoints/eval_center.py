@@ -147,6 +147,17 @@ def list_features():
     ]
 
 
+@router.get("/feature-stats")
+def feature_stats(
+    hours: int = Query(24, ge=1, le=2160),
+):
+    """按功能聚合的流水线概览：调用数 / 幻觉率 / 综合分 / 平均 Token / 平均耗时。
+
+    前端「AI 功能链路概览」卡片的数据源，用于一眼定位哪个功能出问题。
+    """
+    return get_eval_event_store().stats_by_feature(hours=hours)
+
+
 @router.get("/trace-panorama/{trace_id}")
 def get_trace_panorama(trace_id: str):
     """返回指定 trace_id 的 AI 底座工位全景图。

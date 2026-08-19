@@ -540,6 +540,8 @@ class EvalEventStore:
                     "avg_score": 0.0,
                     "score_sum": 0.0,
                     "score_count": 0,
+                    "hallucination_sum": 0.0,
+                    "hallucination_count": 0,
                 }
             s = stats[e.feature]
             s["count"] += 1
@@ -548,10 +550,25 @@ class EvalEventStore:
             if e.judge and "overall" in e.judge:
                 s["score_sum"] += float(e.judge["overall"])
                 s["score_count"] += 1
+            # 幻觉率：优先取 judge 的 hallucination 维度，其次 metrics.hallucination
+            halluc = None
+            if e.judge and isinstance(e.judge.get("dimension_scores"), dict):
+                halluc = e.judge["dimension_scores"].get("hallucination")
+            if halluc is None and isinstance(e.metrics, dict):
+                mh = e.metrics.get("hallucination")
+                if isinstance(mh, dict):
+                    halluc = mh.get("overall") or mh.get("overall_score")
+            if halluc is not None:
+                try:
+                    s["hallucination_sum"] += float(halluc)
+                    s["hallucination_count"] += 1
+                except (TypeError, ValueError):
+                    pass
         for s in stats.values():
             s["avg_latency_ms"] = round(s["total_latency_ms"] / max(s["count"], 1), 1)
             s["avg_tokens"] = round(s["total_tokens"] / max(s["count"], 1), 1)
             s["avg_score"] = round(s["score_sum"] / max(s["score_count"], 1), 2)
+            s["avg_hallucination"] = round(s["hallucination_sum"] / max(s["hallucination_count"], 1), 2)
         return stats
 
 
@@ -584,6 +601,7 @@ def build_event(
     metadata: Optional[Dict[str, Any]] = None,
     status: str = "completed",
     metrics: Optional[Dict[str, Any]] = None,
+    judge: Optional[Dict[str, Any]] = None,
 ) -> EvalEvent:
     now = datetime.now(timezone.utc)
     steps = trace_steps or []
@@ -608,6 +626,7 @@ def build_event(
         metadata=metadata or {},
         status=status,
         metrics=metrics or {},
+        judge=judge or None,
     )
 
 
