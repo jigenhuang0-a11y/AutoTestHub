@@ -18,9 +18,11 @@ memory_bridge — 为 AI 日常对话与 RAG 知识库问答统一接入长短�
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Dict, Optional
 
 from app.core.memory import MemoryManager, MemoryType
+from app.core.eval_event_store import record_infra_event, TraceContext
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ def get_memory_for(
     return mm
 
 
-def build_long_term_context(mm: MemoryManager, query: str) -> str:
+def build_long_term_context(mm: MemoryManager, query: str, trace_id: Optional[str] = None) -> str:
     """根据当前问题检索长期记忆，返回可注入 prompt 的文本块。
 
     返回空串表示无相关长期记忆。
@@ -70,7 +72,31 @@ def build_long_term_context(mm: MemoryManager, query: str) -> str:
     if mm is None or not query:
         return ""
     try:
+        start = time.time()
         ctx = mm.recall(query=query, limit=LTM_INJECT_LIMIT)
+        latency_ms = int((time.time() - start) * 1000)
+        hit_count = len(ctx.split("\n")) if ctx else 0
+        try:
+            tid = trace_id or TraceContext.get() or ""
+            if tid:
+                record_infra_event(
+                    feature="memory",
+                    task_type="long_term_recall",
+                    input_text=query,
+                    output_text=ctx[:500],
+                    latency_ms=latency_ms,
+                    model="",
+                    provider="memory",
+                    trace_id=tid,
+                    metadata={
+                        "memory_type": "long_term",
+                        "hit_count": hit_count,
+                        "user_id": mm.user_id,
+                        "mode": mm.team_id or "",
+                    },
+                )
+        except Exception:
+            pass
         if not ctx:
             return ""
         return ctx

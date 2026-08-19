@@ -10,7 +10,7 @@ from app.core.llm_provider import BaseLLMProvider
 from app.core.provider_pool import get_provider_pool
 from app.core.config import LLMRouterConfig, get_available_providers, MODEL_REGISTRY
 from app.core.task_store import get_task_store
-from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event, TraceContext
+from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event, TraceContext, estimate_cost
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,16 @@ class LLMRouter:
             }
             start = time.time()
             try:
-                content = provider.chat(messages, **trace_kwargs, **extra_kwargs)
+                raw = provider.chat_raw(messages, **trace_kwargs, **extra_kwargs)
                 latency_ms = int((time.time() - start) * 1000)
+                content = (raw.get("content", "") if isinstance(raw, dict) else str(raw)).strip()
+                usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
+                token_usage, metrics = self._extract_usage_metrics(used_model, usage, latency_ms)
                 self._record_event(
                     task_type, used_model, provider, messages, content, latency_ms,
                     trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
                     temperature=temperature, max_tokens=max_tokens, fallback=False,
+                    token_usage=token_usage, metrics=metrics,
                 )
                 return content
             except Exception as e:
@@ -70,12 +74,15 @@ class LLMRouter:
                 fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
                 fallback = self._pool.get_for_model(fallback_model)
                 logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
-                content = fallback.chat(messages, **trace_kwargs, **extra_kwargs)
+                raw = fallback.chat_raw(messages, **trace_kwargs, **extra_kwargs)
                 latency_ms = int((time.time() - start) * 1000)
+                usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
+                token_usage, metrics = self._extract_usage_metrics(fallback.model, usage, latency_ms)
                 self._record_event(
                     task_type, fallback.model, fallback, messages, content, latency_ms,
                     trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
                     temperature=temperature, max_tokens=max_tokens, fallback=True,
+                    token_usage=token_usage, metrics=metrics,
                 )
                 return content
 
@@ -185,11 +192,12 @@ class LLMRouter:
                 latency_ms = int((time.time() - start) * 1000)
                 content = result.get("content", "")
                 usage = result.get("usage") or {}
-                token_usage = usage.get("total_tokens", 0) or max(1, len(str(content)) // 4)
+                token_usage, metrics = self._extract_usage_metrics(used_model, usage, latency_ms)
                 self._record_event(
                     task_type, used_model, provider, messages, content, latency_ms,
                     trace_id=trace_id, trace_steps=trace_steps, route_reason=f"chat_with_tools 显式指定/路由到 {used_model}",
                     temperature=temperature, max_tokens=None, fallback=False,
+                    token_usage=token_usage, metrics=metrics,
                 )
                 return result
             except Exception as e:
@@ -199,14 +207,18 @@ class LLMRouter:
                 fallback = self._pool.get_for_model(fallback_model)
                 logger.warning(f"[LLMRouter] 降级到纯文本 {fallback.model}")
                 try:
-                    content = fallback.chat(messages)
+                    raw = fallback.chat_raw(messages)
                     latency_ms = int((time.time() - start) * 1000)
+                    content = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+                    usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
+                    token_usage, metrics = self._extract_usage_metrics(fallback.model, usage, latency_ms)
                     self._record_event(
                         task_type, fallback.model, fallback, messages, content, latency_ms,
                         trace_id=trace_id, trace_steps=trace_steps, route_reason=f"工具调用失败后降级到 {fallback_model}",
                         temperature=temperature, fallback=True,
+                        token_usage=token_usage, metrics=metrics,
                     )
-                    return {"content": content, "tool_calls": None, "model": fallback.model, "usage": {}}
+                    return {"content": content, "tool_calls": None, "model": fallback.model, "usage": usage}
                 except Exception as fe:
                     logger.error(f"[LLMRouter] 降级也失败: {fe}")
                     raise
@@ -274,6 +286,26 @@ class LLMRouter:
         p, m, _ = self._resolve_provider_with_reason(task_type, model, team_id, **kwargs)
         return p, m
 
+    def _extract_usage_metrics(
+        self,
+        model: str,
+        usage: Dict[str, Any],
+        latency_ms: int,
+    ) -> tuple[int, Dict[str, Any]]:
+        """从 LLM 原始 usage 中提取 token 与成本指标。"""
+        input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+        output_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        total_tokens = usage.get("total_tokens") or (input_tokens + output_tokens)
+        cost = estimate_cost(model, input_tokens, output_tokens)
+        metrics = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost,
+            "latency_ms": latency_ms,
+        }
+        return int(total_tokens), metrics
+
     def _record_event(
         self,
         task_type: str,
@@ -290,6 +322,7 @@ class LLMRouter:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         fallback: bool = False,
+        metrics: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """把一次 LLM 调用记录到 EvalEventStore，供 EvalCenter 事件驱动刷新。"""
         if not is_tracked_feature(task_type):
@@ -324,6 +357,7 @@ class LLMRouter:
                     },
                 })
 
+            llm_metrics = metrics or {}
             trace_steps.append({
                 "step_id": f"step-llm-{trace_id or uuid.uuid4()}",
                 "type": "llm",
@@ -339,6 +373,9 @@ class LLMRouter:
                     "provider": provider_name,
                     "latency_ms": latency_ms,
                     "token_usage": token_usage or max(1, len(text) // 4),
+                    "input_tokens": llm_metrics.get("input_tokens", 0),
+                    "output_tokens": llm_metrics.get("output_tokens", 0),
+                    "cost_usd": llm_metrics.get("cost_usd", 0),
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "route_reason": route_reason,
@@ -365,6 +402,7 @@ class LLMRouter:
                     "fallback": fallback,
                     "messages_summary": self._summarize_messages(messages),
                 },
+                metrics=metrics or {},
             )
             get_eval_event_store().add(event)
 
@@ -457,10 +495,20 @@ class LLMRouter:
         finally:
             latency_ms = int((time.time() - start) * 1000)
             content = "".join(buffer)
+            # 流式没有真实 usage，按字符粗略估算并记录为 estimated
+            est_token = max(1, len(content) // 4)
+            metrics = {
+                "input_tokens": 0,
+                "output_tokens": est_token,
+                "total_tokens": est_token,
+                "cost_usd": estimate_cost(used_model, 0, est_token),
+                "latency_ms": latency_ms,
+                "stream": True,
+            }
             self._record_event(
                 task_type, used_model, provider, messages, content, latency_ms,
                 trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
-                fallback=fallback,
+                fallback=fallback, token_usage=est_token, metrics=metrics,
             )
 
 

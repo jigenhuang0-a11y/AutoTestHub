@@ -415,7 +415,7 @@ def answer(
     ltm_ctx = ""
     if history:
         mm = get_memory_for(user_id=user_id, mode="knowledge")
-        ltm_ctx = build_long_term_context(mm, question)
+        ltm_ctx = build_long_term_context(mm, question, trace_id=trace_id)
 
     ret_start = _now_ms()
     hits = retrieve(kb_id, question, trace_id=trace_id)
@@ -608,7 +608,7 @@ def answer_stream(
     ltm_ctx = ""
     if history:
         mm = get_memory_for(user_id=user_id, mode="knowledge")
-        ltm_ctx = build_long_term_context(mm, question)
+        ltm_ctx = build_long_term_context(mm, question, trace_id=trace_id)
 
     ret_start = _now_ms()
     hits = retrieve(kb_id, question, trace_id=trace_id)
@@ -873,7 +873,7 @@ def chat_stream(
     ltm_ctx = ""
     if history:
         mm = get_memory_for(user_id=user_id, mode="chat")
-        ltm_ctx = build_long_term_context(mm, question)
+        ltm_ctx = build_long_term_context(mm, question, trace_id=trace_id)
 
     # 深度思考模式：提高最大 token 数，保证输出内容足够充实
     extra_params: dict = {}

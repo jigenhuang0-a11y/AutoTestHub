@@ -19,7 +19,7 @@ from typing import Optional
 
 from app.core.task_store import get_task_store, ModelConfigRecord
 from app.core.provider_pool import get_provider_pool
-from app.core.eval_event_store import build_event, get_eval_event_store, TraceContext
+from app.core.eval_event_store import build_event, get_eval_event_store, TraceContext, estimate_cost
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +92,26 @@ async def generate_text(
 
     async with TraceContext.async_bind(effective_trace_id):
         start = time.time()
-        result = provider.chat([
+        raw = provider.chat_raw([
             {"role": "system", "content": "你是资深测试开发工程师。"},
             {"role": "user", "content": prompt},
         ], temperature=temperature)
         latency_ms = int((time.time() - start) * 1000)
-        content = result.get("content", "") if isinstance(result, dict) else str(result)
+        content = (raw.get("content", "") if isinstance(raw, dict) else str(raw)).strip()
+
+        # 真实 token/cost 指标
+        usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
+        input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+        output_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        total_tokens = usage.get("total_tokens") or (input_tokens + output_tokens) or max(1, len(content) // 4)
+        cost_usd = estimate_cost(model_name, input_tokens, output_tokens)
+        metrics = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost_usd,
+            "latency_ms": latency_ms,
+        }
 
         # 记录到 EvalEventStore，供 EvalCenter 事件驱动刷新
         try:
@@ -125,7 +139,10 @@ async def generate_text(
                         "model": model_name,
                         "provider": provider.__class__.__name__,
                         "latency_ms": latency_ms,
-                        "token_usage": max(1, len(content) // 4),
+                        "token_usage": total_tokens,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cost_usd": cost_usd,
                     },
                 },
             ]
@@ -137,9 +154,10 @@ async def generate_text(
                 input_text=prompt,
                 output_text=content,
                 latency_ms=latency_ms,
-                token_usage=max(1, len(content) // 4),
+                token_usage=total_tokens,
                 trace_id=effective_trace_id,
                 trace_steps=trace_steps,
+                metrics=metrics,
             )
             get_eval_event_store().add(event)
             # 把本 LLM 步骤追加到父 trace（若父事件已存在）

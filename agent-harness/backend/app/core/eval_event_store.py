@@ -92,7 +92,22 @@ class AsyncTraceScope(_BaseTraceScope):
 DATA_DIR = os.environ.get("EVAL_DATA_DIR", "/app/data")
 EVENTS_PATH = os.path.join(DATA_DIR, "eval_events.json")
 
+# ============================================================
+# 业务功能工位（对应左侧菜单 / 产品能力）
+# ============================================================
+BUSINESS_FEATURES = {
+    "knowledge_chat",
+    "requirement_review",
+    "ai_testcase",
+    "data_factory",
+    "api_test",
+    "ui_auto",
+    "perf_test",
+}
+
+# ============================================================
 # 需要被 EvalCenter 监控的 AI 功能模块（对应 task_type / feature）
+# ============================================================
 TRACKED_FEATURES = {
     # ── 业务功能层（RAG / 问答 / 生成）──
     "knowledge_chat",
@@ -103,20 +118,25 @@ TRACKED_FEATURES = {
     "rag_search",
     "ai_testcase",
     "data_generation",
+    "data_factory",
     "requirement_review",
     "quality_check",
     "agent_loop",
     "evaluate",
     # ── AI 底座链路层（基础设施监控）──
     "llm_router",      # LLM 路由决策
+    "llm_call",        # LLM 实际生成
     "tool_call",       # 工具/MCP 调用执行
     "tool_gateway",    # 工具网关调用
     "vector_search",   # 向量检索（Milvus / 本地向量库）
     "db_query",        # 数据库持久化操作
+    "memory",          # 长短期记忆召回/沉淀
+    "judge",           # Judge 五维评分
 }
 
 # 友好显示名称
 FEATURE_LABELS = {
+    # 业务工位
     "knowledge_chat": "AI 知识库问答",
     "chat": "AI 日常问答",
     "fast_chat": "AI 快速问答",
@@ -125,26 +145,65 @@ FEATURE_LABELS = {
     "rag_search": "RAG 检索",
     "ai_testcase": "AI 用例生成",
     "data_generation": "数据工厂",
+    "data_factory": "数据工厂",
     "requirement_review": "需求评审",
     "quality_check": "质量检查",
     "agent_loop": "Agent 编排",
     "evaluate": "AI 评测",
+    "api_test": "接口测试",
+    "ui_auto": "UI 自动化",
+    "perf_test": "性能测试",
     # AI 底座链路层
     "llm_router": "LLM 路由决策",
+    "llm_call": "LLM 生成",
     "tool_call": "工具调用执行",
     "tool_gateway": "工具网关调用",
     "vector_search": "向量检索",
     "db_query": "数据库操作",
+    "memory": "长短期记忆",
+    "judge": "Judge 评分",
 }
 
 # 基础设施层功能（用于前端区分"业务功能"与"AI 底座"标签）
 INFRA_FEATURES = {
     "llm_router",
+    "llm_call",
     "tool_call",
     "tool_gateway",
     "vector_search",
     "db_query",
+    "memory",
+    "judge",
 }
+
+# 按模型大致单价（USD / 1K tokens），用于展示成本
+MODEL_COST: Dict[str, Dict[str, float]] = {
+    "deepseek-chat": {"input": 0.00027, "output": 0.0011},
+    "deepseek-reasoner": {"input": 0.00055, "output": 0.00219},
+    "glm-4-flash": {"input": 0.0, "output": 0.0},
+    "dashscope": {"input": 0.0005, "output": 0.0015},
+}
+
+
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """估算一次 LLM 调用的美元成本。"""
+    cost = MODEL_COST.get(model) or MODEL_COST.get("deepseek-chat")
+    return round(
+        input_tokens * cost["input"] / 1000.0 + output_tokens * cost["output"] / 1000.0,
+        6,
+    )
+
+
+def is_tracked_feature(feature: str) -> bool:
+    return feature in TRACKED_FEATURES
+
+
+def is_business_feature(feature: str) -> bool:
+    return feature in BUSINESS_FEATURES
+
+
+def is_infra_feature(feature: str) -> bool:
+    return feature in INFRA_FEATURES
 
 
 def _now_ms() -> int:
@@ -172,6 +231,8 @@ class EvalEvent:
     trace_steps: List[Dict] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at_ms: int = field(default_factory=_now_ms)
+    # 真实运行指标：token/cost/latency/memory/rag 等
+    metrics: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -194,6 +255,7 @@ class EvalEvent:
             "trace_steps": self.trace_steps,
             "metadata": self.metadata,
             "created_at_ms": self.created_at_ms,
+            "metrics": self.metrics,
         }
 
     @classmethod
@@ -218,6 +280,7 @@ class EvalEvent:
             trace_steps=data.get("trace_steps") or [],
             metadata=data.get("metadata") or {},
             created_at_ms=int(data.get("created_at_ms", 0) or 0),
+            metrics=data.get("metrics") or {},
         )
 
 
@@ -520,6 +583,7 @@ def build_event(
     trace_steps: Optional[List[Dict]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     status: str = "completed",
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> EvalEvent:
     now = datetime.now(timezone.utc)
     steps = trace_steps or []
@@ -543,6 +607,7 @@ def build_event(
         trace_steps=steps,
         metadata=metadata or {},
         status=status,
+        metrics=metrics or {},
     )
 
 
@@ -558,6 +623,7 @@ def record_infra_event(
     metadata: Optional[Dict[str, Any]] = None,
     status: str = "completed",
     trace_id: Optional[str] = None,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """AI 底座链路轻量埋点（不触发 Judge 评分，仅做全链路追踪）。
 
@@ -610,6 +676,7 @@ def record_infra_event(
             trace_steps=trace_steps,
             metadata={**(metadata or {}), "infra": True},
             status=status,
+            metrics=metrics or {},
         )
         get_eval_event_store().add(ev)
         # 若关联到了业务 trace，把当前底座步骤追加到父业务事件的 trace_steps 里，
