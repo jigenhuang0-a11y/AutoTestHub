@@ -304,6 +304,7 @@ class LLMRouter:
                     "start_time_ms": _now_ms() - latency_ms,
                     "end_time_ms": _now_ms() - latency_ms,
                     "detail": f"task_type={task_type} -> {used_model}",
+                    "output": used_model,
                     "metadata": {
                         "task_type": task_type,
                         "model": used_model,
@@ -320,6 +321,7 @@ class LLMRouter:
                 "start_time_ms": _now_ms() - latency_ms,
                 "end_time_ms": _now_ms(),
                 "detail": f"{used_model} / {provider_name}，耗时 {latency_ms}ms，token≈{token_usage or max(1, len(text) // 4)}",
+                "output": text[:500] + ("..." if len(text) > 500 else ""),
                 "metadata": {
                     "model": used_model,
                     "provider": provider_name,

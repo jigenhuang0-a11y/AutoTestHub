@@ -299,54 +299,52 @@
         </div>
 
         <el-divider>执行链路</el-divider>
-        <div v-if="detail.trace_steps && detail.trace_steps.length" class="trace-timeline">
-          <div v-for="(step, i) in detail.trace_steps" :key="step.step_id || i" class="trace-step" :class="'trace-type-' + step.type">
-            <div class="trace-left">
-              <div class="trace-dot" :class="step.status || 'completed'">{{ i + 1 }}</div>
-              <div v-if="i < detail.trace_steps.length - 1" class="trace-line" />
-            </div>
-            <div class="trace-body">
-              <div class="trace-title">{{ step.title }}</div>
-              <div class="trace-desc">{{ step.detail }}</div>
-              <div v-if="step.metadata" class="trace-meta">
+        <div v-if="detail.trace_steps && detail.trace_steps.length" class="trace-flow">
+          <div
+            v-for="(step, i) in detail.trace_steps"
+            :key="step.step_id || i"
+            class="trace-flow-item"
+            :class="{
+              'is-problem': isProblemStep(step, detail),
+              'is-last': i === detail.trace_steps.length - 1,
+              ['trace-type-' + step.type]: true,
+            }"
+            @click="openStepDetail(step)"
+          >
+            <div class="trace-flow-card">
+              <div class="trace-flow-header">
+                <div class="trace-flow-icon" :class="stepStatusType(step)">
+                  <el-icon :size="16"><component :is="stepIcon(step)" /></el-icon>
+                </div>
+                <div class="trace-flow-title">{{ step.title }}</div>
+                <el-tag v-if="isProblemStep(step, detail)" size="small" type="danger" effect="dark" class="trace-flow-warn">异常</el-tag>
+              </div>
+              <div class="trace-flow-output" :title="stepOutputText(step)">
+                {{ truncate(stepOutputText(step), 90) }}
+              </div>
+              <div class="trace-flow-meta">
                 <template v-if="step.type === 'route'">
-                  <el-tag size="small" type="info">task_type={{ step.metadata.task_type }}</el-tag>
-                  <el-tag size="small" type="success">model={{ step.metadata.model }}</el-tag>
-                  <div class="trace-reason">{{ step.metadata.reason }}</div>
+                  <el-tag size="small" type="info">{{ step.metadata?.task_type }}</el-tag>
+                  <el-tag size="small" type="success">{{ step.metadata?.model }}</el-tag>
                 </template>
                 <template v-else-if="step.type === 'retrieve'">
-                  <el-tag size="small" type="info">命中 {{ step.metadata.hit_count }} 个 chunk</el-tag>
-                  <div v-for="(h, hi) in step.metadata.hits || []" :key="hi" class="trace-hit">
-                    <span class="trace-hit-src">#{{ hi + 1 }} {{ h.source }}</span>
-                    <span class="trace-hit-score">score {{ h.score }}</span>
-                    <div class="trace-hit-text">{{ h.content }}</div>
-                  </div>
-                </template>
-                <template v-else-if="step.type === 'prompt'">
-                  <el-collapse v-if="step.metadata.system || step.metadata.user">
-                    <el-collapse-item title="System Prompt" v-if="step.metadata.system" name="sys">
-                      <pre class="trace-code">{{ step.metadata.system }}</pre>
-                    </el-collapse-item>
-                    <el-collapse-item title="User Prompt" v-if="step.metadata.user" name="user">
-                      <pre class="trace-code">{{ step.metadata.user }}</pre>
-                    </el-collapse-item>
-                  </el-collapse>
+                  <el-tag size="small" type="info">{{ step.metadata?.hit_count || 0 }} chunk</el-tag>
                 </template>
                 <template v-else-if="step.type === 'llm'">
-                  <el-tag size="small" type="info">model={{ step.metadata.model }}</el-tag>
-                  <el-tag size="small" type="info">provider={{ step.metadata.provider }}</el-tag>
-                  <el-tag size="small" type="warning">latency={{ step.metadata.latency_ms }}ms</el-tag>
-                  <el-tag size="small" type="success">tokens≈{{ step.metadata.token_usage }}</el-tag>
-                  <div v-if="step.metadata.route_reason" class="trace-reason">{{ step.metadata.route_reason }}</div>
+                  <el-tag size="small" type="info">{{ step.metadata?.model }}</el-tag>
+                  <el-tag size="small" type="warning">{{ step.metadata?.latency_ms }}ms</el-tag>
+                  <el-tag size="small" type="success">≈{{ step.metadata?.token_usage }} token</el-tag>
                 </template>
                 <template v-else-if="step.type === 'judge'">
-                  <el-tag size="small" :type="scoreTag(step.metadata.overall || 0)">综合 {{ step.metadata.overall || 0 }}</el-tag>
-                  <div v-if="step.metadata.issues && step.metadata.issues.length" class="trace-issues">
-                    <div v-for="(iss, ii) in step.metadata.issues" :key="ii" class="trace-issue">· {{ iss }}</div>
-                  </div>
-                  <div v-if="step.metadata.summary" class="trace-reason">{{ step.metadata.summary }}</div>
+                  <el-tag size="small" :type="scoreTag(step.metadata?.overall || 0)">综合 {{ step.metadata?.overall || 0 }}</el-tag>
+                </template>
+                <template v-else>
+                  <el-tag size="small" type="info">{{ step.status || 'completed' }}</el-tag>
                 </template>
               </div>
+            </div>
+            <div v-if="i < detail.trace_steps.length - 1" class="trace-flow-arrow">
+              <el-icon :size="18"><ArrowRight /></el-icon>
             </div>
           </div>
         </div>
@@ -357,6 +355,51 @@
           <el-step title="LLM 生成" :description="(detail.latency_ms ? detail.latency_ms + 'ms' : '—') + (detail.token_usage ? ' · ' + detail.token_usage + ' tokens' : '')" />
           <el-step title="Judge 评分" :description="(detail.overall ? '综合 ' + detail.overall : '未评分')" />
         </el-steps>
+
+        <!-- 链路节点诊断弹窗 -->
+        <el-dialog v-model="stepDetailVisible" title="节点诊断" width="520px" :destroy-on-close="true" class="step-detail-dialog">
+          <div v-if="selectedStep" class="step-detail-body">
+            <div class="step-detail-head">
+              <div class="step-detail-icon" :class="stepStatusType(selectedStep)">
+                <el-icon :size="20"><component :is="stepIcon(selectedStep)" /></el-icon>
+              </div>
+              <div>
+                <div class="step-detail-title">{{ selectedStep.title }}</div>
+                <div class="step-detail-status">
+                  <el-tag :type="stepStatusType(selectedStep)">{{ selectedStep.status || 'completed' }}</el-tag>
+                  <el-tag v-if="isProblemStep(selectedStep, detail)" type="danger" class="ml-2">疑似异常</el-tag>
+                </div>
+              </div>
+            </div>
+
+            <el-divider />
+
+            <div class="step-detail-section">
+              <div class="step-detail-label">节点输出</div>
+              <pre class="step-detail-output">{{ stepOutputText(selectedStep) || '（无输出）' }}</pre>
+            </div>
+
+            <div v-if="selectedStep.metadata && Object.keys(selectedStep.metadata).length" class="step-detail-section">
+              <div class="step-detail-label">关键指标</div>
+              <div class="step-detail-metrics">
+                <div v-for="(v, k) in selectedStep.metadata" :key="k" class="step-detail-metric">
+                  <span class="step-detail-key">{{ k }}</span>
+                  <span class="step-detail-val">{{ typeof v === 'object' ? JSON.stringify(v).slice(0, 120) : v }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="isProblemStep(selectedStep, detail)" class="step-detail-section">
+              <div class="step-detail-label">为什么出问题？</div>
+              <div class="step-detail-diagnosis">{{ stepDiagnosis(selectedStep, detail) }}</div>
+            </div>
+
+            <div v-if="isProblemStep(selectedStep, detail)" class="step-detail-section">
+              <div class="step-detail-label">建议方案</div>
+              <div class="step-detail-solution">{{ stepSolution(selectedStep, detail) }}</div>
+            </div>
+          </div>
+        </el-dialog>
 
         <el-divider>检索上下文（RAG 引用）</el-divider>
         <div v-if="(detail.retrieved_docs || []).length" class="doc-list">
@@ -441,7 +484,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download, ArrowRight, User, Switch, Search, Document, Cpu, CircleCheck } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -486,6 +529,8 @@ const records = ref([])
 const recordsLoading = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
+const stepDetailVisible = ref(false)
+const selectedStep = ref(null)
 const demoLoading = ref(false)
 const isTracking = ref(false)
 const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
@@ -918,6 +963,103 @@ function traceActiveStep(row) {
   return step
 }
 
+function stepStatusType(step) {
+  if (step.status === 'failed' || step.status === 'error') return 'danger'
+  if (step.status === 'running') return 'primary'
+  return 'success'
+}
+
+function isProblemStep(step, detailRow) {
+  if (step.status === 'failed' || step.status === 'error') return true
+  const m = step.metadata || {}
+  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) return true
+  if (step.type === 'llm' && m.token_usage === 1) return true
+  if (step.type === 'llm' && m.latency_ms > 10000) return true
+  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) return true
+  if (step.type === 'route' && m.fallback) return true
+  // 若整条记录 judge 为 0，且该步骤是生成/评分相关，标红提示
+  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) return true
+  return false
+}
+
+const stepIconMap = {
+  input: User,
+  route: Switch,
+  retrieve: Search,
+  prompt: Document,
+  llm: Cpu,
+  judge: Medal,
+}
+
+function stepIcon(step) {
+  return stepIconMap[step.type] || CircleCheck
+}
+
+function stepOutputText(step) {
+  if (step.output) return step.output
+  if (step.type === 'input') return step.detail || ''
+  if (step.type === 'route') return (step.metadata?.model) || ''
+  if (step.type === 'llm') return (step.metadata?.route_reason) || ''
+  return step.detail || ''
+}
+
+function openStepDetail(step) {
+  selectedStep.value = step
+  stepDetailVisible.value = true
+}
+
+function stepDiagnosis(step, detailRow) {
+  const m = step.metadata || {}
+  if (step.status === 'failed' || step.status === 'error') {
+    return `该步骤执行失败（status=${step.status}）。可能是模型接口异常、超时或依赖服务（如向量库、路由配置）不可用。`
+  }
+  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) {
+    return 'Judge 评分返回 0 或未生成评分。常见原因：Judge LLM 未被触发、Judge prompt 未命中输出格式、或评分维度字段缺失。'
+  }
+  if (step.type === 'llm' && m.token_usage === 1) {
+    return 'LLM 生成 token 数极少，疑似输出被截断、模型拒绝回答、或 max_tokens/temperature 设置过严。'
+  }
+  if (step.type === 'llm' && m.latency_ms > 10000) {
+    return 'LLM 调用耗时超过 10 秒，存在明显延迟。可能当前模型负载高、网络抖动，或提示词过长导致首 token 时间增加。'
+  }
+  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) {
+    return '检索未命中任何上下文片段。可能是知识库为空、向量相似度阈值过高、query 与文档差异大，或未走 RAG 路径。'
+  }
+  if (step.type === 'route' && m.fallback) {
+    return '路由命中 fallback 模型。说明首选模型不可用、配额耗尽，或路由规则未覆盖当前 task_type。'
+  }
+  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
+    return '本记录综合评分为 0，该步骤可能是导致未评分的环节，建议检查 Judge 执行链路或模型输出完整性。'
+  }
+  return '该步骤暂未发现明显异常。点击可查看详细指标与输出内容。'
+}
+
+function stepSolution(step, detailRow) {
+  const m = step.metadata || {}
+  if (step.status === 'failed' || step.status === 'error') {
+    return '查看 ai-orchestrator 容器日志，定位模型/RAG/路由层的异常栈；确认 API Key、网络与依赖服务状态。'
+  }
+  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) {
+    return '1) 检查 eval_loop.py 是否被触发；2) 确认 Judge prompt 要求返回 JSON 维度分数；3) 在日志中搜索 "Judge" 查看解析失败原因。'
+  }
+  if (step.type === 'llm' && m.token_usage === 1) {
+    return '1) 提高 max_tokens；2) 检查 temperature/top_p 是否过低；3) 查看原始输出是否为空/截断；4) 必要时换模型重试。'
+  }
+  if (step.type === 'llm' && m.latency_ms > 10000) {
+    return '1) 启用流式响应以提升首 token 体验；2) 缩短 prompt；3) 切换更低延迟模型；4) 检查网络与模型服务端负载。'
+  }
+  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) {
+    return '1) 确认知识库已上传并建立索引；2) 调低向量检索阈值；3) 检查 query 编码器是否与索引一致；4) 如无需 RAG，可明确关闭 RAG 开关。'
+  }
+  if (step.type === 'route' && m.fallback) {
+    return '1) 检查 model_configs 中首选模型配置是否生效；2) 查看路由表是否覆盖 task_type；3) 确认首选模型配额/网络正常。'
+  }
+  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
+    return '从 LLM 生成输出、Judge 评分结果、路由选择三个方向排查，确保每个步骤都有有效输出且 Judge 能正确解析。'
+  }
+  return '保持当前配置，定期观察该步骤指标趋势。'
+}
+
 function barColor(score) {
   if (score >= 85) return '#4ade80'
   if (score >= 60) return '#fbbf24'
@@ -1205,138 +1347,224 @@ onUnmounted(() => {
 .gap-list li { color: #fcd34d; }
 .rec-list li { color: #a5f3fc; }
 
-.trace-timeline {
-  position: relative;
-  padding: 8px 0 24px;
+/* 横向执行链路流程图 */
+.trace-flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 12px 4px 24px;
+  overflow-x: auto;
 }
 
-.trace-step {
+.trace-flow-item {
   display: flex;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-
-.trace-left {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  width: 32px;
+  flex: 1;
+  min-width: 160px;
+  max-width: 260px;
+  cursor: pointer;
+}
+
+.trace-flow-card {
+  flex: 1;
+  min-height: 130px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.2);
+  transition: all 0.2s ease;
+}
+
+.trace-flow-item:hover .trace-flow-card {
+  transform: translateY(-2px);
+  border-color: rgba(56, 189, 248, 0.4);
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
+}
+
+.trace-flow-item.is-problem .trace-flow-card {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(69, 26, 26, 0.35);
+  box-shadow: 0 0 16px rgba(248, 113, 113, 0.18);
+}
+
+.trace-flow-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.trace-flow-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.trace-flow-icon.success { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.trace-flow-icon.primary { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.trace-flow-icon.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+
+.trace-flow-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  color: #e2e8f0;
+}
+
+.trace-flow-warn {
   flex-shrink: 0;
 }
 
-.trace-dot {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #67c23a;
-  color: #fff;
+.trace-flow-output {
+  min-height: 38px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.45);
+  color: #cbd5e1;
   font-size: 12px;
-  line-height: 28px;
-  text-align: center;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.trace-dot.running {
-  background: #409eff;
-  animation: pulse 1.5s infinite;
+.trace-flow-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.trace-dot.failed {
-  background: #f56c6c;
+.trace-flow-meta .el-tag {
+  margin: 0;
 }
 
-.trace-line {
-  width: 2px;
-  flex: 1;
-  min-height: 24px;
-  background: #4a5568;
-  margin-top: 4px;
+.trace-flow-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  flex-shrink: 0;
+  color: #64748b;
 }
 
-.trace-body {
-  flex: 1;
-  margin-left: 12px;
-  padding: 12px;
-  border-radius: 8px;
-  background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(148, 163, 184, 0.1);
+.trace-flow-item.is-problem .trace-flow-arrow {
+  color: #f87171;
 }
 
-.trace-title {
+/* 节点诊断弹窗 */
+.step-detail-dialog :deep(.el-dialog__body) {
+  padding-top: 10px;
+}
+
+.step-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.step-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: #fff;
+}
+
+.step-detail-icon.success { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.step-detail-icon.primary { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.step-detail-icon.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+
+.step-detail-title {
   font-weight: 600;
+  font-size: 16px;
   color: #e2e8f0;
   margin-bottom: 6px;
 }
 
-.trace-desc {
-  color: #94a3b8;
+.step-detail-status {
+  display: flex;
+  gap: 8px;
+}
+
+.step-detail-section {
+  margin-bottom: 18px;
+}
+
+.step-detail-label {
   font-size: 13px;
-  line-height: 1.5;
+  font-weight: 600;
+  color: #94a3b8;
   margin-bottom: 8px;
 }
 
-.trace-meta .el-tag {
-  margin: 0 6px 6px 0;
-}
-
-.trace-reason {
-  margin-top: 6px;
-  padding: 8px;
-  background: rgba(15, 23, 42, 0.5);
-  border-radius: 6px;
-  color: #cbd5e1;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.trace-hit {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(15, 23, 42, 0.5);
-  border-radius: 6px;
-}
-
-.trace-hit-src {
-  color: #60a5fa;
-  font-weight: 500;
-  font-size: 12px;
-}
-
-.trace-hit-score {
-  float: right;
-  color: #34d399;
-  font-size: 12px;
-}
-
-.trace-hit-text {
-  color: #94a3b8;
-  font-size: 12px;
-  margin-top: 4px;
-  line-height: 1.5;
-}
-
-.trace-code {
+.step-detail-output {
   margin: 0;
   padding: 10px;
+  border-radius: 8px;
   background: #0f172a;
-  border-radius: 6px;
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
+  max-height: 220px;
   overflow: auto;
 }
 
-.trace-issues {
-  margin-top: 8px;
+.step-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
 }
 
-.trace-issue {
-  color: #f87171;
+.step-detail-metric {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.5);
   font-size: 12px;
-  line-height: 1.6;
 }
+
+.step-detail-key {
+  display: block;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.step-detail-val {
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.step-detail-diagnosis,
+.step-detail-solution {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.step-detail-diagnosis {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  color: #fecaca;
+}
+
+.step-detail-solution {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189,  248, 0.25);
+  color: #bae6fd;
+}
+
+.ml-2 { margin-left: 8px; }
 
 @keyframes pulse {
   0% { opacity: 1; }

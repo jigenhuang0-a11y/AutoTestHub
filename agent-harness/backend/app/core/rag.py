@@ -61,6 +61,7 @@ def _make_input_step(question: str, history: Optional[List[Dict]] = None) -> Dic
         "start_time_ms": _now_ms(),
         "end_time_ms": _now_ms(),
         "detail": question,
+        "output": question,
         "metadata": {
             "history_turns": len(history) if history else 0,
             "enable_reasoning": False,
