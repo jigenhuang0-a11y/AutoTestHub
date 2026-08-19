@@ -423,21 +423,6 @@
           </div>
         </template>
 
-        <template v-if="detail.metadata?.hasScore">
-          <el-divider>Judge 评分明细</el-divider>
-          <div class="dim-bars">
-            <div v-for="d in dimList" :key="d.key" class="dim-bar-item">
-              <span class="dim-bar-name">{{ d.label }}</span>
-              <el-progress :percentage="detail[d.key] || 0" :stroke-width="12" :show-text="false" :color="barColor(detail[d.key] || 0)" />
-              <span class="dim-bar-val" :class="scoreClass(detail[d.key] || 0)">{{ detail[d.key] }}</span>
-            </div>
-          </div>
-          <div class="reason-box">
-            <div class="reason-title">Judge 结论</div>
-            <p>{{ detail.reason || '（无说明）' }}</p>
-          </div>
-        </template>
-
         <!-- 实时流水线记录仪：幻觉根因定位 + 修改建议 -->
         <template v-if="(detail.issues && detail.issues.length) || (detail.retrieval_gaps && detail.retrieval_gaps.length) || (detail.recommendations && detail.recommendations.length)">
           <el-divider content-position="left">
