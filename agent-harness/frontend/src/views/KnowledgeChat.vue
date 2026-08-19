@@ -1617,7 +1617,6 @@ const resetCurrentChatState = () => {
   currentTaskId.value = ''
   try {
     localStorage.removeItem('kb_current_task_id')
-    localStorage.removeItem('kb_event_seq')
   } catch (e) {}
 
   // 3. 清掉流式相关状态
@@ -2957,6 +2956,9 @@ const stopStreaming = () => {
   // 4. 清理流式状态
   stopTimer()
   stopTypewriter()
+  stopTaskPolling()
+  currentTaskId.value = ''
+  try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
   answering.value = false
   streamingText.value = ''
   fullStreamingText.value = ''
@@ -3354,104 +3356,75 @@ const sendMessage = async () => {
   }
 }
 
-// ── 切换页面后重连后台生成任务，从断点 offset 继续接收增量 ──
-async function reconnectTask() {
+// ── 切换页面后轮询后台任务结果（不重连 SSE，真正异步解耦页面生命周期） ──
+let taskPollTimer = null
+
+async function pollTaskResult() {
   const taskId = currentTaskId.value
   if (!taskId) return
   const token = localStorage.getItem('access_token')
-  const url = `/api/v1/knowledge/chat/task/${taskId}/stream?offset=${eventSeq}`
+  const url = `/api/v1/knowledge/chat/task/${taskId}/result`
   try {
     const resp = await fetch(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${token}` },
     })
     if (!resp.ok) {
-      console.warn('[Reconnect] 任务重连失败 status', resp.status)
+      console.warn('[Poll] 任务查询失败 status', resp.status)
       return
     }
-    answering.value = true
-    streamReader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await streamReader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const blocks = buffer.split('\n\n')
-      buffer = blocks.pop() || ''
-      for (const block of blocks) {
-        handleReconnectBlock(block)
-      }
+    const data = await resp.json()
+    if (!data.exists) {
+      // 任务已不存在（如已过期）：放弃轮询，回退到历史加载
+      console.log('[Poll] 任务不存在，停止轮询', taskId)
+      stopTaskPolling()
+      currentTaskId.value = ''
+      try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+      return
     }
-    if (buffer.trim()) handleReconnectBlock(buffer.trim())
+    if (data.error) {
+      console.warn('[Poll] 后台任务出错', data.error)
+      stopTaskPolling()
+      currentTaskId.value = ''
+      try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+      ElMessage.error('生成任务失败：' + data.error)
+      return
+    }
+    if (data.done && data.full_answer) {
+      // 任务完成：直接渲染完整答案，无需再等 SSE 增量
+      stopTaskPolling()
+      const doneTaskId = taskId
+      currentTaskId.value = ''
+      try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
+      if (doneTaskId && finishedTaskIds.has(doneTaskId)) {
+        console.log('[Poll] 忽略已处理过的任务', doneTaskId)
+        return
+      }
+      if (doneTaskId) finishedTaskIds.add(doneTaskId)
+      finishStreaming(data.full_answer, [], null, 0, {})
+      return
+    }
+    // 未完成：保持“生成中”状态，继续轮询
+    if (!answering.value) {
+      answering.value = true
+      currentThinkingStatus.value = reasoningMode.value === 'reasoning' ? '深度思考中...' : '生成中...'
+    }
   } catch (e) {
-    console.warn('[Reconnect] 重连异常', e)
-  } finally {
-    streamReader = null
+    console.warn('[Poll] 轮询异常', e)
   }
 }
 
-function handleReconnectBlock(block) {
-  const lines = block.split('\n')
-  for (const rawLine of lines) {
-    const line = rawLine.trim()
-    if (!line || !line.startsWith('data: ')) continue
-    const payload = line.substring(6)
-    if (payload === '[DONE]') continue
-    try {
-      const data = JSON.parse(payload)
-      switch (data.type) {
-        case 'status':
-          if (data.content && reasoningMode.value === 'reasoning') {
-            thinkingSteps.value = [...thinkingSteps.value, data.content]
-            activeStreamingThinkingPanel.value = ['reasoning']
-            scrollToBottom()
-          }
-          break
-        case 'reasoning':
-          if (data.content && reasoningMode.value === 'reasoning') {
-            streamingReasoning.value += data.content
-            isReasoningPhase.value = true
-            activeStreamingThinkingPanel.value = ['reasoning']
-            scrollToBottom()
-          }
-          break
-        case 'token':
-          if (reasoningMode.value === 'reasoning') {
-            if (isReasoningPhase.value) {
-              isReasoningPhase.value = false
-              streamingText.value = answerBuffer.value || ''
-            }
-            answerBuffer.value += data.content
-            streamingText.value += data.content
-            scrollToBottom()
-          } else {
-            streamingText.value += data.content
-            scrollToBottom()
-          }
-          break
-        case 'done':
-          const reconnectDoneTaskId = data.task_id || currentTaskId.value
-          currentTaskId.value = ''
-          try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
-          if (reconnectDoneTaskId && finishedTaskIds.has(reconnectDoneTaskId)) {
-            console.log('[Reconnect] 忽略已处理过的 done 事件，task:', reconnectDoneTaskId)
-            break
-          }
-          if (reconnectDoneTaskId) finishedTaskIds.add(reconnectDoneTaskId)
-          const finalAnswer = data.full_answer || answerBuffer.value || streamingText.value || ''
-          const ctx = data.context_docs || []
-          const rt = data.response_time || elapsedTime.value * 1000
-          finishStreaming(finalAnswer, ctx, null, rt, {})
-          break
-        case 'error':
-          console.warn('[Reconnect] 后端错误', data.message)
-          break
-      }
-      if (data.type !== 'meta') eventSeq += 1
-    } catch (e) {
-      console.warn('[Reconnect] parse error', e)
-    }
+function startTaskPolling() {
+  stopTaskPolling()
+  // 立即查一次，再每 2 秒轮询，彻底解耦页面生命周期
+  pollTaskResult()
+  taskPollTimer = setInterval(pollTaskResult, 2000)
+}
+
+function stopTaskPolling() {
+  if (taskPollTimer) {
+    clearInterval(taskPollTimer)
+    taskPollTimer = null
   }
 }
 
@@ -3985,12 +3958,10 @@ onMounted(async () => {
     messages.value = restoredMessages.map(m => ({ ...m }))
     currentSessionId.value = restoredSessionId
     currentMessageId.value = null
-    // 恢复未完成的后台任务 id 与已消费事件序号，用于切回页面时继续接收增量
+    // 恢复未完成的后台任务 id，用于切回页面时异步轮询结果（不再依赖事件序号断点）
     const savedTaskId = localStorage.getItem('kb_current_task_id')
-    const savedSeq = parseInt(localStorage.getItem('kb_event_seq') || '0', 10) || 0
     if (savedTaskId) {
       currentTaskId.value = savedTaskId
-      eventSeq = savedSeq
     }
     // 若最后一条是离开页面时中断的 AI 消息（兼容旧版 localStorage 数据），清理流式占位状态
     const lastMsg = messages.value[messages.value.length - 1]
@@ -4041,14 +4012,14 @@ onMounted(async () => {
   setupCodeBlockCopy()
   loadSkills() // 加载 Skills
 
-  // 6. 若离开页面时存在未完成的后台生成任务，切回后自动重连继续接收增量
+  // 6. 若离开页面时存在未完成的后台生成任务，切回后异步轮询结果（不重连 SSE）
   if (currentTaskId.value) {
-    // 等待本轮初始化（历史/消息恢复）完成再重连，避免与初次渲染竞争
+    // 等待本轮初始化（历史/消息恢复）完成再轮询，避免与初次渲染竞争
     nextTick(async () => {
       try {
-        await reconnectTask()
+        startTaskPolling()
       } catch (e) {
-        console.warn('[Reconnect] 自动重连失败', e)
+        console.warn('[Poll] 自动轮询启动失败', e)
       }
     })
   }
@@ -4092,13 +4063,17 @@ onUnmounted(() => {
     clearTimeout(persistTimer)
     persistTimer = null
   }
-  // 后台生成任务不依赖前端连接：离开页面时只需保存 task_id 与已消费事件序号，
-  // 回来时通过 reconnectTask 从断点继续接收增量（后端任务仍在跑，结果自动落库）。
-  if (currentTaskId.value) {
+  // 后台生成任务不依赖前端连接：离开页面时只需保存 task_id，
+  // 回来时通过轮询 result 接口获取结果（后端任务仍在跑，结果自动落库）。
+  // 若本轮发送已结束或用户主动停止，则清理 task_id，避免回来后误轮询。
+  stopTaskPolling()
+  if (currentTaskId.value && answering.value) {
     try {
       localStorage.setItem('kb_current_task_id', currentTaskId.value)
-      localStorage.setItem('kb_event_seq', String(eventSeq))
     } catch (e) { /* ignore */ }
+  } else {
+    currentTaskId.value = ''
+    try { localStorage.removeItem('kb_current_task_id') } catch (e) {}
   }
   persistState()
 })

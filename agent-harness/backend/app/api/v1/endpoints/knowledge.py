@@ -134,6 +134,7 @@ router = APIRouter(tags=["knowledge-rag"])
 class _GenTask:
     def __init__(self):
         self.events = []          # 按序累积的所有 SSE 事件
+        self.full_answer = ''     # 累积的完整答案（delta 事件拼接），供前端脱离 SSE 查询结果
         self.done = False
         self.error = None
         self.lock = threading.Lock()
@@ -159,6 +160,9 @@ def _run_gen_task(task_id: str, gen_callable, on_done=None):
         for event in gen_callable():
             with task.lock:
                 task.events.append(event)
+                # 累积完整答案，供前端通过 result 接口脱离 SSE 查询最终结果
+                if event.get("type") == "delta":
+                    task.full_answer += event.get("content", "")
         with task.lock:
             task.done = True
     except Exception as e:  # noqa: BLE001
@@ -592,6 +596,27 @@ def reconnect_task_stream(task_id: str, offset: int = 0):
             yield ev
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/chat/task/{task_id}/result", summary="查询后台生成任务结果（脱离 SSE 的轻量轮询）")
+def get_task_result(task_id: str):
+    """
+    前端切换页面/会话后，不重连 SSE，而是轮询本接口获取任务结果：
+    - done=True 且 full_answer 非空：直接渲染完整答案，无需再占用长连接；
+    - done=False：前端标记“生成中”并继续轮询；
+    - 任务不存在：返回 exists=False，前端回退到历史记录加载。
+    """
+    task = GEN_TASKS.get(task_id)
+    if task is None:
+        return {"exists": False, "done": False, "error": None, "full_answer": "", "events_count": 0}
+    with task.lock:
+        return {
+            "exists": True,
+            "done": task.done,
+            "error": task.error,
+            "full_answer": task.full_answer,
+            "events_count": len(task.events),
+        }
 
 
 @router.get("/knowledge-bases/{kb_id}/chat_history/", summary="知识库会话历史")
