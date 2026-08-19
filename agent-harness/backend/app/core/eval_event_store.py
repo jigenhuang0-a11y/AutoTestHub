@@ -477,6 +477,11 @@ def build_event(
     status: str = "completed",
 ) -> EvalEvent:
     now = datetime.now(timezone.utc)
+    steps = trace_steps or []
+    # 给每个 trace_step 分配唯一 step_id，便于 EvalCenter 去重/稳定 key
+    for s in steps:
+        if not s.get("step_id"):
+            s["step_id"] = str(uuid.uuid4())
     return EvalEvent(
         event_id=str(uuid.uuid4()),
         timestamp=now.isoformat(),
@@ -490,7 +495,7 @@ def build_event(
         token_usage=token_usage,
         trace_id=trace_id or str(uuid.uuid4()),
         retrieved_docs=retrieved_docs or [],
-        trace_steps=trace_steps or [],
+        trace_steps=steps,
         metadata=metadata or {},
         status=status,
     )
@@ -532,9 +537,17 @@ def record_infra_event(
         # 显式传入优先；否则自动从全链路 TraceContext 取（无侵入挂载底座子链路）
         effective_trace_id = trace_id or TraceContext.get()
         # 若未显式传入 trace_steps，则按默认步骤构造一条链路记录
+        # 底座功能映射到标准可视化类型，EvalCenter 才能按工位展示正确图标/颜色
         if not trace_steps:
+            infra_type_map = {
+                "tool_call": "tool",
+                "tool_gateway": "tool",
+                "vector_search": "retrieve",
+                "db_query": "db",
+                "llm_router": "route",
+            }
             trace_steps = [{
-                "type": "tool" if feature in ("tool_call", "tool_gateway", "vector_search", "db_query") else "route",
+                "type": infra_type_map.get(feature, "tool"),
                 "title": FEATURE_LABELS.get(feature, feature),
                 "status": status,
                 "metadata": metadata or {},

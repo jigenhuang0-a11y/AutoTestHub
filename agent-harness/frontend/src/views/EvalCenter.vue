@@ -325,12 +325,16 @@
             }"
             @click="openStepDetail(step)"
           >
+            <div class="workstation-no">工位 {{ i + 1 }}</div>
             <div class="trace-flow-card">
               <div class="trace-flow-header">
                 <div class="trace-flow-icon" :class="stepStatusType(step)">
                   <el-icon :size="16"><component :is="stepIcon(step)" /></el-icon>
                 </div>
-                <div class="trace-flow-title">{{ step.title }}</div>
+                <div class="trace-flow-title-block">
+                  <div class="trace-flow-title">{{ step.title }}</div>
+                  <div class="trace-flow-subtitle" :title="stepWorkstationName(step)">{{ stepWorkstationName(step) }}</div>
+                </div>
                 <el-tag v-if="isProblemStep(step, detail)" size="small" type="danger" effect="dark" class="trace-flow-warn">异常</el-tag>
               </div>
               <div class="trace-flow-body">
@@ -346,25 +350,14 @@
                   暂无输入输出详情
                 </div>
               </div>
-              <div class="trace-flow-meta">
-                <template v-if="step.type === 'route'">
-                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.task_type }}</el-tag>
-                  <el-tag size="small" effect="dark" type="success">{{ step.metadata?.model }}</el-tag>
-                </template>
-                <template v-else-if="step.type === 'retrieve'">
-                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.hit_count || 0 }} chunk</el-tag>
-                </template>
-                <template v-else-if="step.type === 'llm'">
-                  <el-tag size="small" effect="dark" type="info">{{ step.metadata?.model }}</el-tag>
-                  <el-tag size="small" effect="dark" type="warning">{{ step.metadata?.latency_ms }}ms</el-tag>
-                  <el-tag size="small" effect="dark" type="success">≈{{ step.metadata?.token_usage }} token</el-tag>
-                </template>
-                <template v-else-if="step.type === 'judge'">
-                  <el-tag size="small" effect="dark" :type="scoreTag(step.metadata?.overall || 0)">综合 {{ step.metadata?.overall || 0 }}</el-tag>
-                </template>
-                <template v-else>
-                  <el-tag size="small" effect="dark" type="info">{{ step.status || 'completed' }}</el-tag>
-                </template>
+              <div v-if="stepTags(step).length" class="trace-flow-meta">
+                <el-tag
+                  v-for="(tag, idx) in stepTags(step)"
+                  :key="idx"
+                  size="small"
+                  effect="dark"
+                  :type="tag.type"
+                >{{ tag.label }}</el-tag>
               </div>
             </div>
             <div v-if="i < detail.trace_steps.length - 1" class="trace-flow-arrow">
@@ -492,7 +485,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download, ArrowRight, User, Switch, Search, Document, Cpu, CircleCheck } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download, ArrowRight, User, Switch, Search, Document, Cpu, CircleCheck, Tools, Coin } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -997,10 +990,14 @@ function isProblemStep(step, detailRow) {
   if (step.status === 'failed' || step.status === 'error') return true
   const m = step.metadata || {}
   if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) return true
-  if (step.type === 'llm' && m.token_usage === 1) return true
+  // LLM 生成：只有真正输出为空/token=0 或响应极慢才标异常；
+  // "你好"这类正常短回复（token=1）不再误报。
+  if (step.type === 'llm' && (!m.token_usage || m.token_usage === 0)) return true
   if (step.type === 'llm' && m.latency_ms > 10000) return true
   if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) return true
   if (step.type === 'route' && m.fallback) return true
+  // 工具/DB/网关：底层调用失败才标异常
+  if (['tool', 'db'].includes(step.type) && (m.error || m.status === 'failed')) return true
   // 若整条记录 judge 为 0，且该步骤是生成/评分相关，标红提示
   if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) return true
   return false
@@ -1013,16 +1010,73 @@ const stepIconMap = {
   prompt: Document,
   llm: Cpu,
   judge: Medal,
+  tool: Tools,
+  db: Coin,
 }
 
 function stepIcon(step) {
   return stepIconMap[step.type] || CircleCheck
 }
 
+// 工位名称：展示该步骤具体由哪个组件完成（模型/工具/向量库/表）
+function stepWorkstationName(step) {
+  const m = step.metadata || {}
+  if (step.type === 'route') {
+    return m.model || m.provider || 'LLM 路由'
+  }
+  if (step.type === 'llm') {
+    return `${m.provider || 'LLM'} · ${m.model || 'unknown'}`
+  }
+  if (step.type === 'tool') {
+    if (m.tool) return `工具 · ${m.tool}`
+    if (m.tool_name) return `工具 · ${m.tool_name}`
+    if (m.gateway) return `网关 · ${m.gateway}`
+    return '工具/MCP 调用'
+  }
+  if (step.type === 'retrieve') {
+    if (m.kb_id) return `知识库 · ${m.kb_id}`
+    if (m.collection) return `向量索引 · ${m.collection}`
+    return '向量检索'
+  }
+  if (step.type === 'db') {
+    const tables = Array.isArray(m.tables) ? m.tables.join(', ') : (m.table || 'sqlite')
+    return `DB · ${tables}`
+  }
+  if (step.type === 'judge') {
+    return m.model ? `Judge · ${m.model}` : 'Judge 评分'
+  }
+  return step.title || '节点'
+}
+
+// 工位标签：展示关键运行指标/身份标识
+function stepTags(step) {
+  const m = step.metadata || {}
+  const tags = []
+  if (m.task_type && step.type === 'route') tags.push({ label: m.task_type, type: 'info' })
+  if (m.model) tags.push({ label: m.model, type: 'success' })
+  if (m.provider && !m.model) tags.push({ label: m.provider, type: 'success' })
+  if (m.tool) tags.push({ label: m.tool, type: 'warning' })
+  if (m.tool_name && !m.tool) tags.push({ label: m.tool_name, type: 'warning' })
+  if (Array.isArray(m.tables) && m.tables.length) tags.push({ label: m.tables.join(','), type: 'danger' })
+  if (m.kb_id) tags.push({ label: `KB:${m.kb_id}`, type: 'warning' })
+  if (m.collection) tags.push({ label: m.collection, type: 'warning' })
+  if (m.latency_ms) tags.push({ label: `${m.latency_ms}ms`, type: 'info' })
+  if (m.token_usage) tags.push({ label: `${m.token_usage} token`, type: 'primary' })
+  if (m.hit_count != null) tags.push({ label: `命中 ${m.hit_count}`, type: 'success' })
+  if (m.fallback) tags.push({ label: 'fallback', type: 'danger' })
+  return tags
+}
+
 function stepInputText(step) {
   if (step.input) return step.input
   if (step.type === 'input') return step.detail || ''
   if (step.type === 'route') return (step.metadata?.task_type) || ''
+  if (step.type === 'tool') return step.metadata?.tool || step.metadata?.tool_name || ''
+  if (step.type === 'retrieve') return step.metadata?.query || step.metadata?.kb_id || ''
+  if (step.type === 'db') {
+    const ops = step.metadata?.ops
+    return ops ? `INSERT=${ops.insert} UPDATE=${ops.update} DELETE=${ops.delete}` : ''
+  }
   return ''
 }
 
@@ -1031,10 +1085,15 @@ function stepOutputText(step) {
   if (step.type === 'input') return step.detail || ''
   if (step.type === 'route') return (step.metadata?.reason) || (step.metadata?.model) || ''
   if (step.type === 'llm') return step.detail || (step.metadata?.route_reason) || ''
+  if (step.type === 'tool') return step.metadata?.result || step.metadata?.status || ''
   if (step.type === 'retrieve') {
     const hit = step.metadata?.hit_count || 0
     const top = step.metadata?.top_score
     return `命中 ${hit} 条${top != null ? '，最高分 ' + top.toFixed(3) : ''}`
+  }
+  if (step.type === 'db') {
+    const tables = Array.isArray(step.metadata?.tables) ? step.metadata.tables.join(', ') : ''
+    return tables ? `涉及表: ${tables}` : '数据库写操作'
   }
   if (step.type === 'judge') return `综合 ${step.metadata?.overall || 0}`
   return step.detail || ''
@@ -1451,12 +1510,14 @@ onUnmounted(() => {
   min-width: 160px;
   max-width: 260px;
   cursor: pointer;
+  position: relative;
+  padding-top: 10px;
 }
 
 .trace-flow-card {
   flex: 1;
   min-height: 130px;
-  padding: 12px;
+  padding: 14px 12px 12px;
   border-radius: 12px;
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.15);
@@ -1497,16 +1558,54 @@ onUnmounted(() => {
 .trace-flow-icon.primary { background: linear-gradient(135deg, #3b82f6, #2563eb); }
 .trace-flow-icon.danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
 
-.trace-flow-title {
+.trace-flow-title-block {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trace-flow-title {
   font-weight: 600;
   font-size: 14px;
   color: #e2e8f0;
 }
 
+.trace-flow-subtitle {
+  font-size: 11.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workstation-no {
+  position: absolute;
+  top: -9px;
+  left: 8px;
+  z-index: 2;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #0f172a;
+  background: linear-gradient(135deg, #38bdf8, #22d3ee);
+  box-shadow: 0 2px 6px rgba(56, 189, 248, 0.25);
+}
+
 .trace-flow-warn {
   flex-shrink: 0;
 }
+
+/* 按底座工位类型着色边框，像工厂流水线区分不同工位 */
+.trace-flow-item.trace-type-route .trace-flow-card { border-top: 3px solid #3b82f6; }
+.trace-flow-item.trace-type-llm .trace-flow-card { border-top: 3px solid #22c55e; }
+.trace-flow-item.trace-type-tool .trace-flow-card { border-top: 3px solid #f59e0b; }
+.trace-flow-item.trace-type-retrieve .trace-flow-card { border-top: 3px solid #a855f7; }
+.trace-flow-item.trace-type-db .trace-flow-card { border-top: 3px solid #ec4899; }
+.trace-flow-item.trace-type-judge .trace-flow-card { border-top: 3px solid #eab308; }
+.trace-flow-item.trace-type-input .trace-flow-card { border-top: 3px solid #64748b; }
 
 .trace-flow-body {
   display: flex;
