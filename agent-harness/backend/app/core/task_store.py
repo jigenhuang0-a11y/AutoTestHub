@@ -2109,6 +2109,9 @@ class TaskStore:
 
     @contextmanager
     def _get_conn(self, trace_id: Optional[str] = None):
+        from app.core.eval_event_store import TraceContext
+
+        _trace_id = trace_id or TraceContext.get()
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -2154,7 +2157,7 @@ class TaskStore:
                             "read_only": False,
                         },
                         status="completed",
-                        trace_id=trace_id,
+                        trace_id=_trace_id,
                     )
                 except Exception:
                     pass

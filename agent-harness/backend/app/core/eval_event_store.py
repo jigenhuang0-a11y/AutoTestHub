@@ -6,6 +6,7 @@ EvalCenter 的自动追踪通过轮询本存储，实现"有 AI 调用才刷新"
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -17,6 +18,51 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# ── 全链路 Trace 上下文（ContextVar，自动透传 trace_id）──
+# 业务入口（router.chat 等）调用 TraceContext.set(trace_id) 后，
+# 任意底座埋点（LLM路由/工具/向量/DB/网关）都能自动归属到该 trace，
+# 无需在每层手动透传 trace_id 参数，实现无侵入的底座子链路挂载。
+_trace_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "eval_trace_id", default=None
+)
+
+
+class TraceContext:
+    """全链路 trace_id 上下文管理器（基于 contextvars，天然支持 async/线程）。"""
+
+    @staticmethod
+    def get() -> Optional[str]:
+        return _trace_ctx.get()
+
+    @staticmethod
+    def set(trace_id: str) -> "contextvars.Token":
+        return _trace_ctx.set(trace_id)
+
+    @staticmethod
+    def reset(token: "contextvars.Token") -> None:
+        _trace_ctx.reset(token)
+
+    @classmethod
+    def bind(cls, trace_id: Optional[str]) -> "TraceScope":
+        """返回一个上下文管理器；若 trace_id 为空则自动生成一个。"""
+        return TraceScope(trace_id)
+
+
+class TraceScope:
+    """with TraceContext.bind(tid): ... 的上下文管理器实现。"""
+
+    def __init__(self, trace_id: Optional[str]):
+        self._trace_id = trace_id or str(uuid.uuid4())
+        self._token: Optional["contextvars.Token"] = None
+
+    def __enter__(self) -> str:
+        self._token = _trace_ctx.set(self._trace_id)
+        return self._trace_id
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._token is not None:
+            _trace_ctx.reset(self._token)
 
 DATA_DIR = os.environ.get("EVAL_DATA_DIR", "/app/data")
 EVENTS_PATH = os.path.join(DATA_DIR, "eval_events.json")
@@ -245,6 +291,47 @@ class EvalEventStore:
                     return True
         return False
 
+    def flush_infra_steps(self, trace_id: str) -> bool:
+        """业务 trace 收尾时调用：把本次调用过程中已落库、但当时父事件尚不存在、
+        导致 append_trace_steps 失败的底座子链路事件，重新挂载到父 trace 上。
+
+        机制：底座埋点在父事件创建前先以 INFRA_FEATURES 落库（同一 trace_id），
+        此处扫描这些 infra 事件，提取其 trace_steps 并合并进父事件，然后标记已挂载、
+        避免重复。这样无论父子事件创建顺序如何，底座子链路都能正确归属。
+        """
+        if not trace_id:
+            return False
+        infra_steps: List[Dict] = []
+        with self._lock:
+            parent = None
+            for ev in self._events:
+                if ev.trace_id == trace_id and not (ev.metadata or {}).get("infra"):
+                    parent = ev
+                    break
+            if parent is None:
+                return False
+            for ev in self._events:
+                if ev.trace_id != trace_id:
+                    continue
+                if not (ev.metadata or {}).get("infra"):
+                    continue
+                if (ev.metadata or {}).get("_mounted_to_parent"):
+                    continue
+                infra_steps.extend(ev.trace_steps or [])
+                ev.metadata = {**(ev.metadata or {}), "_mounted_to_parent": True}
+            if infra_steps:
+                existing = list(parent.trace_steps or [])
+                # 去重：避免重复挂载同一项
+                seen_ids = {s.get("step_id") for s in existing if s.get("step_id")}
+                for s in infra_steps:
+                    if s.get("step_id") and s.get("step_id") in seen_ids:
+                        continue
+                    existing.append(s)
+                parent.trace_steps = existing
+                self._save()
+                return True
+        return False
+
     def attach_judge_to_latest(
         self,
         feature: str,
@@ -417,6 +504,8 @@ def record_infra_event(
             token = int(len((input_text or "") + (output_text or "")) / 4)
         except Exception:
             token = 0
+        # 显式传入优先；否则自动从全链路 TraceContext 取（无侵入挂载底座子链路）
+        effective_trace_id = trace_id or TraceContext.get()
         # 若未显式传入 trace_steps，则按默认步骤构造一条链路记录
         if not trace_steps:
             trace_steps = [{
@@ -434,17 +523,17 @@ def record_infra_event(
             output_text=output_text,
             latency_ms=latency_ms,
             token_usage=token,
-            trace_id=trace_id,
+            trace_id=effective_trace_id,
             trace_steps=trace_steps,
             metadata={**(metadata or {}), "infra": True},
             status=status,
         )
         get_eval_event_store().add(ev)
-        # 若指定了 trace_id，把当前底座步骤追加到父业务事件的 trace_steps 里，
+        # 若关联到了业务 trace，把当前底座步骤追加到父业务事件的 trace_steps 里，
         # 这样业务 trace 回放时能看到完整的底座子链路。
-        if trace_id:
+        if effective_trace_id:
             try:
-                get_eval_event_store().append_trace_steps(trace_id, trace_steps)
+                get_eval_event_store().append_trace_steps(effective_trace_id, trace_steps)
             except Exception:
                 pass
         return ev.event_id

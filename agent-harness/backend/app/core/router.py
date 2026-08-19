@@ -10,7 +10,7 @@ from app.core.llm_provider import BaseLLMProvider
 from app.core.provider_pool import get_provider_pool
 from app.core.config import LLMRouterConfig, get_available_providers, MODEL_REGISTRY
 from app.core.task_store import get_task_store
-from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event
+from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event, TraceContext
 
 logger = logging.getLogger(__name__)
 
@@ -43,40 +43,41 @@ class LLMRouter:
         trace_steps = trace_steps if trace_steps is not None else []
         route_reason = ""
 
-        provider, used_model, route_reason = self._resolve_provider_with_reason(
-            task_type=task_type, model=model, temperature=temperature,
-            max_tokens=max_tokens, team_id=team_id,
-        )
-        logger.info(f"[LLMRouter] {task_type} -> {used_model}")
-        trace_kwargs = {
-            "__langfuse_name": f"{task_type}",
-            "__langfuse_session_id": session_id,
-            "__langfuse_user_id": user_id,
-            "__langfuse_meta": {"feature": task_type, "model": used_model},
-        }
-        start = time.time()
-        try:
-            content = provider.chat(messages, **trace_kwargs, **extra_kwargs)
-            latency_ms = int((time.time() - start) * 1000)
-            self._record_event(
-                task_type, used_model, provider, messages, content, latency_ms,
-                trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
-                temperature=temperature, max_tokens=max_tokens, fallback=False,
+        with TraceContext.bind(trace_id):
+            provider, used_model, route_reason = self._resolve_provider_with_reason(
+                task_type=task_type, model=model, temperature=temperature,
+                max_tokens=max_tokens, team_id=team_id,
             )
-            return content
-        except Exception as e:
-            logger.error(f"[LLMRouter] {used_model} 失败: {e}")
-            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
-            fallback = self._pool.get_for_model(fallback_model)
-            logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
-            content = fallback.chat(messages, **trace_kwargs, **extra_kwargs)
-            latency_ms = int((time.time() - start) * 1000)
-            self._record_event(
-                task_type, fallback.model, fallback, messages, content, latency_ms,
-                trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
-                temperature=temperature, max_tokens=max_tokens, fallback=True,
-            )
-            return content
+            logger.info(f"[LLMRouter] {task_type} -> {used_model}")
+            trace_kwargs = {
+                "__langfuse_name": f"{task_type}",
+                "__langfuse_session_id": session_id,
+                "__langfuse_user_id": user_id,
+                "__langfuse_meta": {"feature": task_type, "model": used_model},
+            }
+            start = time.time()
+            try:
+                content = provider.chat(messages, **trace_kwargs, **extra_kwargs)
+                latency_ms = int((time.time() - start) * 1000)
+                self._record_event(
+                    task_type, used_model, provider, messages, content, latency_ms,
+                    trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
+                    temperature=temperature, max_tokens=max_tokens, fallback=False,
+                )
+                return content
+            except Exception as e:
+                logger.error(f"[LLMRouter] {used_model} 失败: {e}")
+                fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+                fallback = self._pool.get_for_model(fallback_model)
+                logger.warning(f"[LLMRouter] 降级到 {fallback.model}")
+                content = fallback.chat(messages, **trace_kwargs, **extra_kwargs)
+                latency_ms = int((time.time() - start) * 1000)
+                self._record_event(
+                    task_type, fallback.model, fallback, messages, content, latency_ms,
+                    trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
+                    temperature=temperature, max_tokens=max_tokens, fallback=True,
+                )
+                return content
 
     def chat_stream(
         self,
@@ -101,36 +102,40 @@ class LLMRouter:
         trace_id = trace_id or str(uuid.uuid4())
         trace_steps = trace_steps if trace_steps is not None else []
 
-        if enable_reasoning:
-            task_type = "reasoning"
-        provider, used_model, route_reason = self._resolve_provider_with_reason(
-            task_type=task_type, model=model, team_id=team_id, **kwargs
-        )
-        logger.info(f"[LLMRouter] stream {task_type} -> {used_model} (reasoning={enable_reasoning})")
-        trace_kwargs = {
-            "__langfuse_name": f"{task_type}_stream",
-            "__langfuse_session_id": session_id,
-            "__langfuse_user_id": user_id,
-            "__langfuse_meta": {"feature": task_type, "model": used_model, "stream": True},
-        }
-        start = time.time()
+        _trace_token = TraceContext.set(trace_id)
         try:
-            yield from self._stream_with_event(
-                provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
-                task_type, used_model, provider, messages,
-                trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
-                fallback=False,
+            if enable_reasoning:
+                task_type = "reasoning"
+            provider, used_model, route_reason = self._resolve_provider_with_reason(
+                task_type=task_type, model=model, team_id=team_id, **kwargs
             )
-        except Exception as e:
-            logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
-            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
-            fallback = self._pool.get_for_model(fallback_model)
-            yield from self._stream_with_event(
-                fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
-                task_type, fallback.model, fallback, messages,
-                trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
-                fallback=True,
-            )
+            logger.info(f"[LLMRouter] stream {task_type} -> {used_model} (reasoning={enable_reasoning})")
+            trace_kwargs = {
+                "__langfuse_name": f"{task_type}_stream",
+                "__langfuse_session_id": session_id,
+                "__langfuse_user_id": user_id,
+                "__langfuse_meta": {"feature": task_type, "model": used_model, "stream": True},
+            }
+            start = time.time()
+            try:
+                yield from self._stream_with_event(
+                    provider.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
+                    task_type, used_model, provider, messages,
+                    trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
+                    fallback=False,
+                )
+            except Exception as e:
+                logger.error(f"[LLMRouter] stream {used_model} 失败: {e}")
+                fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+                fallback = self._pool.get_for_model(fallback_model)
+                yield from self._stream_with_event(
+                    fallback.chat_stream(messages, enable_reasoning=enable_reasoning, **trace_kwargs, **kwargs),
+                    task_type, fallback.model, fallback, messages,
+                    trace_id=trace_id, trace_steps=trace_steps, route_reason=route_reason,
+                    fallback=True,
+                )
+        finally:
+            TraceContext.reset(_trace_token)
 
     def chat_with_tools(
         self,
@@ -171,37 +176,41 @@ class LLMRouter:
 
         trace_id = str(uuid.uuid4())
         trace_steps: List[Dict] = []
-        start = time.time()
+        _trace_token = TraceContext.set(trace_id)
         try:
-            result = provider.chat_raw(messages, **kwargs)
-            latency_ms = int((time.time() - start) * 1000)
-            content = result.get("content", "")
-            usage = result.get("usage") or {}
-            token_usage = usage.get("total_tokens", 0) or max(1, len(str(content)) // 4)
-            self._record_event(
-                task_type, used_model, provider, messages, content, latency_ms,
-                trace_id=trace_id, trace_steps=trace_steps, route_reason=f"chat_with_tools 显式指定/路由到 {used_model}",
-                temperature=temperature, max_tokens=None, fallback=False,
-            )
-            return result
-        except Exception as e:
-            logger.error(f"[LLMRouter] {used_model} chat_with_tools 失败: {e}")
-            # 降级：纯文本 chat（不带工具）
-            fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
-            fallback = self._pool.get_for_model(fallback_model)
-            logger.warning(f"[LLMRouter] 降级到纯文本 {fallback.model}")
+            start = time.time()
             try:
-                content = fallback.chat(messages)
+                result = provider.chat_raw(messages, **kwargs)
                 latency_ms = int((time.time() - start) * 1000)
+                content = result.get("content", "")
+                usage = result.get("usage") or {}
+                token_usage = usage.get("total_tokens", 0) or max(1, len(str(content)) // 4)
                 self._record_event(
-                    task_type, fallback.model, fallback, messages, content, latency_ms,
-                    trace_id=trace_id, trace_steps=trace_steps, route_reason=f"工具调用失败后降级到 {fallback_model}",
-                    temperature=temperature, fallback=True,
+                    task_type, used_model, provider, messages, content, latency_ms,
+                    trace_id=trace_id, trace_steps=trace_steps, route_reason=f"chat_with_tools 显式指定/路由到 {used_model}",
+                    temperature=temperature, max_tokens=None, fallback=False,
                 )
-                return {"content": content, "tool_calls": None, "model": fallback.model, "usage": {}}
-            except Exception as fe:
-                logger.error(f"[LLMRouter] 降级也失败: {fe}")
-                raise
+                return result
+            except Exception as e:
+                logger.error(f"[LLMRouter] {used_model} chat_with_tools 失败: {e}")
+                # 降级：纯文本 chat（不带工具）
+                fallback_model = self.config.route_map.get("fallback", ["deepseek-chat"])[0]
+                fallback = self._pool.get_for_model(fallback_model)
+                logger.warning(f"[LLMRouter] 降级到纯文本 {fallback.model}")
+                try:
+                    content = fallback.chat(messages)
+                    latency_ms = int((time.time() - start) * 1000)
+                    self._record_event(
+                        task_type, fallback.model, fallback, messages, content, latency_ms,
+                        trace_id=trace_id, trace_steps=trace_steps, route_reason=f"工具调用失败后降级到 {fallback_model}",
+                        temperature=temperature, fallback=True,
+                    )
+                    return {"content": content, "tool_calls": None, "model": fallback.model, "usage": {}}
+                except Exception as fe:
+                    logger.error(f"[LLMRouter] 降级也失败: {fe}")
+                    raise
+        finally:
+            TraceContext.reset(_trace_token)
 
     def get_available_models(self) -> list[dict]:
         models = []
@@ -393,6 +402,14 @@ class LLMRouter:
                     status="completed" if not fallback else "fallback",
                     trace_id=trace_id,
                 )
+            except Exception:
+                pass
+
+            # EvalCenter 底座埋点收尾：把本次 LLM 调用过程中已落库但当时父事件尚未
+            # 创建的底座子链路（工具/向量/DB/网关等）重新挂载到父 trace 的 trace_steps，
+            # 实现无论父子事件创建顺序都能正确归链的嵌套追踪。
+            try:
+                get_eval_event_store().flush_infra_steps(trace_id)
             except Exception:
                 pass
             return event.event_id
