@@ -43,8 +43,12 @@
           </div>
           <div class="overview-card">
             <div class="overview-label">Token 消耗</div>
-            <div class="overview-value">{{ detail.token_usage || 0 }}</div>
-            <div v-if="detail.metrics?.cost_usd" class="overview-sub">≈ ${{ detail.metrics.cost_usd }}</div>
+            <div class="overview-value">{{ detail.metrics?.total_tokens || detail.token_usage || 0 }}</div>
+            <div class="overview-sub">
+              <span v-if="detail.metrics?.input_tokens != null">in {{ detail.metrics.input_tokens }}</span>
+              <span v-if="detail.metrics?.output_tokens != null"> / out {{ detail.metrics.output_tokens }}</span>
+              <span v-if="detail.metrics?.cost_usd"> · ${{ detail.metrics.cost_usd }}</span>
+            </div>
           </div>
           <div class="overview-card">
             <div class="overview-label">综合分 / 幻觉率</div>
