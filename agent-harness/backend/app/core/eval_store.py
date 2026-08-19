@@ -166,9 +166,14 @@ class EvalStore:
             else:
                 key = r.get("created_at", "")[:13]        # '2026-08-16T14'
             if key not in trend_map:
-                trend_map[key] = {"hour": key, "count": 0, "overall_sum": 0.0}
+                trend_map[key] = {"hour": key, "count": 0, "overall_sum": 0.0, "latest_date": key}
             trend_map[key]["count"] += 1
             trend_map[key]["overall_sum"] += r.get("overall", 0)
+            # 周/月视图下保留该桶内最新一条记录日期，用于 X 轴标签
+            if effective_gran in ("week", "month"):
+                record_date = r.get("created_at", "")[:10]
+                if record_date > trend_map[key]["latest_date"]:
+                    trend_map[key]["latest_date"] = record_date
 
         # 填充完整时间窗口，空桶补 None，让 X 轴连续且时间正确
         filled_trend: List[Dict[str, Any]] = []
@@ -180,7 +185,9 @@ class EvalStore:
             cur = cutoff.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             for _ in range(months):
                 key = cur.strftime("%Y-%m")
-                bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
+                existing = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0, "latest_date": key})
+                bucket = existing.copy()
+                bucket["hour"] = bucket.get("latest_date") or key
                 bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
                 filled_trend.append(bucket)
                 # 下个月
@@ -195,7 +202,10 @@ class EvalStore:
             cur = start
             for _ in range(weeks):
                 key = cur.strftime("%Y-%m-%d")
-                bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
+                existing = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0, "latest_date": key})
+                bucket = existing.copy()
+                # X 轴标签显示该周最新有数据日期，空桶则显示周一
+                bucket["hour"] = bucket.get("latest_date") or key
                 bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
                 filled_trend.append(bucket)
                 cur += timedelta(weeks=1)
