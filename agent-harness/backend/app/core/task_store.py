@@ -74,6 +74,42 @@ RETENTION_DAYS = 90
 # 数据类
 # ============================================================
 
+class _DBConnProxy:
+    """轻量代理 sqlite3.Connection，仅拦截 execute 以统计 SQL 操作。
+
+    sqlite3.Connection.execute 是只读属性，不能直接赋值替换。
+    通过 __getattr__ 把其他属性/方法透传给底层连接。
+    """
+
+    def __init__(self, conn, ops: dict, tables: set):
+        self._conn = conn
+        self._ops = ops
+        self._tables = tables
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, params=None):
+        sql_u = (sql or "").strip().upper()
+        if sql_u.startswith("SELECT"):
+            self._ops["select"] += 1
+        elif sql_u.startswith("INSERT"):
+            self._ops["insert"] += 1
+        elif sql_u.startswith("UPDATE"):
+            self._ops["update"] += 1
+        elif sql_u.startswith("DELETE"):
+            self._ops["delete"] += 1
+        else:
+            self._ops["other"] += 1
+        # 粗略提取表名：FROM / INTO / UPDATE 后的第一个 token
+        import re
+
+        m = re.search(r"(?:FROM|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_]*)", sql_u)
+        if m:
+            self._tables.add(m.group(1).lower())
+        return self._conn.execute(sql, params) if params is not None else self._conn.execute(sql)
+
+
 @dataclass
 class TaskRecord:
     """任务主记录"""
@@ -2077,34 +2113,14 @@ class TaskStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        # EvalCenter 底座埋点：包装 execute 统计 SQL 操作
+        # EvalCenter 底座埋点：通过代理对象包装 execute，统计 SQL 写操作
         _t0 = time.time()
         _ops = {"select": 0, "insert": 0, "update": 0, "delete": 0, "other": 0}
         _tables = set()
         _orig_execute = conn.execute
-
-        def _wrapped_execute(sql, params=None):
-            sql_u = (sql or "").strip().upper()
-            if sql_u.startswith("SELECT"):
-                _ops["select"] += 1
-            elif sql_u.startswith("INSERT"):
-                _ops["insert"] += 1
-            elif sql_u.startswith("UPDATE"):
-                _ops["update"] += 1
-            elif sql_u.startswith("DELETE"):
-                _ops["delete"] += 1
-            else:
-                _ops["other"] += 1
-            # 粗略提取表名：FROM / INTO / UPDATE 后的第一个 token
-            import re
-            m = re.search(r"(?:FROM|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_]*)", sql_u)
-            if m:
-                _tables.add(m.group(1).lower())
-            return _orig_execute(sql, params) if params is not None else _orig_execute(sql)
-
-        conn.execute = _wrapped_execute
+        _wrapped = _DBConnProxy(conn, _ops, _tables)
         try:
-            yield conn
+            yield _wrapped
             # 成功：仅在有实际写操作时记录（避免大量只读查询刷屏）
             if (_ops["insert"] + _ops["update"] + _ops["delete"]) > 0:
                 try:
