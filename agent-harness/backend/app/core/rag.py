@@ -381,13 +381,13 @@ def ingest_document(kb_id: str, filename: str, content: str) -> Dict:
     return {"chunks": len(chunks), "message": "入库成功"}
 
 
-def retrieve(kb_id: str, question: str, top_k: int = TOP_K) -> List[Dict]:
+def retrieve(kb_id: str, question: str, top_k: int = TOP_K, trace_id: Optional[str] = None) -> List[Dict]:
     """检索相关 chunk（跨多个文档）。embedding 失败时降级返回空列表，避免请求挂死。"""
     try:
         provider = get_embedding_provider()
         store = get_vector_store(f"kb_{kb_id}", dim=provider.dim)
         q_vec = provider.embed([question])[0]
-        return store.search(q_vec, top_k=top_k)
+        return store.search(q_vec, top_k=top_k, trace_id=trace_id)
     except Exception as e:
         logger.warning(f"[RAG] 检索失败 kb={kb_id}: {e}")
         return []
@@ -418,7 +418,7 @@ def answer(
         ltm_ctx = build_long_term_context(mm, question)
 
     ret_start = _now_ms()
-    hits = retrieve(kb_id, question)
+    hits = retrieve(kb_id, question, trace_id=trace_id)
     ret_latency = _now_ms() - ret_start
     context = "\n\n".join(
         f"[来源 {i+1}] {h['text']}" for i, h in enumerate(hits)
@@ -611,7 +611,7 @@ def answer_stream(
         ltm_ctx = build_long_term_context(mm, question)
 
     ret_start = _now_ms()
-    hits = retrieve(kb_id, question)
+    hits = retrieve(kb_id, question, trace_id=trace_id)
     ret_latency = _now_ms() - ret_start
     context = "\n\n".join(
         f"[来源 {i+1}] {h['text']}" for i, h in enumerate(hits)
