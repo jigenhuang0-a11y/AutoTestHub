@@ -82,49 +82,55 @@ class ToolRegistry:
             if t.owner_team_id is None or t.owner_team_id == team_id
         ]
 
-    def call_tool(self, name: str, **kwargs: Any) -> Any:
+    def call_tool(self, name: str, trace_id: Optional[str] = None, **kwargs: Any) -> Any:
         spec = self._tools.get(name)
         if spec is None or spec.handler is None:
             raise KeyError(f"工具未注册: {name}")
         # EvalCenter 底座埋点：工具调用开始
         _t0 = time.time()
+        _status = "completed"
+        _output = ""
+        _err = ""
         try:
             result = spec.handler(**kwargs)
-            try:
-                from app.core.eval_event_store import record_infra_event
-
-                record_infra_event(
-                    feature="tool_call",
-                    task_type="tool_call",
-                    input_text=f"工具: {name}\n入参: {_safe_summary(kwargs)}",
-                    output_text=_safe_summary(result),
-                    latency_ms=int((time.time() - _t0) * 1000),
-                    model="local",
-                    provider="local-registry",
-                    metadata={"tool_name": name, "tool_source": "local", "is_mcp": False},
-                    status="completed",
-                )
-            except Exception:
-                pass
+            _output = _safe_summary(result)
             return result
         except Exception as e:
+            _status = "failed"
+            _err = str(e)
+            raise
+        finally:
             try:
                 from app.core.eval_event_store import record_infra_event
 
+                _step = {
+                    "type": "tool",
+                    "title": f"工具调用: {name}",
+                    "status": _status,
+                    "input": _safe_summary(kwargs),
+                    "output": _output if _status == "completed" else f"ERROR: {_err}",
+                    "metadata": {
+                        "tool_name": name,
+                        "tool_source": "local",
+                        "is_mcp": False,
+                        **({"error": _err} if _err else {}),
+                    },
+                }
                 record_infra_event(
                     feature="tool_call",
                     task_type="tool_call",
                     input_text=f"工具: {name}\n入参: {_safe_summary(kwargs)}",
-                    output_text=f"ERROR: {e}",
+                    output_text=_output if _status == "completed" else f"ERROR: {_err}",
                     latency_ms=int((time.time() - _t0) * 1000),
                     model="local",
                     provider="local-registry",
-                    metadata={"tool_name": name, "tool_source": "local", "is_mcp": False, "error": str(e)},
-                    status="failed",
+                    trace_steps=[_step],
+                    metadata={"tool_name": name, "tool_source": "local", "is_mcp": False, **({"error": _err} if _err else {})},
+                    status=_status,
+                    trace_id=trace_id,
                 )
             except Exception:
                 pass
-            raise
 
     def resolve_agent(self, agent_type: str) -> Optional[str]:
         """Supervisor 决策出 agent 类型后，映射到具体工具名。"""

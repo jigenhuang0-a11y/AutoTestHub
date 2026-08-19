@@ -102,7 +102,7 @@ class LocalVectorStore:
             self._save()
 
     # ── 检索 ──
-    def search(self, query_vector: List[float], top_k: int = 5) -> List[Dict]:
+    def search(self, query_vector: List[float], top_k: int = 5, trace_id: Optional[str] = None) -> List[Dict]:
         if not self._vectors:
             return []
         _t0 = time.time()
@@ -120,6 +120,20 @@ class LocalVectorStore:
             try:
                 from app.core.eval_event_store import record_infra_event
 
+                _step = {
+                    "type": "retrieve",
+                    "title": f"向量检索: {self.collection}",
+                    "status": "completed",
+                    "input": f"top_k={top_k}，向量维度={self.dim}",
+                    "output": f"命中 {len(result)} 条，最高分={result[0]['score']:.4f}" if result else "命中 0 条",
+                    "metadata": {
+                        "collection": self.collection,
+                        "top_k": top_k,
+                        "corpus_size": len(self._vectors),
+                        "hit_count": len(result),
+                        "top_score": round(result[0]["score"], 4) if result else 0.0,
+                    },
+                }
                 record_infra_event(
                     feature="vector_search",
                     task_type="vector_search",
@@ -128,6 +142,7 @@ class LocalVectorStore:
                     latency_ms=int((time.time() - _t0) * 1000),
                     model="local-faiss" if _HAS_FAISS else "numpy-cosine",
                     provider="vector-store",
+                    trace_steps=[_step],
                     metadata={
                         "collection": self.collection,
                         "top_k": top_k,
@@ -136,6 +151,7 @@ class LocalVectorStore:
                         "top_score": round(result[0]["score"], 4) if result else 0.0,
                     },
                     status="completed",
+                    trace_id=trace_id,
                 )
             except Exception:
                 pass
@@ -154,6 +170,7 @@ class LocalVectorStore:
                     provider="vector-store",
                     metadata={"collection": self.collection, "error": str(e)},
                     status="failed",
+                    trace_id=trace_id,
                 )
             except Exception:
                 pass

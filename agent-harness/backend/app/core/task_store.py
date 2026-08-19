@@ -2108,7 +2108,7 @@ class TaskStore:
         return {"tasks": tasks, "traces": trace_data}
 
     @contextmanager
-    def _get_conn(self):
+    def _get_conn(self, trace_id: Optional[str] = None):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -2117,7 +2117,6 @@ class TaskStore:
         _t0 = time.time()
         _ops = {"select": 0, "insert": 0, "update": 0, "delete": 0, "other": 0}
         _tables = set()
-        _orig_execute = conn.execute
         _wrapped = _DBConnProxy(conn, _ops, _tables)
         try:
             yield _wrapped
@@ -2126,6 +2125,19 @@ class TaskStore:
                 try:
                     from app.core.eval_event_store import record_infra_event
 
+                    _step = {
+                        "type": "tool",
+                        "title": f"数据库写操作: {', '.join(sorted(_tables)) or 'n/a'}",
+                        "status": "completed",
+                        "input": f"INSERT={_ops['insert']} UPDATE={_ops['update']} DELETE={_ops['delete']}",
+                        "output": f"涉及表: {', '.join(sorted(_tables)) or 'n/a'}",
+                        "metadata": {
+                            "db": "harness.db",
+                            "ops": _ops,
+                            "tables": sorted(_tables),
+                            "read_only": False,
+                        },
+                    }
                     record_infra_event(
                         feature="db_query",
                         task_type="db_query",
@@ -2134,6 +2146,7 @@ class TaskStore:
                         latency_ms=int((time.time() - _t0) * 1000),
                         model="sqlite",
                         provider="task-store",
+                        trace_steps=[_step],
                         metadata={
                             "db": "harness.db",
                             "ops": _ops,
@@ -2141,6 +2154,7 @@ class TaskStore:
                             "read_only": False,
                         },
                         status="completed",
+                        trace_id=trace_id,
                     )
                 except Exception:
                     pass
@@ -2156,8 +2170,17 @@ class TaskStore:
                     latency_ms=int((time.time() - _t0) * 1000),
                     model="sqlite",
                     provider="task-store",
+                    trace_steps=[{
+                        "type": "tool",
+                        "title": "数据库操作异常",
+                        "status": "failed",
+                        "input": f"ops={_ops}",
+                        "output": "ERROR in db transaction",
+                        "metadata": {"db": "harness.db", "tables": sorted(_tables), "error": True},
+                    }],
                     metadata={"db": "harness.db", "ops": _ops, "tables": sorted(_tables), "error": True},
                     status="failed",
+                    trace_id=trace_id,
                 )
             except Exception:
                 pass

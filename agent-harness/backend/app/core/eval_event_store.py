@@ -231,6 +231,20 @@ class EvalEventStore:
                     return ev.event_id
         return None
 
+    def append_trace_steps(self, trace_id: str, steps: List[Dict]) -> bool:
+        """向已有事件追加 trace_steps（用于把底座子链路挂载到业务 trace 下）。"""
+        if not trace_id or not steps:
+            return False
+        with self._lock:
+            for ev in self._events:
+                if ev.trace_id == trace_id:
+                    existing = list(ev.trace_steps or [])
+                    existing.extend(steps)
+                    ev.trace_steps = existing
+                    self._save()
+                    return True
+        return False
+
     def attach_judge_to_latest(
         self,
         feature: str,
@@ -381,6 +395,7 @@ def record_infra_event(
     trace_steps: Optional[List[Dict]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     status: str = "completed",
+    trace_id: Optional[str] = None,
 ) -> Optional[str]:
     """AI 底座链路轻量埋点（不触发 Judge 评分，仅做全链路追踪）。
 
@@ -419,11 +434,19 @@ def record_infra_event(
             output_text=output_text,
             latency_ms=latency_ms,
             token_usage=token,
+            trace_id=trace_id,
             trace_steps=trace_steps,
             metadata={**(metadata or {}), "infra": True},
             status=status,
         )
         get_eval_event_store().add(ev)
+        # 若指定了 trace_id，把当前底座步骤追加到父业务事件的 trace_steps 里，
+        # 这样业务 trace 回放时能看到完整的底座子链路。
+        if trace_id:
+            try:
+                get_eval_event_store().append_trace_steps(trace_id, trace_steps)
+            except Exception:
+                pass
         return ev.event_id
     except Exception as e:
         logger.warning(f"[EvalEventStore] 底座埋点失败({feature}): {e}")

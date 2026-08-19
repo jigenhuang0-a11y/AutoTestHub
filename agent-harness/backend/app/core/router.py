@@ -373,6 +373,8 @@ class LLMRouter:
                             "type": "route",
                             "title": "LLM 路由决策",
                             "status": "completed" if not fallback else "fallback",
+                            "input": self._summarize_messages(messages),
+                            "output": route_reason or used_model,
                             "metadata": {
                                 "task_type": task_type,
                                 "model": used_model,
@@ -389,6 +391,7 @@ class LLMRouter:
                         "linked_event_id": event.event_id,
                     },
                     status="completed" if not fallback else "fallback",
+                    trace_id=trace_id,
                 )
             except Exception:
                 pass

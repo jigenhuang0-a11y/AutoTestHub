@@ -52,13 +52,14 @@ class LocalToolGateway:
         arguments: Optional[dict] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> dict:
         arguments = arguments or {}
         _t0 = time.time()
         _status = "completed"
         _detail = ""
         try:
-            raw = self._registry.call_tool(name, **arguments)
+            raw = self._registry.call_tool(name, trace_id=trace_id, **arguments)
         except KeyError as e:
             _status = "failed"
             _detail = str(e)
@@ -77,6 +78,19 @@ class LocalToolGateway:
         try:
             from app.core.eval_event_store import record_infra_event
 
+            _step = {
+                "type": "tool",
+                "title": f"工具网关: {name}",
+                "status": _status,
+                "input": _to_text(arguments)[:200],
+                "output": _detail if _status == "failed" else _to_text(raw)[:300],
+                "metadata": {
+                    "tool_name": name,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "is_error": _status == "failed",
+                },
+            }
             record_infra_event(
                 feature="tool_gateway",
                 task_type="tool_gateway",
@@ -85,6 +99,7 @@ class LocalToolGateway:
                 latency_ms=int((time.time() - _t0) * 1000),
                 model="gateway",
                 provider="local-gateway",
+                trace_steps=[_step],
                 metadata={
                     "tool_name": name,
                     "team_id": team_id,
@@ -92,6 +107,7 @@ class LocalToolGateway:
                     "is_error": _status == "failed",
                 },
                 status=_status,
+                trace_id=trace_id,
             )
         except Exception:
             pass

@@ -76,11 +76,13 @@ async def generate_text(
     model_id: Optional[str] = None,
     temperature: float = 0.7,
     task_type: str = "agent_loop",
+    trace_id: Optional[str] = None,
 ) -> str:
     """调用真实 LLM 生成文本（同步 Provider 包成 async）。
 
     Args:
         task_type: 业务模块类型，用于 EvalCenter 按功能追踪。可选值参考 eval_event_store 的 TRACKED_FEATURES。
+        trace_id: 父业务 trace_id，传入后本 LLM 调用步骤会追加到父 trace 中。
     """
     provider, model_name = get_llm_for_test(model_id)
     logger.info(f"[llm_helper] generate_text via {model_name} task_type={task_type}")
@@ -94,6 +96,21 @@ async def generate_text(
 
     # 记录到 EvalEventStore，供 EvalCenter 事件驱动刷新
     try:
+        trace_steps = [
+            {
+                "type": "llm",
+                "title": "LLM 生成",
+                "status": "completed",
+                "input": prompt[:500],
+                "output": content[:500] + ("..." if len(content) > 500 else ""),
+                "metadata": {
+                    "model": model_name,
+                    "provider": provider.__class__.__name__,
+                    "latency_ms": latency_ms,
+                    "token_usage": max(1, len(content) // 4),
+                },
+            }
+        ]
         event = build_event(
             feature=task_type,
             task_type=task_type,
@@ -103,8 +120,16 @@ async def generate_text(
             output_text=content,
             latency_ms=latency_ms,
             token_usage=max(1, len(content) // 4),
+            trace_id=trace_id,
+            trace_steps=trace_steps,
         )
         get_eval_event_store().add(event)
+        # 若有父 trace_id，把本 LLM 步骤追加到父 trace
+        if trace_id:
+            try:
+                get_eval_event_store().append_trace_steps(trace_id, trace_steps)
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"[llm_helper] 记录 EvalEvent 失败: {e}")
 
