@@ -301,229 +301,18 @@
       </div>
     </el-card>
 
-    <!-- 评测详情抽屉：RAG 链路回放 -->
-    <el-drawer v-model="detailVisible" title="链路追踪回放" size="46%" :destroy-on-close="true">
-      <div v-if="detail" class="detail-wrap">
-        <div class="detail-head">
-          <el-tag :effect="isInfraFeature(detail.feature) ? 'dark' : 'plain'" :type="isInfraFeature(detail.feature) ? 'warning' : 'info'">{{ featureLabel(detail.feature) }}</el-tag>
-          <el-tag v-if="isInfraFeature(detail.feature)" size="small" effect="dark" type="danger">AI 底座</el-tag>
-          <el-tag v-if="detail.status" :type="detail.status === 'completed' ? 'success' : 'warning'">{{ detail.status === 'judging' ? 'Judge 中' : detail.status }}</el-tag>
-          <el-tag type="info">{{ formatTime(detail.created_at) }}</el-tag>
-          <el-button v-if="detail.trace_id && langfuse?.enabled" size="small" type="info" @click="openTrace(detail.trace_id)">在 Langfuse 打开</el-button>
-        </div>
-
-        <el-divider>执行链路</el-divider>
-        <div v-if="detail.trace_steps && detail.trace_steps.length" class="trace-flow">
-          <div
-            v-for="(step, i) in detail.trace_steps"
-            :key="step.step_id || i"
-            class="trace-flow-item"
-            :class="{
-              'is-problem': isProblemStep(step, detail),
-              'is-last': i === detail.trace_steps.length - 1,
-              ['trace-type-' + step.type]: true,
-            }"
-            @click="openStepDetail(step)"
-          >
-            <div class="workstation-no">工位 {{ i + 1 }}</div>
-            <div class="trace-flow-card">
-              <div class="trace-flow-header">
-                <div class="trace-flow-icon" :class="stepStatusType(step)">
-                  <el-icon :size="16"><component :is="stepIcon(step)" /></el-icon>
-                </div>
-                <div class="trace-flow-title-block">
-                  <div class="trace-flow-title">{{ step.title }}</div>
-                  <div class="trace-flow-subtitle" :title="stepWorkstationName(step)">{{ stepWorkstationName(step) }}</div>
-                </div>
-                <el-tag v-if="isProblemStep(step, detail)" size="small" type="danger" effect="dark" class="trace-flow-warn">异常</el-tag>
-              </div>
-              <div class="trace-flow-body">
-                <div v-if="stepInputText(step)" class="trace-flow-line trace-flow-input-line" :title="stepInputText(step)">
-                  <span class="trace-flow-label">输入</span>
-                  <span class="trace-flow-text">{{ truncate(stepInputText(step), 70) }}</span>
-                </div>
-                <div v-if="stepOutputText(step)" class="trace-flow-line trace-flow-output-line" :title="stepOutputText(step)">
-                  <span class="trace-flow-label">输出</span>
-                  <span class="trace-flow-text">{{ truncate(stepOutputText(step), 90) }}</span>
-                </div>
-                <div v-if="!stepInputText(step) && !stepOutputText(step)" class="trace-flow-line trace-flow-empty">
-                  暂无输入输出详情
-                </div>
-              </div>
-              <div v-if="stepTags(step).length" class="trace-flow-meta">
-                <el-tag
-                  v-for="(tag, idx) in stepTags(step)"
-                  :key="idx"
-                  size="small"
-                  effect="dark"
-                  :type="tag.type"
-                >{{ tag.label }}</el-tag>
-              </div>
-            </div>
-            <div v-if="i < detail.trace_steps.length - 1" class="trace-flow-arrow">
-              <el-icon :size="18"><ArrowRight /></el-icon>
-            </div>
-          </div>
-        </div>
-        <!-- AI 底座工位全景：像工厂看板一样列出所有底座能力，标出本次哪些参与了 -->
-        <el-divider v-if="detail.trace_id">AI 底座工位全景</el-divider>
-        <div v-if="detail.trace_id" v-loading="panoramaLoading" class="trace-panorama">
-          <div v-if="tracePanorama && tracePanorama.length" class="panorama-grid">
-            <div
-              v-for="item in tracePanorama"
-              :key="item.feature"
-              class="panorama-card"
-              :class="{ 'is-used': item.used, 'is-unused': !item.used }"
-            >
-              <div class="panorama-icon" :style="{ background: panoramaColor(item.feature) }">
-                <el-icon :size="18"><component :is="panoramaIcon(item.feature)" /></el-icon>
-              </div>
-              <div class="panorama-info">
-                <div class="panorama-title">{{ item.label || panoramaLabel(item.feature) }}</div>
-                <div class="panorama-desc">
-                  <template v-if="item.used">
-                    <el-tag size="small" type="success" effect="dark">已参与</el-tag>
-                    <span class="panorama-count">调用 {{ item.count }} 次</span>
-                    <span class="panorama-latency">{{ item.latency_ms }}ms</span>
-                  </template>
-                  <el-tag v-else size="small" type="info" effect="dark">未参与</el-tag>
-                </div>
-                <div v-if="item.used" class="panorama-detail">
-                  <span v-if="item.model">模型: {{ item.model }}</span>
-                  <span v-if="item.tool">工具: {{ item.tool }}</span>
-                  <span v-if="item.tables && item.tables.length">表: {{ item.tables.join(',') }}</span>
-                  <span v-if="item.kb_id">KB: {{ item.kb_id }}</span>
-                </div>
-                <div v-else class="panorama-hint">本次链路未调用该底座能力</div>
-              </div>
-            </div>
-          </div>
-          <el-empty v-else description="暂无底座工位数据" :image-size="80" />
-        </div>
-
-        <el-steps v-else :active="traceActiveStep(detail)" align-center finish-status="success" class="trace-steps">
-          <el-step title="用户提问" :description="truncate(detail.input_text, 60)" />
-          <el-step title="LLM 路由" :description="(detail.model || '—') + ' / ' + (detail.provider || '—')" />
-          <el-step v-if="(detail.retrieved_docs || []).length" title="RAG 检索" :description="(detail.retrieved_docs || []).length + ' 个片段'" />
-          <el-step title="LLM 生成" :description="(detail.latency_ms ? detail.latency_ms + 'ms' : '—') + (detail.token_usage ? ' · ' + detail.token_usage + ' tokens' : '')" />
-          <el-step title="Judge 评分" :description="(detail.overall ? '综合 ' + detail.overall : '未评分')" />
-        </el-steps>
-
-        <!-- 链路节点诊断弹窗 -->
-        <el-dialog v-model="stepDetailVisible" title="节点诊断" width="520px" :destroy-on-close="true" class="step-detail-dialog">
-          <div v-if="selectedStep" class="step-detail-body">
-            <div class="step-detail-head">
-              <div class="step-detail-icon" :class="stepStatusType(selectedStep)">
-                <el-icon :size="20"><component :is="stepIcon(selectedStep)" /></el-icon>
-              </div>
-              <div>
-                <div class="step-detail-title">{{ selectedStep.title }}</div>
-                <div class="step-detail-status">
-                  <el-tag :type="stepStatusType(selectedStep)">{{ selectedStep.status || 'completed' }}</el-tag>
-                  <el-tag v-if="isProblemStep(selectedStep, detail)" type="danger" class="ml-2">疑似异常</el-tag>
-                </div>
-              </div>
-            </div>
-
-            <el-divider />
-
-            <div v-if="stepInputText(selectedStep)" class="step-detail-section">
-              <div class="step-detail-label">节点输入</div>
-              <pre class="step-detail-output">{{ stepInputText(selectedStep) }}</pre>
-            </div>
-
-            <div class="step-detail-section">
-              <div class="step-detail-label">节点输出</div>
-              <pre class="step-detail-output">{{ stepOutputText(selectedStep) || '（无输出）' }}</pre>
-            </div>
-
-            <div v-if="selectedStep.metadata && Object.keys(selectedStep.metadata).length" class="step-detail-section">
-              <div class="step-detail-label">关键指标</div>
-              <div class="step-detail-metrics">
-                <div v-for="(v, k) in selectedStep.metadata" :key="k" class="step-detail-metric">
-                  <span class="step-detail-key">{{ k }}</span>
-                  <span class="step-detail-val">{{ typeof v === 'object' ? JSON.stringify(v).slice(0, 120) : v }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="isProblemStep(selectedStep, detail)" class="step-detail-section">
-              <div class="step-detail-label">为什么出问题？</div>
-              <div class="step-detail-diagnosis">{{ stepDiagnosis(selectedStep, detail) }}</div>
-            </div>
-
-            <div v-if="isProblemStep(selectedStep, detail)" class="step-detail-section">
-              <div class="step-detail-label">建议方案</div>
-              <div class="step-detail-solution">{{ stepSolution(selectedStep, detail) }}</div>
-            </div>
-          </div>
-        </el-dialog>
-
-        <template v-if="(detail.retrieved_docs || []).length">
-          <el-divider>检索上下文（RAG 引用）</el-divider>
-          <div class="doc-list">
-            <div v-for="(doc, i) in detail.retrieved_docs" :key="i" class="doc-item">
-              <div class="doc-meta">
-                <span class="doc-idx">#{{ i + 1 }}</span>
-                <span class="doc-src">{{ doc.source || '知识库' }}</span>
-                <span class="doc-score">相关度 {{ doc.score ?? '—' }}</span>
-              </div>
-              <div class="doc-content">{{ doc.content }}</div>
-            </div>
-          </div>
-        </template>
-
-        <!-- 实时流水线记录仪：幻觉根因定位 + 修改建议 -->
-        <template v-if="(detail.issues && detail.issues.length) || (detail.retrieval_gaps && detail.retrieval_gaps.length) || (detail.recommendations && detail.recommendations.length)">
-          <el-divider content-position="left">
-            <span class="recorder-title">🔍 幻觉/问题定位记录仪</span>
-          </el-divider>
-
-          <div v-if="detail.issues && detail.issues.length" class="issue-list">
-            <div class="recorder-subtitle">问题定位清单（{{ detail.issues.length }}）</div>
-            <div v-for="(iss, i) in detail.issues" :key="i" class="issue-card" :class="'sev-' + (iss.severity || 'medium')">
-              <div class="issue-head">
-                <el-tag :type="sevTag(iss.severity)" size="small">{{ sevLabel(iss.severity) }}</el-tag>
-                <el-tag size="small" effect="plain">{{ dimLabel(iss.dimension) }}</el-tag>
-                <span class="issue-loc">{{ iss.location || '未标注位置' }}</span>
-              </div>
-              <div class="issue-row"><span class="issue-key">问题陈述</span><span class="issue-claim">{{ iss.claim }}</span></div>
-              <div class="issue-row"><span class="issue-key">事实依据</span><span class="issue-evi">{{ iss.evidence || '—' }}</span></div>
-              <div class="issue-row issue-fix"><span class="issue-key">修改建议</span><span class="issue-sug">{{ iss.suggestion || '—' }}</span></div>
-            </div>
-          </div>
-
-          <div v-if="detail.retrieval_gaps && detail.retrieval_gaps.length" class="gap-block">
-            <div class="recorder-subtitle">检索缺口（RAG 漏召回）</div>
-            <ul class="gap-list">
-              <li v-for="(g, i) in detail.retrieval_gaps" :key="i">{{ g }}</li>
-            </ul>
-          </div>
-
-          <div v-if="detail.recommendations && detail.recommendations.length" class="rec-block">
-            <div class="recorder-subtitle">工程优化建议</div>
-            <ul class="rec-list">
-              <li v-for="(r, i) in detail.recommendations" :key="i">{{ r }}</li>
-            </ul>
-          </div>
-        </template>
-
-        <div v-if="detail.model || detail.latency_ms || detail.token_usage" class="meta-line">
-          <el-tag size="small" v-if="detail.model">模型 {{ detail.model }}</el-tag>
-          <el-tag size="small" v-if="detail.latency_ms">耗时 {{ detail.latency_ms }}ms</el-tag>
-          <el-tag size="small" v-if="detail.token_usage">Tokens {{ detail.token_usage }}</el-tag>
-        </div>
-      </div>
-    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download, ArrowRight, User, Switch, Search, Document, Cpu, CircleCheck, Tools, Coin } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
+
+const router = useRouter()
 
 const featureLabels = {
   // ── 业务功能层 ──
@@ -575,13 +364,8 @@ const dashboard = ref({
 const langfuse = ref({ enabled: false, host: '', traces_url: '' })
 const records = ref([])
 const recordsLoading = ref(false)
-const detailVisible = ref(false)
-const detail = ref(null)
-const stepDetailVisible = ref(false)
-const selectedStep = ref(null)
-const tracePanorama = ref(null)
-const panoramaLoading = ref(false)
 const demoLoading = ref(false)
+const demoTrace = ref(null)
 const isTracking = ref(false)
 const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
 const refreshInterval = ref(30)
@@ -681,32 +465,11 @@ function isLegacyRecordId(id) {
 }
 
 async function openDetail(row) {
-  tracePanorama.value = null
-  // local-/rec- 开头的 ID 来自旧 EvalStore 记录，不是事件存储里的真实 AI 调用事件，直接展示本行数据
-  if (row.event_id && !isLegacyRecordId(row.event_id)) {
-    try {
-      const ev = await evalCenterAPI.event(row.event_id)
-      detail.value = normalizeEventToRecord(ev)
-    } catch (e) {
-      ElMessage.error('详情加载失败：' + (e.message || e))
-      detail.value = row
-    }
-  } else {
-    detail.value = row
+  if (!row.trace_id) {
+    ElMessage.warning('该记录没有 trace_id，无法回放')
+    return
   }
-  // 打开抽屉时并行拉取底座工位全景，填充下方区域
-  if (detail.value?.trace_id) {
-    panoramaLoading.value = true
-    try {
-      const data = await evalCenterAPI.tracePanorama(detail.value.trace_id)
-      tracePanorama.value = data?.components || []
-    } catch (_) {
-      tracePanorama.value = []
-    } finally {
-      panoramaLoading.value = false
-    }
-  }
-  detailVisible.value = true
+  router.push({ name: 'TraceReplay', params: { traceId: row.trace_id }, query: { event_id: row.event_id || '' } })
 }
 
 const annotations = ref({})  // trace_id -> 标注
@@ -889,7 +652,7 @@ async function demoJudge() {
     demoLoading.value = false
   }
   if (payload && payload.overall !== undefined) {
-    detail.value = {
+    demoTrace.value = {
       ...payload,
       input_text: req.input_text,
       output_text: req.output_text,
@@ -943,8 +706,8 @@ function openLatestReplay() {
   demoLoading.value = true
   demoJudge().then(() => {
     demoLoading.value = false
-    if (detail.value && detail.value.overall !== undefined) {
-      detailVisible.value = true
+    if (demoTrace.value?.trace_id) {
+      router.push({ name: 'TraceReplay', params: { traceId: demoTrace.value.trace_id } })
     }
   })
 }
@@ -1008,232 +771,6 @@ function scoreTag(score) {
   return 'danger'
 }
 
-function sevLabel(sev) {
-  return { high: '严重', medium: '中等', low: '轻微' }[sev] || '中等'
-}
-function sevTag(sev) {
-  return { high: 'danger', medium: 'warning', low: 'info' }[sev] || 'warning'
-}
-function dimLabel(dim) {
-  return {
-    hallucination: '幻觉', consistency: '一致性', completeness: '完整性',
-    executability: '可执行性', safety: '安全性',
-  }[dim] || dim || '其他'
-}
-
-function traceActiveStep(row) {
-  if (!row) return 0
-  let step = 1
-  if (row.model) step = 2
-  if ((row.retrieved_docs || []).length) step = 3
-  if (row.model && row.latency_ms) step = 4
-  if (row.overall) step = 5
-  return step
-}
-
-function stepStatusType(step) {
-  if (step.status === 'failed' || step.status === 'error') return 'danger'
-  if (step.status === 'running') return 'primary'
-  return 'success'
-}
-
-function isProblemStep(step, detailRow) {
-  if (step.status === 'failed' || step.status === 'error') return true
-  const m = step.metadata || {}
-  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) return true
-  // LLM 生成：只有真正输出为空/token=0 或响应极慢才标异常；
-  // "你好"这类正常短回复（token=1）不再误报。
-  if (step.type === 'llm' && (!m.token_usage || m.token_usage === 0)) return true
-  if (step.type === 'llm' && m.latency_ms > 10000) return true
-  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) return true
-  if (step.type === 'route' && m.fallback) return true
-  // 工具/DB/网关：底层调用失败才标异常
-  if (['tool', 'db'].includes(step.type) && (m.error || m.status === 'failed')) return true
-  // 仅当该业务链路本身需要 Judge 评分且评分确实为 0 时才提示；
-  // fast_chat 这类无 Judge 预期的链路，overall=0 是正常状态，不标异常。
-  const needsJudge = detailRow && (detailRow.feature || detailRow.task_type) &&
-    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
-  if (needsJudge && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) return true
-  return false
-}
-
-const stepIconMap = {
-  input: User,
-  route: Switch,
-  retrieve: Search,
-  prompt: Document,
-  llm: Cpu,
-  judge: Medal,
-  tool: Tools,
-  db: Coin,
-}
-
-function stepIcon(step) {
-  return stepIconMap[step.type] || CircleCheck
-}
-
-// 工位名称：展示该步骤具体由哪个组件完成（模型/工具/向量库/表）
-function stepWorkstationName(step) {
-  const m = step.metadata || {}
-  if (step.type === 'route') {
-    return m.model || m.provider || 'LLM 路由'
-  }
-  if (step.type === 'llm') {
-    return `${m.provider || 'LLM'} · ${m.model || 'unknown'}`
-  }
-  if (step.type === 'tool') {
-    if (m.tool) return `工具 · ${m.tool}`
-    if (m.tool_name) return `工具 · ${m.tool_name}`
-    if (m.gateway) return `网关 · ${m.gateway}`
-    return '工具/MCP 调用'
-  }
-  if (step.type === 'retrieve') {
-    if (m.kb_id) return `知识库 · ${m.kb_id}`
-    if (m.collection) return `向量索引 · ${m.collection}`
-    return '向量检索'
-  }
-  if (step.type === 'db') {
-    const tables = Array.isArray(m.tables) ? m.tables.join(', ') : (m.table || 'sqlite')
-    return `DB · ${tables}`
-  }
-  if (step.type === 'judge') {
-    return m.model ? `Judge · ${m.model}` : 'Judge 评分'
-  }
-  return step.title || '节点'
-}
-
-// 工位标签：展示关键运行指标/身份标识
-function stepTags(step) {
-  const m = step.metadata || {}
-  const tags = []
-  if (m.task_type && step.type === 'route') tags.push({ label: m.task_type, type: 'info' })
-  if (m.model) tags.push({ label: m.model, type: 'success' })
-  if (m.provider && !m.model) tags.push({ label: m.provider, type: 'success' })
-  if (m.tool) tags.push({ label: m.tool, type: 'warning' })
-  if (m.tool_name && !m.tool) tags.push({ label: m.tool_name, type: 'warning' })
-  if (Array.isArray(m.tables) && m.tables.length) tags.push({ label: m.tables.join(','), type: 'danger' })
-  if (m.kb_id) tags.push({ label: `KB:${m.kb_id}`, type: 'warning' })
-  if (m.collection) tags.push({ label: m.collection, type: 'warning' })
-  if (m.latency_ms) tags.push({ label: `${m.latency_ms}ms`, type: 'info' })
-  if (m.token_usage) tags.push({ label: `${m.token_usage} token`, type: 'primary' })
-  if (m.hit_count != null) tags.push({ label: `命中 ${m.hit_count}`, type: 'success' })
-  if (m.fallback) tags.push({ label: 'fallback', type: 'danger' })
-  return tags
-}
-
-function stepInputText(step) {
-  if (step.input) return step.input
-  if (step.type === 'input') return step.detail || ''
-  if (step.type === 'route') return (step.metadata?.task_type) || ''
-  if (step.type === 'tool') return step.metadata?.tool || step.metadata?.tool_name || ''
-  if (step.type === 'retrieve') return step.metadata?.query || step.metadata?.kb_id || ''
-  if (step.type === 'db') {
-    const ops = step.metadata?.ops
-    return ops ? `INSERT=${ops.insert} UPDATE=${ops.update} DELETE=${ops.delete}` : ''
-  }
-  return ''
-}
-
-function stepOutputText(step) {
-  if (step.output) return step.output
-  if (step.type === 'input') return step.detail || ''
-  if (step.type === 'route') return (step.metadata?.reason) || (step.metadata?.model) || ''
-  if (step.type === 'llm') return step.detail || (step.metadata?.route_reason) || ''
-  if (step.type === 'tool') return step.metadata?.result || step.metadata?.status || ''
-  if (step.type === 'retrieve') {
-    const hit = step.metadata?.hit_count || 0
-    const top = step.metadata?.top_score
-    return `命中 ${hit} 条${top != null ? '，最高分 ' + top.toFixed(3) : ''}`
-  }
-  if (step.type === 'db') {
-    const tables = Array.isArray(step.metadata?.tables) ? step.metadata.tables.join(', ') : ''
-    return tables ? `涉及表: ${tables}` : '数据库写操作'
-  }
-  if (step.type === 'judge') return `综合 ${step.metadata?.overall || 0}`
-  return step.detail || ''
-}
-
-function openStepDetail(step) {
-  selectedStep.value = step
-  stepDetailVisible.value = true
-}
-
-function stepDiagnosis(step, detailRow) {
-  const m = step.metadata || {}
-  if (step.status === 'failed' || step.status === 'error') {
-    return `该步骤执行失败（status=${step.status}）。可能是模型接口异常、超时或依赖服务（如向量库、路由配置）不可用。`
-  }
-  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) {
-    return 'Judge 评分返回 0 或未生成评分。常见原因：Judge LLM 未被触发、Judge prompt 未命中输出格式、或评分维度字段缺失。'
-  }
-  if (step.type === 'llm' && m.token_usage === 1) {
-    return 'LLM 生成 token 数极少，疑似输出被截断、模型拒绝回答、或 max_tokens/temperature 设置过严。'
-  }
-  if (step.type === 'llm' && m.latency_ms > 10000) {
-    return 'LLM 调用耗时超过 10 秒，存在明显延迟。可能当前模型负载高、网络抖动，或提示词过长导致首 token 时间增加。'
-  }
-  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) {
-    return '检索未命中任何上下文片段。可能是知识库为空、向量相似度阈值过高、query 与文档差异大，或未走 RAG 路径。'
-  }
-  if (step.type === 'route' && m.fallback) {
-    return '路由命中 fallback 模型。说明首选模型不可用、配额耗尽，或路由规则未覆盖当前 task_type。'
-  }
-  const needsJudge = detailRow && (detailRow.feature || detailRow.task_type) &&
-    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
-  if (needsJudge && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
-    return '本记录综合评分为 0，该步骤可能是导致未评分的环节，建议检查 Judge 执行链路或模型输出完整性。'
-  }
-  return '该步骤暂未发现明显异常。点击可查看详细指标与输出内容。'
-}
-
-function stepSolution(step, detailRow) {
-  const m = step.metadata || {}
-  if (step.status === 'failed' || step.status === 'error') {
-    return '查看 ai-orchestrator 容器日志，定位模型/RAG/路由层的异常栈；确认 API Key、网络与依赖服务状态。'
-  }
-  if (step.type === 'judge' && (m.overall === 0 || m.overall === undefined)) {
-    return '1) 检查 eval_loop.py 是否被触发；2) 确认 Judge prompt 要求返回 JSON 维度分数；3) 在日志中搜索 "Judge" 查看解析失败原因。'
-  }
-  if (step.type === 'llm' && m.token_usage === 1) {
-    return '1) 提高 max_tokens；2) 检查 temperature/top_p 是否过低；3) 查看原始输出是否为空/截断；4) 必要时换模型重试。'
-  }
-  if (step.type === 'llm' && m.latency_ms > 10000) {
-    return '1) 启用流式响应以提升首 token 体验；2) 缩短 prompt；3) 切换更低延迟模型；4) 检查网络与模型服务端负载。'
-  }
-  if (step.type === 'retrieve' && (m.hit_count === 0 || m.hit_count === undefined)) {
-    return '1) 确认知识库已上传并建立索引；2) 调低向量检索阈值；3) 检查 query 编码器是否与索引一致；4) 如无需 RAG，可明确关闭 RAG 开关。'
-  }
-  if (step.type === 'route' && m.fallback) {
-    return '1) 检查 model_configs 中首选模型配置是否生效；2) 查看路由表是否覆盖 task_type；3) 确认首选模型配额/网络正常。'
-  }
-  const needsJudge2 = detailRow && (detailRow.feature || detailRow.task_type) &&
-    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
-  if (needsJudge2 && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
-    return '从 LLM 生成输出、Judge 评分结果、路由选择三个方向排查，确保每个步骤都有有效输出且 Judge 能正确解析。'
-  }
-  return '保持当前配置，定期观察该步骤指标趋势。'
-}
-
-// 底座工位全景：把 feature 映射为视觉类型和图标
-const panoramaTypeMap = {
-  llm_router: { type: 'route', icon: Switch, color: '#3b82f6', label: 'LLM 路由' },
-  tool_call: { type: 'tool', icon: Tools, color: '#f59e0b', label: '工具调用' },
-  tool_gateway: { type: 'tool', icon: Link, color: '#f97316', label: 'MCP 网关' },
-  vector_search: { type: 'retrieve', icon: Search, color: '#a855f7', label: '向量检索' },
-  db_query: { type: 'db', icon: Coin, color: '#ec4899', label: '数据库' },
-}
-
-function panoramaIcon(feature) {
-  return (panoramaTypeMap[feature] || {}).icon || CircleCheck
-}
-
-function panoramaColor(feature) {
-  return (panoramaTypeMap[feature] || {}).color || '#64748b'
-}
-
-function panoramaLabel(feature) {
-  return (panoramaTypeMap[feature] || {}).label || feature
-}
 
 function barColor(score) {
   if (score >= 85) return '#4ade80'

@@ -76,6 +76,12 @@ const routes = [
     meta: { requiresAuth: true, title: '全链路评测中心', group: 'test' },
   },
   {
+    path: '/eval-center/trace/:traceId',
+    name: 'TraceReplay',
+    component: () => import('@/views/TraceReplay.vue'),
+    meta: { requiresAuth: true, title: '链路追踪回放', group: 'test' },
+  },
+  {
     path: '/quality-checker',
     name: 'QualityChecker',
     component: () => import('@/views/QualityChecker.vue'),
