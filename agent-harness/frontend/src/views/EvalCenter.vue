@@ -488,7 +488,7 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const demoLoading = ref(false)
 const isTracking = ref(false)
-const autoRefresh = ref(false)
+const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
 const refreshInterval = ref(30)
 let trackingTimer = null
 const LOW_OVERALL = 70
@@ -861,6 +861,7 @@ function toggleAutoRefresh() {
 function startTracking() {
   isTracking.value = true
   autoRefresh.value = true
+  localStorage.setItem('eval-center-auto-refresh', 'true')
   const sec = refreshInterval.value
   const label = sec < 60 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`
   ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次（仅在使用 AI 功能时更新）`, duration: 2000 })
@@ -875,6 +876,7 @@ function startTracking() {
 function stopTracking() {
   isTracking.value = false
   autoRefresh.value = false
+  localStorage.setItem('eval-center-auto-refresh', 'false')
   if (trackingTimer) {
     clearInterval(trackingTimer)
     trackingTimer = null
@@ -1146,7 +1148,12 @@ onUnmounted(() => {
   radarChart?.dispose()
   trendChart?.dispose()
   featureChart?.dispose()
-  stopTracking()
+  // 只清 timer，不重置 autoRefresh：状态由 localStorage 持久化，切回页面可恢复
+  if (trackingTimer) {
+    clearInterval(trackingTimer)
+    trackingTimer = null
+  }
+  isTracking.value = false
 })
 </script>
 
