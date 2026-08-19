@@ -39,7 +39,7 @@ class LLMRouter:
         trace_steps: Optional[List[Dict]] = None,
         **extra_kwargs,
     ) -> str:
-        trace_id = trace_id or str(uuid.uuid4())
+        trace_id = trace_id or TraceContext.get() or str(uuid.uuid4())
         trace_steps = trace_steps if trace_steps is not None else []
         route_reason = ""
 
@@ -99,7 +99,7 @@ class LLMRouter:
           {"type": "done", "content": str}
           {"type": "error", "message": str}
         """
-        trace_id = trace_id or str(uuid.uuid4())
+        trace_id = trace_id or TraceContext.get() or str(uuid.uuid4())
         trace_steps = trace_steps if trace_steps is not None else []
 
         _trace_token = TraceContext.set(trace_id)
@@ -174,7 +174,7 @@ class LLMRouter:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        trace_id = str(uuid.uuid4())
+        trace_id = trace_id or TraceContext.get() or str(uuid.uuid4())
         trace_steps: List[Dict] = []
         _trace_token = TraceContext.set(trace_id)
         try:

@@ -45,6 +45,7 @@ from app.core.telemetry import setup_tracer_provider, inject_trace_context
 from app.core.metrics import metrics_response, REGISTRY
 from app.core.middleware import PrometheusMetricsMiddleware, GracefulShutdownMiddleware
 from app.core.auth import AuthMiddleware
+from app.core.eval_event_store import TraceContext
 
 # ============================================================
 # 结构化日志：JSON 格式 + trace_id 注入
@@ -131,16 +132,25 @@ else:
 # ============================================================
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """请求级 trace_id 注入（兼容上游 X-Request-ID）"""
+    """请求级 trace_id 注入（兼容上游 X-Request-ID）。
+
+    同时将 request_id 写入 EvalCenter 的 TraceContext，
+    这样一次 HTTP 请求内发生的所有 AI 底座调用（LLM 路由、工具、向量、DB）
+    都会自动归属到同一条全链路 trace，无需各端点手动传参。
+    """
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", "").strip()
         if not request_id:
             request_id = str(uuid.uuid4())
         _request_id_ctx.set(request_id)
+        trace_token = TraceContext.set(request_id)
 
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            TraceContext.reset(trace_token)
 
 
 # ============================================================

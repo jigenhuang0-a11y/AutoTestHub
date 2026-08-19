@@ -45,24 +45,49 @@ class TraceContext:
 
     @classmethod
     def bind(cls, trace_id: Optional[str]) -> "TraceScope":
-        """返回一个上下文管理器；若 trace_id 为空则自动生成一个。"""
+        """返回一个同步上下文管理器；若 trace_id 为空则自动生成一个。"""
         return TraceScope(trace_id)
 
+    @classmethod
+    def async_bind(cls, trace_id: Optional[str]) -> "AsyncTraceScope":
+        """返回一个异步上下文管理器，供 async def 使用。"""
+        return AsyncTraceScope(trace_id)
 
-class TraceScope:
-    """with TraceContext.bind(tid): ... 的上下文管理器实现。"""
+
+class _BaseTraceScope:
+    """TraceScope / AsyncTraceScope 的公共逻辑。"""
 
     def __init__(self, trace_id: Optional[str]):
         self._trace_id = trace_id or str(uuid.uuid4())
         self._token: Optional["contextvars.Token"] = None
 
-    def __enter__(self) -> str:
+    def _enter(self) -> str:
         self._token = _trace_ctx.set(self._trace_id)
         return self._trace_id
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def _exit(self) -> None:
         if self._token is not None:
             _trace_ctx.reset(self._token)
+
+
+class TraceScope(_BaseTraceScope):
+    """with TraceContext.bind(tid): ... 的同步上下文管理器实现。"""
+
+    def __enter__(self) -> str:
+        return self._enter()
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._exit()
+
+
+class AsyncTraceScope(_BaseTraceScope):
+    """async with TraceContext.async_bind(tid): ... 的异步上下文管理器实现。"""
+
+    async def __aenter__(self) -> str:
+        return self._enter()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._exit()
 
 DATA_DIR = os.environ.get("EVAL_DATA_DIR", "/app/data")
 EVENTS_PATH = os.path.join(DATA_DIR, "eval_events.json")
