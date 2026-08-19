@@ -157,7 +157,13 @@
           <template #header>
             <div class="card-header">
               <span>综合分趋势（近 {{ hours }}h · {{ dashboard.granularity === 'day' ? '按天' : '按小时' }}）</span>
-              <el-tag size="small" type="info">{{ dashboard.trend.length }} 个时间点</el-tag>
+              <div class="trend-header-actions">
+                <el-radio-group v-model="granularity" size="small" @change="loadDashboard">
+                  <el-radio-button label="按小时" value="hour" />
+                  <el-radio-button label="按天" value="day" />
+                </el-radio-group>
+                <el-tag size="small" type="info">{{ dashboard.trend.length }} 个时间点</el-tag>
+              </div>
             </div>
           </template>
           <div ref="trendRef" class="chart-box">
@@ -515,6 +521,7 @@ function formatTime(iso) {
 }
 
 const hours = ref(24)
+const granularity = ref('hour')
 const loading = ref(false)
 const dashboard = ref({
   total_records: 0,
@@ -748,7 +755,7 @@ async function loadDashboard() {
   loading.value = true
   try {
     // axios 拦截器已返回 response.data，无需再解构 { data }
-    const data = await evalCenterAPI.dashboard(hours.value, 'auto')
+    const data = await evalCenterAPI.dashboard(hours.value, granularity.value)
     dashboard.value = normalizeDashboard(data)
     nextTick(() => setTimeout(initCharts, 100))
   } catch (e) {
@@ -1747,6 +1754,12 @@ onUnmounted(() => {
   font-weight: 700;
   line-height: 1.2;
   color: #f8fafc;
+}
+
+.trend-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .metric-label {
