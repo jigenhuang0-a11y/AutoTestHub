@@ -48,6 +48,48 @@
     <el-tabs v-model="activeTab" class="settings-tabs">
       <!-- ═══════ Tab 1: 引擎配置 ═══════ -->
       <el-tab-pane label="引擎配置" name="engine">
+        <!-- 底座连接状态：置于首屏最上方，进入即见 -->
+        <div class="tech-card status-card">
+          <div class="card-header">
+            <div class="header-left">
+              <span class="card-icon"><el-icon><Monitor /></el-icon></span>
+              <span class="card-title">底座连接状态</span>
+            </div>
+            <el-tag size="small" :type="healthError ? 'danger' : 'success'" class="health-tag">
+              {{ healthError ? '异常' : '监控中' }}
+            </el-tag>
+          </div>
+          <div class="card-body" v-loading="loadingHealth">
+            <div class="status-grid status-grid-compact" v-if="healthServices.length > 0">
+              <div v-for="(svc, index) in healthServices" :key="svc.name" class="status-item" :class="svc.status" :style="{ '--delay': index * 0.1 + 's' }">
+                <div class="status-glow"></div>
+                <div class="status-icon-wrap">
+                  <el-icon class="status-icon" :class="svc.status">
+                    <CircleCheckFilled v-if="svc.status === 'ok'" />
+                    <WarningFilled v-else />
+                  </el-icon>
+                  <span class="status-pulse" :class="svc.status"></span>
+                </div>
+                <div class="status-content">
+                  <div class="status-name">{{ svc.name }}</div>
+                  <div class="status-detail">{{ svc.detail }}</div>
+                </div>
+                <div class="status-arrow">
+                  <el-icon><ArrowRight /></el-icon>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!loadingHealth && !healthError" class="health-empty">
+              <el-icon><InfoFilled /></el-icon>
+              <span>点击刷新检查底座服务连接状态</span>
+            </div>
+            <div v-if="healthError" class="health-error">
+              <el-icon><WarningFilled /></el-icon>
+              <span>{{ healthError }}</span>
+            </div>
+          </div>
+        </div>
+
         <div class="config-grid config-grid-3">
           <!-- 模型配置 -->
           <div class="tech-card model-card">
@@ -171,48 +213,6 @@
                 <el-icon><FolderOpened /></el-icon>
                 <span>暂无知识库，点击上方 + 新建</span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 底座连接状态 -->
-        <div class="tech-card status-card">
-          <div class="card-header">
-            <div class="header-left">
-              <span class="card-icon"><el-icon><Monitor /></el-icon></span>
-              <span class="card-title">底座连接状态</span>
-            </div>
-            <el-tag size="small" :type="healthError ? 'danger' : 'success'" class="health-tag">
-              {{ healthError ? '异常' : '监控中' }}
-            </el-tag>
-          </div>
-          <div class="card-body" v-loading="loadingHealth">
-            <div class="status-grid" v-if="healthServices.length > 0">
-              <div v-for="(svc, index) in healthServices" :key="svc.name" class="status-item" :class="svc.status" :style="{ '--delay': index * 0.1 + 's' }">
-                <div class="status-glow"></div>
-                <div class="status-icon-wrap">
-                  <el-icon class="status-icon" :class="svc.status">
-                    <CircleCheckFilled v-if="svc.status === 'ok'" />
-                    <WarningFilled v-else />
-                  </el-icon>
-                  <span class="status-pulse" :class="svc.status"></span>
-                </div>
-                <div class="status-content">
-                  <div class="status-name">{{ svc.name }}</div>
-                  <div class="status-detail">{{ svc.detail }}</div>
-                </div>
-                <div class="status-arrow">
-                  <el-icon><ArrowRight /></el-icon>
-                </div>
-              </div>
-            </div>
-            <div v-else-if="!loadingHealth && !healthError" class="health-empty">
-              <el-icon><InfoFilled /></el-icon>
-              <span>点击刷新检查底座服务连接状态</span>
-            </div>
-            <div v-if="healthError" class="health-error">
-              <el-icon><WarningFilled /></el-icon>
-              <span>{{ healthError }}</span>
             </div>
           </div>
         </div>
@@ -1332,7 +1332,9 @@ onMounted(() => {
 
 /* ── 状态网格 ── */
 .status-card { margin-top: 0; margin-bottom: 12px; }
-.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.status-grid,
+.status-grid-compact { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.status-grid-compact .status-item { padding: 10px; gap: 10px; }
 .status-item {
   display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px;
   background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(64, 158, 255, 0.18);
