@@ -11,6 +11,7 @@ from app.core.provider_pool import get_provider_pool
 from app.core.config import LLMRouterConfig, get_available_providers, MODEL_REGISTRY
 from app.core.task_store import get_task_store
 from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event, TraceContext, estimate_cost
+from app.core.hallucination_judge import judge_output
 
 logger = logging.getLogger(__name__)
 
@@ -193,12 +194,17 @@ class LLMRouter:
                 content = result.get("content", "")
                 usage = result.get("usage") or {}
                 token_usage, metrics = self._extract_usage_metrics(used_model, usage, latency_ms)
+                # 对最终答案做一次幻觉/质量 Judge，让 trace 携带真实评分
+                judge_score = self._judge_and_attach(
+                    messages, content, trace_steps, metrics, used_model,
+                )
                 self._record_event(
                     task_type, used_model, provider, messages, content, latency_ms,
                     trace_id=trace_id, trace_steps=trace_steps, route_reason=f"chat_with_tools 显式指定/路由到 {used_model}",
                     temperature=temperature, max_tokens=None, fallback=False,
                     token_usage=token_usage, metrics=metrics,
                 )
+                result["judge_score"] = judge_score
                 return result
             except Exception as e:
                 logger.error(f"[LLMRouter] {used_model} chat_with_tools 失败: {e}")
@@ -212,13 +218,16 @@ class LLMRouter:
                     content = raw.get("content", "") if isinstance(raw, dict) else str(raw)
                     usage = raw.get("usage") or {} if isinstance(raw, dict) else {}
                     token_usage, metrics = self._extract_usage_metrics(fallback.model, usage, latency_ms)
+                    judge_score = self._judge_and_attach(
+                        messages, content, trace_steps, metrics, fallback.model,
+                    )
                     self._record_event(
                         task_type, fallback.model, fallback, messages, content, latency_ms,
                         trace_id=trace_id, trace_steps=trace_steps, route_reason=f"工具调用失败后降级到 {fallback_model}",
                         temperature=temperature, fallback=True,
                         token_usage=token_usage, metrics=metrics,
                     )
-                    return {"content": content, "tool_calls": None, "model": fallback.model, "usage": usage}
+                    return {"content": content, "tool_calls": None, "model": fallback.model, "usage": usage, "judge_score": judge_score}
                 except Exception as fe:
                     logger.error(f"[LLMRouter] 降级也失败: {fe}")
                     raise
@@ -305,6 +314,62 @@ class LLMRouter:
             "latency_ms": latency_ms,
         }
         return int(total_tokens), metrics
+
+    def _judge_and_attach(
+        self,
+        messages: list,
+        content: str,
+        trace_steps: List[Dict],
+        metrics: Dict[str, Any],
+        used_model: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        对最终答案跑一次幻觉/质量 Judge，把评分写进 trace_steps（judge 步骤）
+        和 metrics（hallucination 维度），让 agent 链路追踪携带真实评分。
+
+        Returns:
+            judge_output 的评分 dict 或 None（跳过/异常时）
+        """
+        if not content or not content.strip():
+            return None
+        try:
+            context_text = "\n".join(
+                str(m.get("content", "")) for m in messages if m.get("role") in ("system", "user", "tool")
+            )
+            score = judge_output(
+                question=context_text[:2000],
+                answer=content,
+                context=context_text[:4000],
+                task_type="agent",
+                model=used_model,
+            )
+            if score and isinstance(score, dict):
+                summary = score.get("summary", "")
+                hallucination_rate = score.get("overall_score", 0)
+                metrics["hallucination"] = {
+                    "overall_score": hallucination_rate,
+                    "summary": summary,
+                    "dimensions": score.get("dimensions", []),
+                }
+                trace_steps.append({
+                    "step_id": f"step-judge-{uuid.uuid4().hex[:8]}",
+                    "type": "judge",
+                    "title": "幻觉/质量评估",
+                    "status": "completed",
+                    "start_time_ms": _now_ms(),
+                    "end_time_ms": _now_ms(),
+                    "detail": f"综合分 {hallucination_rate} / 100；{summary}",
+                    "input": content[:300],
+                    "output": summary,
+                    "metadata": {
+                        "overall_score": hallucination_rate,
+                        "dimensions": score.get("dimensions", []),
+                    },
+                })
+                return score
+        except Exception as e:
+            logger.warning(f"[LLMRouter] Judge 评分失败（不影响主链路）: {e}")
+        return None
 
     def _record_event(
         self,

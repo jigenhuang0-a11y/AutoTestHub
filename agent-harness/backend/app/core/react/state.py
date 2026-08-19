@@ -65,6 +65,10 @@ class ReActState:
     available_tools: list[dict] = field(default_factory=list)
     # available_tools: OpenAI Function Calling 格式的工具列表
 
+    # === 链路追踪 ===
+    trace_id: Optional[str] = None
+    # 整个 ReAct 循环共享同一个 trace_id，让 LLM 步骤与工具步骤归并到同一条追踪链路
+
     # === 记忆 ===
     retrieved_memories: list[dict] = field(default_factory=list)
     # 从长期记忆中检索到的相关上下文
@@ -98,4 +102,5 @@ class ReActState:
             "iteration": self.iteration,
             "final_response": self.final_response,
             "team_id": self.team_id,
+            "trace_id": self.trace_id,
         }

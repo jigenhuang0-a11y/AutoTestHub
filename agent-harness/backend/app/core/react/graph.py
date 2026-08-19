@@ -44,6 +44,7 @@ def build_react_graph(react_agent) -> StateGraph:
             available_tools=state.get("available_tools", []),
             retrieved_memories=state.get("retrieved_memories", []),
             iteration=state.get("iteration", 0),
+            trace_id=state.get("trace_id"),
         )
 
         think_result = react_agent.think(react_state)
@@ -54,6 +55,7 @@ def build_react_graph(react_agent) -> StateGraph:
             "reasoning": think_result.reasoning,
             "final_response": think_result.content,
             "messages": react_state.messages,
+            "trace_id": react_state.trace_id,
         }
 
     def act_node(state: dict) -> dict:
@@ -64,6 +66,7 @@ def build_react_graph(react_agent) -> StateGraph:
             user_id=state.get("user_id"),
             task_id=state.get("task_id"),
             current_tool_calls=state.get("current_tool_calls", []),
+            trace_id=state.get("trace_id"),
         )
 
         react_state = react_agent.act(react_state)

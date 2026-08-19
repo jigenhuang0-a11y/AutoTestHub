@@ -10,6 +10,7 @@ ReActAgent — 多轮思考-行动-观察循环
 
 import json
 import time
+import uuid
 import logging
 from typing import Optional, Generator
 
@@ -71,6 +72,7 @@ class ReActAgent:
             response = self._call_llm_with_tools(
                 messages=state.messages,
                 tools=tools,
+                trace_id=state.trace_id,
             )
         except Exception as e:
             logger.error(f"[ReAct.think] LLM 调用失败: {e}")
@@ -94,6 +96,7 @@ class ReActAgent:
         self,
         messages: list[dict],
         tools: list[dict],
+        trace_id: Optional[str] = None,
     ) -> dict:
         """
         通过 LLMRouter 调用 LLM 并传递 tools 参数（含降级保护）。
@@ -113,6 +116,7 @@ class ReActAgent:
                 temperature=0.3,
                 circuit_name="react:agent",
                 max_retries=1,
+                trace_id=trace_id,
             )
             return result
         except Exception:
@@ -181,6 +185,7 @@ class ReActAgent:
                     arguments=tc.arguments,
                     team_id=state.team_id,
                     user_id=state.user_id,
+                    trace_id=state.trace_id,
                 )
                 tc.duration_ms = (time.time() - start) * 1000
 
@@ -255,6 +260,7 @@ class ReActAgent:
         available_tools: list[dict] = None,
         user_id: int = None,
         task_id: str = None,
+        trace_id: str = None,
     ) -> ReActState:
         """
         执行完整的 ReAct 循环
@@ -265,16 +271,20 @@ class ReActAgent:
             available_tools: OpenAI FC 格式的工具列表
             user_id: 用户 ID
             task_id: 任务 ID
+            trace_id: 链路追踪 ID（不传则自动生成），整条 ReAct 链路共享
 
         Returns:
             ReActState 包含完整执行过程
         """
+        if not trace_id:
+            trace_id = f"trace_react_{uuid.uuid4().hex[:12]}"
         state = ReActState(
             max_iterations=self.max_iterations,
             team_id=self.team_id,
             user_id=user_id,
             task_id=task_id,
             available_tools=available_tools or [],
+            trace_id=trace_id,
         )
 
         # 初始化消息
