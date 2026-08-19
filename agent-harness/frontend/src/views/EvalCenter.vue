@@ -117,14 +117,6 @@
               <span class="fm-label">综合分</span>
               <span class="fm-value" :class="scoreClass(f.avg_score)">{{ f.avg_score || '—' }}</span>
             </div>
-            <div class="feat-metric">
-              <span class="fm-label">均 Token</span>
-              <span class="fm-value">{{ f.avg_tokens || '—' }}</span>
-            </div>
-            <div class="feat-metric">
-              <span class="fm-label">均耗时</span>
-              <span class="fm-value">{{ f.avg_latency_ms ? (f.avg_latency_ms / 1000).toFixed(1) + 's' : '—' }}</span>
-            </div>
           </div>
           <!-- AI 底座链路支撑标签 -->
           <div class="feat-infra">
@@ -137,7 +129,7 @@
               class="infra-chip"
             >{{ featureLabel(infra) }}</el-tag>
           </div>
-          <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="6" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
+          <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="4" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
         </div>
       </div>
     </el-card>
@@ -1670,8 +1662,12 @@ onUnmounted(() => {
 }
 
 .feat-card :deep(.el-card__header) {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.feat-card :deep(.el-card__body) {
+  padding: 10px 14px 12px;
 }
 
 .card-sub {
@@ -1682,17 +1678,31 @@ onUnmounted(() => {
 }
 
 .feat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-  padding: 12px 2px 2px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 8px 2px 2px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.feat-grid::-webkit-scrollbar {
+  height: 6px;
+}
+
+.feat-grid::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
 }
 
 .feat-item {
+  flex: 1 1 0;
+  min-width: 126px;
+  max-width: 160px;
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 10px;
-  padding: 10px 12px 10px;
+  padding: 8px 10px;
   cursor: pointer;
   transition: all 0.18s ease;
 }
@@ -1716,25 +1726,29 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .feat-name {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .feat-count {
-  font-size: 11px;
+  font-size: 10px;
   color: #94a3b8;
+  flex-shrink: 0;
+  margin-left: 4px;
 }
 
 .feat-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 4px 10px;
-  margin-bottom: 6px;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .feat-metric {
@@ -1743,12 +1757,12 @@ onUnmounted(() => {
 }
 
 .fm-label {
-  font-size: 10px;
+  font-size: 9px;
   color: #94a3b8;
 }
 
 .fm-value {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1.2;
@@ -1757,14 +1771,16 @@ onUnmounted(() => {
 .feat-infra {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 6px;
+  gap: 3px;
+  margin-bottom: 4px;
+  max-height: 36px;
+  overflow: hidden;
 }
 
 .infra-chip {
   font-size: 9px !important;
-  padding: 0 5px;
-  height: 16px;
+  padding: 0 4px;
+  height: 15px;
 }
 
 .dim-card {
