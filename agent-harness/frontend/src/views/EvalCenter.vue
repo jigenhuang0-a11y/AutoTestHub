@@ -170,20 +170,6 @@
     </el-row>
 
 
-    <!-- 说明 -->
-    <el-card shadow="never" class="info-card">
-      <div class="info-grid">
-        <div class="info-item">
-          <div class="info-title">评测机制</div>
-          <p>每次 LLM 调用自动上报 Langfuse trace；Judge LLM 基于幻觉率、一致性、完整性、可执行性、安全性五个维度打分，分数同步写入 Langfuse Score。</p>
-        </div>
-        <div class="info-item">
-          <div class="info-title">部署位置</div>
-          <p>Langfuse 服务运行在阿里云 ECS Docker 中，本页面读取后端聚合数据，可直接下钻到原始 Trace 进行人工复核。</p>
-        </div>
-      </div>
-    </el-card>
-
   </div>
 </template>
 
@@ -529,10 +515,8 @@ const granularityText = computed(() => {
 
 const radarRef = ref(null)
 const trendRef = ref(null)
-const featureRef = ref(null)
 let radarChart = null
 let trendChart = null
-let featureChart = null
 
 const defaultScores = () => ({ overall: 0, hallucination: 0, consistency: 0, completeness: 0, executability: 0, safety: 0 })
 const defaultDashboard = () => ({
@@ -780,7 +764,7 @@ function scoreOf(key) {
 }
 
 function initCharts() {
-  const refs = [radarRef.value, trendRef.value, featureRef.value]
+  const refs = [radarRef.value, trendRef.value]
   const ready = refs.every(el => el && el.offsetHeight > 0 && el.offsetWidth > 0)
   if (!ready) {
     setTimeout(initCharts, 300)
@@ -788,7 +772,6 @@ function initCharts() {
   }
   initRadar()
   initTrend()
-  initFeature()
 }
 
 function initRadar() {
@@ -967,36 +950,6 @@ function initTrend() {
   trendChart.setOption(option)
 }
 
-function initFeature() {
-  if (!featureRef.value) return
-  featureChart?.dispose()
-  if (isFeatureEmpty.value) {
-    featureChart = null
-    return
-  }
-  featureChart = echarts.init(featureRef.value, null, { renderer: 'canvas' })
-  const byFeature = dashboard.value.by_feature || {}
-  const names = Object.keys(byFeature)
-  const counts = names.map(n => byFeature[n].count)
-  const avgs = names.map(n => byFeature[n].avg_overall)
-  const option = {
-    color: ['#fbbf24', '#2dd4bf'],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(15,23,42,0.95)', borderColor: 'rgba(148,163,184,0.2)', textStyle: { color: '#e2e8f0' } },
-    legend: { data: ['评测次数', '平均综合分'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 20, left: 40, right: 40, bottom: 40, containLabel: true },
-    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, rotate: 20, color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(148,163,184,0.25)' } } },
-    yAxis: [
-      { type: 'value', name: '次数', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
-      { type: 'value', name: '分数', max: 100, axisLabel: { color: '#94a3b8' }, splitLine: { show: false } },
-    ],
-    series: [
-      { name: '评测次数', type: 'bar', data: counts, itemStyle: { borderRadius: [4, 4, 0, 0] } },
-      { name: '平均综合分', type: 'line', yAxisIndex: 1, data: avgs, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 6 },
-    ],
-  }
-  featureChart.setOption(option)
-}
-
 function openLangfuse() {
   if (langfuse.value.traces_url) {
     window.open(langfuse.value.traces_url, '_blank')
@@ -1018,7 +971,6 @@ function openTrace(traceId) {
 function onResize() {
   radarChart?.resize()
   trendChart?.resize()
-  featureChart?.resize()
 }
 
 onMounted(() => {
@@ -1035,7 +987,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   radarChart?.dispose()
   trendChart?.dispose()
-  featureChart?.dispose()
   // 只清 timer，不重置 autoRefresh：状态由 localStorage 持久化，切回页面可恢复
   if (trackingTimer) {
     clearInterval(trackingTimer)
@@ -1939,38 +1890,7 @@ onUnmounted(() => {
   margin-top: 0;
 }
 
-.info-card {
-  background: #27354d;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.2);
-  color: #cbd5e1;
-  margin-top: 16px;
-}
 
-.info-card :deep(.el-card__body) {
-  padding: 20px 24px;
-}
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
-}
-
-.info-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #f8fafc;
-  margin-bottom: 8px;
-}
-
-.info-item p {
-  margin: 0;
-  font-size: 13px;
-  color: #94a3b8;
-  line-height: 1.7;
-}
 
 .chart-card :deep(.el-table),
 .chart-card :deep(.el-table__expanded-cell),
