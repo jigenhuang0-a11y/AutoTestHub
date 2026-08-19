@@ -324,7 +324,7 @@ async def ai_generate_conversation(payload: AIGenConversationPayload, _: None = 
     from app.core.router import LLMRouter
 
     session_id = payload.session_id or _gen_id("aigen")
-    task_type = "data_generation"
+    task_type = "ai_testcase"
     router = LLMRouter()
     model_id = payload.model_id or None
 

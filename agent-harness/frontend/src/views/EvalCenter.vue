@@ -307,10 +307,19 @@ import { evalCenterAPI } from '@/api'
 const router = useRouter()
 
 const featureLabels = {
-  // ── 业务功能层 ──
+  // ── 业务功能层（对应左侧菜单真实功能） ──
+  requirement_review: '需求评审师',
   ai_testcase: 'AI 用例生成',
-  data_generation: '数据工厂',
+  generation: 'AI 用例生成',
   data_factory: '数据工厂',
+  data_generation: '数据工厂',
+  api_test: '接口测试',
+  ui_auto: 'UI 自动化',
+  perf_test: '性能测试',
+  test_execution: '测试执行',
+  quality_eval: 'AI 评测',
+  evaluate: 'AI 评测',
+  evaluation: 'AI 评测',
   knowledge_chat: 'RAG 知识问答',
   chat: '智能对话',
   fast_chat: 'AI 快速问答',
@@ -318,21 +327,44 @@ const featureLabels = {
   rag_query: 'RAG 问答',
   rag_search: 'RAG 检索',
   agent_loop: 'Agent 循环',
-  requirement_review: '需求评审',
   quality_check: '质量检查',
-  evaluate: 'AI 评测',
-  // ── AI 底座链路层 ──
+  // ── AI 底座链路层（用于事件列表底座标签，不在功能链路概览展示） ──
   llm_router: 'LLM 路由',
+  llm_call: 'LLM 生成',
   tool_call: '工具调用',
   tool_gateway: '工具网关',
   vector_search: '向量检索',
   db_query: '数据库操作',
+  memory: '长短期记忆',
+  judge: 'Judge 评分',
   unknown: '未分类',
 }
+// 业务功能层（EvalCenter「AI 功能链路概览」只展示这些）
+const BUSINESS_FEATURES = [
+  'requirement_review',
+  'ai_testcase',
+  'data_factory',
+  'api_test',
+  'ui_auto',
+  'perf_test',
+  'test_execution',
+  'quality_eval',
+  'knowledge_chat',
+]
 // AI 底座链路层标识（用于事件列表的底座标签）
-const INFRA_FEATURES = ['llm_router', 'tool_call', 'tool_gateway', 'vector_search', 'db_query']
+const INFRA_FEATURES = ['llm_router', 'llm_call', 'tool_call', 'tool_gateway', 'vector_search', 'db_query', 'memory', 'judge']
 const isInfraFeature = (f) => INFRA_FEATURES.includes(f)
 const featureLabel = (f) => featureLabels[f] || f || '未分类'
+// 把后端可能的 task_type 别名归并到标准业务功能名，用于统一展示与筛选
+function normalizeFeature(f) {
+  const aliasMap = {
+    generation: 'ai_testcase',
+    data_generation: 'data_factory',
+    evaluation: 'quality_eval',
+    evaluate: 'quality_eval',
+  }
+  return aliasMap[f] || f
+}
 const truncate = (s, n) => (s && s.length > n ? s.slice(0, n) + '…' : (s || ''))
 function formatTime(iso) {
   if (!iso) return '—'
@@ -404,18 +436,48 @@ async function loadRecords() {
 const filteredRecords = computed(() => {
   let list = records.value
   if (!showInfraEvents.value) {
-    list = list.filter(r => !isInfraFeature(r.feature))
+    // 关闭底座事件时，只保留业务功能记录（过滤掉所有 AI 底座链路层）
+    list = list.filter(r => BUSINESS_FEATURES.includes(normalizeFeature(r.feature)))
   }
   if (activeFeature.value) {
-    list = list.filter(r => r.feature === activeFeature.value)
+    list = list.filter(r => normalizeFeature(r.feature) === activeFeature.value)
   }
   return list
 })
 
-// 按功能聚合的流水线概览（幻觉率 / Token / 耗时），来自后端 stats_by_feature
-const featureStatsList = computed(() =>
-  Object.values(featureStats.value || {}).sort((a, b) => (b.avg_hallucination || 0) - (a.avg_hallucination || 0))
-)
+// 按功能聚合的流水线概览（幻觉率 / Token / 耗时），只展示业务功能并补零
+const featureStatsList = computed(() => {
+  // 先归并后端返回的别名数据
+  const merged = {}
+  Object.entries(featureStats.value || {}).forEach(([rawKey, val]) => {
+    const key = normalizeFeature(rawKey)
+    if (!BUSINESS_FEATURES.includes(key)) return
+    const cur = merged[key]
+    if (!cur) {
+      merged[key] = { ...val, feature: key, label: featureLabel(key) }
+      return
+    }
+    const total = (cur.count || 0) + (val.count || 0)
+    const weightA = cur.count || 0
+    const weightB = val.count || 0
+    merged[key] = {
+      feature: key,
+      label: featureLabel(key),
+      count: total,
+      avg_hallucination: total ? Math.round(((cur.avg_hallucination || 0) * weightA + (val.avg_hallucination || 0) * weightB) / total) : 0,
+      avg_score: total ? Math.round(((cur.avg_score || 0) * weightA + (val.avg_score || 0) * weightB) / total) : 0,
+      avg_tokens: total ? Math.round(((cur.avg_tokens || 0) * weightA + (val.avg_tokens || 0) * weightB) / total) : 0,
+      avg_latency_ms: total ? Math.round(((cur.avg_latency_ms || 0) * weightA + (val.avg_latency_ms || 0) * weightB) / total) : 0,
+    }
+  })
+  // 对未调用的业务功能补零展示
+  BUSINESS_FEATURES.forEach((key) => {
+    if (!merged[key]) {
+      merged[key] = { feature: key, label: featureLabel(key), count: 0, avg_hallucination: 0, avg_score: 0, avg_tokens: 0, avg_latency_ms: 0 }
+    }
+  })
+  return Object.values(merged).sort((a, b) => (b.avg_hallucination || 0) - (a.avg_hallucination || 0))
+})
 
 async function loadFeatureStats() {
   try {

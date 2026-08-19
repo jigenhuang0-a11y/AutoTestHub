@@ -103,6 +103,9 @@ BUSINESS_FEATURES = {
     "api_test",
     "ui_auto",
     "perf_test",
+    "test_execution",
+    "quality_eval",
+    "evaluate",
 }
 
 # ============================================================
@@ -123,6 +126,10 @@ TRACKED_FEATURES = {
     "quality_check",
     "agent_loop",
     "evaluate",
+    "evaluation",
+    "quality_eval",
+    "generation",
+    "test_execution",
     # ── AI 底座链路层（基础设施监控）──
     "llm_router",      # LLM 路由决策
     "llm_call",        # LLM 实际生成
@@ -144,15 +151,19 @@ FEATURE_LABELS = {
     "rag_query": "RAG 问答",
     "rag_search": "RAG 检索",
     "ai_testcase": "AI 用例生成",
+    "generation": "AI 用例生成",
     "data_generation": "数据工厂",
     "data_factory": "数据工厂",
-    "requirement_review": "需求评审",
+    "requirement_review": "需求评审师",
     "quality_check": "质量检查",
     "agent_loop": "Agent 编排",
     "evaluate": "AI 评测",
+    "evaluation": "AI 评测",
+    "quality_eval": "AI 评测",
     "api_test": "接口测试",
     "ui_auto": "UI 自动化",
     "perf_test": "性能测试",
+    "test_execution": "测试执行",
     # AI 底座链路层
     "llm_router": "LLM 路由决策",
     "llm_call": "LLM 生成",

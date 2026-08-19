@@ -72,7 +72,7 @@ def evaluate(
         response = router.chat(messages=[
             {"role": "system", "content": "你是严格的评测专家，只输出 JSON 评测结果。"},
             {"role": "user", "content": prompt},
-        ], task_type="evaluation")
+        ], task_type="quality_eval")
     except Exception as e:
         logger.error(f"[evaluate] LLM 调用失败: {e}")
         return {"status": "failed", "error": str(e), "data": {}, "stats": {}}

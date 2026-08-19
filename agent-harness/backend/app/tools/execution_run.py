@@ -57,7 +57,7 @@ def execute_tests(
         response = router.chat(messages=[
             {"role": "system", "content": "你是测试执行引擎，只输出 JSON 执行摘要。"},
             {"role": "user", "content": prompt},
-        ], task_type="fast_chat")
+        ], task_type="test_execution")
     except Exception as e:
         logger.error(f"[execute_tests] LLM 调用失败: {e}")
         return {"status": "failed", "error": str(e), "data": {}, "stats": {}}

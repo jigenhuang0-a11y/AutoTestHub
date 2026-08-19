@@ -62,7 +62,7 @@ def generate_data(
         response = router.chat(messages=[
             {"role": "system", "content": "你是测试数据生成专家，只输出 JSON 数组。"},
             {"role": "user", "content": prompt},
-        ], task_type="generation")
+        ], task_type="data_factory")
     except Exception as e:
         logger.error(f"[generate_data] LLM 调用失败: {e}")
         return {"status": "failed", "error": str(e), "data": [], "stats": {}}

@@ -168,7 +168,7 @@ def generate_testcases(
             response = router.chat(messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
-            ], task_type="generation")
+            ], task_type="ai_testcase")
         except Exception as e:
             logger.error(f"[generate_testcases] LLM 调用失败: {e}")
             return {"status": "failed", "error": str(e), "data": [], "stats": {}}
