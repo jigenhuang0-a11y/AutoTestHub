@@ -222,6 +222,49 @@ class EvalEvent:
 
 
 class EvalEventStore:
+    """本地 EvalCenter 事件存储：支持业务事件 + 底座 infra 事件 + trace 挂载。""
+
+    def get_trace_panorama(self, trace_id: str) -> List[Dict[str, Any]]:
+        """返回指定 trace_id 的 AI 底座工位全景。
+
+        列出所有已注册的底座能力（llm_router/tool/vector/db/gateway），
+        并标出本次链路中实际调用了哪些、调用次数、总耗时、关键指标。
+        """
+        if not trace_id:
+            return []
+        counts: Dict[str, int] = {}
+        latency: Dict[str, int] = {}
+        meta: Dict[str, Dict] = {}
+        with self._lock:
+            for ev in self._events:
+                if ev.trace_id != trace_id:
+                    continue
+                if not (ev.metadata or {}).get("infra"):
+                    continue
+                feat = ev.feature
+                counts[feat] = counts.get(feat, 0) + 1
+                latency[feat] = latency.get(feat, 0) + (ev.latency_ms or 0)
+                # 保留最近一次的模型/表/工具名等关键元数据
+                meta[feat] = {**(meta.get(feat) or {}), **(ev.metadata or {})}
+                meta[feat]["latency_ms"] = ev.latency_ms
+                meta[feat]["model"] = ev.model or meta[feat].get("model")
+        result = []
+        for feat in INFRA_FEATURES:
+            info = {
+                "feature": feat,
+                "label": FEATURE_LABELS.get(feat, feat),
+                "used": feat in counts,
+                "count": counts.get(feat, 0),
+                "latency_ms": latency.get(feat, 0),
+            }
+            if feat in meta:
+                info["model"] = meta[feat].get("model")
+                info["provider"] = meta[feat].get("provider")
+                info["tool"] = meta[feat].get("tool") or meta[feat].get("tool_name")
+                info["tables"] = meta[feat].get("tables")
+                info["kb_id"] = meta[feat].get("kb_id")
+            result.append(info)
+        return result
     """线程安全的事件存储，底层为 JSON 文件。"""
 
     def __init__(self, path: str = EVENTS_PATH):

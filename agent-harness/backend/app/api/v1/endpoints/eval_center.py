@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.eval_store import get_eval_store
-from app.core.eval_event_store import get_eval_event_store, FEATURE_LABELS
+from app.core.eval_event_store import get_eval_event_store, FEATURE_LABELS, INFRA_FEATURES
 from app.core.hallucination_judge import judge_output
 
 logger = logging.getLogger(__name__)
@@ -145,3 +145,17 @@ def list_features():
         {"value": k, "label": v}
         for k, v in FEATURE_LABELS.items()
     ]
+
+
+@router.get("/trace-panorama/{trace_id}")
+def get_trace_panorama(trace_id: str):
+    """返回指定 trace_id 的 AI 底座工位全景图。
+
+    列出所有底座能力，并标出本次链路实际调用了哪些、调用几次、耗时多少。
+    """
+    if not trace_id:
+        raise HTTPException(status_code=400, detail="trace_id 不能为空")
+    return {
+        "trace_id": trace_id,
+        "components": get_eval_event_store().get_trace_panorama(trace_id),
+    }

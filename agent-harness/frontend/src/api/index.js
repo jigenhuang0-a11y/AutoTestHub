@@ -426,6 +426,7 @@ export const evalCenterAPI = {
   event: (id) => api.get(`/eval-center/events/${id}`),
   poll: (sinceMs = 0) => api.get('/eval-center/poll', { params: { since_ms: sinceMs } }),
   features: () => api.get('/eval-center/features'),
+  tracePanorama: (traceId) => api.get(`/eval-center/trace-panorama/${traceId}`),
 }
 
 // 多 Agent 团队编排 API（对接后端 /api/v1/team/team/tasks 任务生命周期）

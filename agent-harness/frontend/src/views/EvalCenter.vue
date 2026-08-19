@@ -365,6 +365,42 @@
             </div>
           </div>
         </div>
+        <!-- AI 底座工位全景：像工厂看板一样列出所有底座能力，标出本次哪些参与了 -->
+        <el-divider v-if="detail.trace_id">AI 底座工位全景</el-divider>
+        <div v-if="detail.trace_id" v-loading="panoramaLoading" class="trace-panorama">
+          <div v-if="tracePanorama && tracePanorama.length" class="panorama-grid">
+            <div
+              v-for="item in tracePanorama"
+              :key="item.feature"
+              class="panorama-card"
+              :class="{ 'is-used': item.used, 'is-unused': !item.used }"
+            >
+              <div class="panorama-icon" :style="{ background: panoramaColor(item.feature) }">
+                <el-icon :size="18"><component :is="panoramaIcon(item.feature)" /></el-icon>
+              </div>
+              <div class="panorama-info">
+                <div class="panorama-title">{{ item.label || panoramaLabel(item.feature) }}</div>
+                <div class="panorama-desc">
+                  <template v-if="item.used">
+                    <el-tag size="small" type="success" effect="dark">已参与</el-tag>
+                    <span class="panorama-count">调用 {{ item.count }} 次</span>
+                    <span class="panorama-latency">{{ item.latency_ms }}ms</span>
+                  </template>
+                  <el-tag v-else size="small" type="info" effect="dark">未参与</el-tag>
+                </div>
+                <div v-if="item.used" class="panorama-detail">
+                  <span v-if="item.model">模型: {{ item.model }}</span>
+                  <span v-if="item.tool">工具: {{ item.tool }}</span>
+                  <span v-if="item.tables && item.tables.length">表: {{ item.tables.join(',') }}</span>
+                  <span v-if="item.kb_id">KB: {{ item.kb_id }}</span>
+                </div>
+                <div v-else class="panorama-hint">本次链路未调用该底座能力</div>
+              </div>
+            </div>
+          </div>
+          <el-empty v-else description="暂无底座工位数据" :image-size="80" />
+        </div>
+
         <el-steps v-else :active="traceActiveStep(detail)" align-center finish-status="success" class="trace-steps">
           <el-step title="用户提问" :description="truncate(detail.input_text, 60)" />
           <el-step title="LLM 路由" :description="(detail.model || '—') + ' / ' + (detail.provider || '—')" />
@@ -543,6 +579,8 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const stepDetailVisible = ref(false)
 const selectedStep = ref(null)
+const tracePanorama = ref(null)
+const panoramaLoading = ref(false)
 const demoLoading = ref(false)
 const isTracking = ref(false)
 const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
@@ -643,6 +681,7 @@ function isLegacyRecordId(id) {
 }
 
 async function openDetail(row) {
+  tracePanorama.value = null
   // local-/rec- 开头的 ID 来自旧 EvalStore 记录，不是事件存储里的真实 AI 调用事件，直接展示本行数据
   if (row.event_id && !isLegacyRecordId(row.event_id)) {
     try {
@@ -654,6 +693,18 @@ async function openDetail(row) {
     }
   } else {
     detail.value = row
+  }
+  // 打开抽屉时并行拉取底座工位全景，填充下方区域
+  if (detail.value?.trace_id) {
+    panoramaLoading.value = true
+    try {
+      const data = await evalCenterAPI.tracePanorama(detail.value.trace_id)
+      tracePanorama.value = data?.components || []
+    } catch (_) {
+      tracePanorama.value = []
+    } finally {
+      panoramaLoading.value = false
+    }
   }
   detailVisible.value = true
 }
@@ -998,8 +1049,11 @@ function isProblemStep(step, detailRow) {
   if (step.type === 'route' && m.fallback) return true
   // 工具/DB/网关：底层调用失败才标异常
   if (['tool', 'db'].includes(step.type) && (m.error || m.status === 'failed')) return true
-  // 若整条记录 judge 为 0，且该步骤是生成/评分相关，标红提示
-  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) return true
+  // 仅当该业务链路本身需要 Judge 评分且评分确实为 0 时才提示；
+  // fast_chat 这类无 Judge 预期的链路，overall=0 是正常状态，不标异常。
+  const needsJudge = detailRow && (detailRow.feature || detailRow.task_type) &&
+    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
+  if (needsJudge && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) return true
   return false
 }
 
@@ -1124,7 +1178,9 @@ function stepDiagnosis(step, detailRow) {
   if (step.type === 'route' && m.fallback) {
     return '路由命中 fallback 模型。说明首选模型不可用、配额耗尽，或路由规则未覆盖当前 task_type。'
   }
-  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
+  const needsJudge = detailRow && (detailRow.feature || detailRow.task_type) &&
+    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
+  if (needsJudge && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
     return '本记录综合评分为 0，该步骤可能是导致未评分的环节，建议检查 Judge 执行链路或模型输出完整性。'
   }
   return '该步骤暂未发现明显异常。点击可查看详细指标与输出内容。'
@@ -1150,10 +1206,33 @@ function stepSolution(step, detailRow) {
   if (step.type === 'route' && m.fallback) {
     return '1) 检查 model_configs 中首选模型配置是否生效；2) 查看路由表是否覆盖 task_type；3) 确认首选模型配额/网络正常。'
   }
-  if (detailRow && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
+  const needsJudge2 = detailRow && (detailRow.feature || detailRow.task_type) &&
+    !['fast_chat'].includes(detailRow.feature || detailRow.task_type)
+  if (needsJudge2 && detailRow.overall === 0 && ['llm', 'judge', 'route'].includes(step.type)) {
     return '从 LLM 生成输出、Judge 评分结果、路由选择三个方向排查，确保每个步骤都有有效输出且 Judge 能正确解析。'
   }
   return '保持当前配置，定期观察该步骤指标趋势。'
+}
+
+// 底座工位全景：把 feature 映射为视觉类型和图标
+const panoramaTypeMap = {
+  llm_router: { type: 'route', icon: Switch, color: '#3b82f6', label: 'LLM 路由' },
+  tool_call: { type: 'tool', icon: Tools, color: '#f59e0b', label: '工具调用' },
+  tool_gateway: { type: 'tool', icon: Link, color: '#f97316', label: 'MCP 网关' },
+  vector_search: { type: 'retrieve', icon: Search, color: '#a855f7', label: '向量检索' },
+  db_query: { type: 'db', icon: Coin, color: '#ec4899', label: '数据库' },
+}
+
+function panoramaIcon(feature) {
+  return (panoramaTypeMap[feature] || {}).icon || CircleCheck
+}
+
+function panoramaColor(feature) {
+  return (panoramaTypeMap[feature] || {}).color || '#64748b'
+}
+
+function panoramaLabel(feature) {
+  return (panoramaTypeMap[feature] || {}).label || feature
 }
 
 function barColor(score) {
@@ -1682,6 +1761,97 @@ onUnmounted(() => {
 
 .trace-flow-item.is-problem .trace-flow-arrow {
   color: #f87171;
+}
+
+/* AI 底座工位全景 */
+.trace-panorama {
+  padding: 8px 4px 20px;
+}
+
+.panorama-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.panorama-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  transition: all 0.2s ease;
+}
+
+.panorama-card.is-used {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(20, 83, 45, 0.12);
+}
+
+.panorama-card.is-unused {
+  opacity: 0.65;
+}
+
+.panorama-card.is-unused .panorama-icon {
+  filter: grayscale(0.5);
+}
+
+.panorama-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.panorama-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.panorama-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #e2e8f0;
+  margin-bottom: 6px;
+}
+
+.panorama-desc {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.panorama-count,
+.panorama-latency {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.panorama-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.panorama-detail span {
+  background: rgba(15, 23, 42, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.panorama-hint {
+  font-size: 11px;
+  color: #64748b;
 }
 
 /* 节点诊断弹窗 */
