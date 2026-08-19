@@ -12,6 +12,7 @@ LocalToolGateway 替代，内部委托进程内 ToolRegistry（app/tools/registr
 """
 import logging
 import os
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -53,16 +54,47 @@ class LocalToolGateway:
         user_id: Optional[str] = None,
     ) -> dict:
         arguments = arguments or {}
+        _t0 = time.time()
+        _status = "completed"
+        _detail = ""
         try:
             raw = self._registry.call_tool(name, **arguments)
         except KeyError as e:
+            _status = "failed"
+            _detail = str(e)
             return {"isError": True, "content": [{"type": "text", "text": str(e)}]}
         except Exception as e:  # noqa: BLE001
+            _status = "failed"
+            _detail = str(e)
             logger.error(f"[LocalToolGateway] 工具调用异常 {name}: {e}")
             return {"isError": True, "content": [{"type": "text", "text": str(e)}]}
 
         if isinstance(raw, dict) and raw.get("status") == "failed":
-            return {"isError": True, "content": [{"type": "text", "text": raw.get("error", "执行失败")}]}
+            _status = "failed"
+            _detail = raw.get("error", "执行失败")
+            return {"isError": True, "content": [{"type": "text", "text": _detail}]}
+        # EvalCenter 底座埋点：工具网关入口
+        try:
+            from app.core.eval_event_store import record_infra_event
+
+            record_infra_event(
+                feature="tool_gateway",
+                task_type="tool_gateway",
+                input_text=f"网关入口 -> 工具: {name}\n入参: {_to_text(arguments)[:200]}",
+                output_text=_detail if _status == "failed" else "网关转发成功",
+                latency_ms=int((time.time() - _t0) * 1000),
+                model="gateway",
+                provider="local-gateway",
+                metadata={
+                    "tool_name": name,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "is_error": _status == "failed",
+                },
+                status=_status,
+            )
+        except Exception:
+            pass
         return {
             "isError": False,
             "content": [{"type": "text", "text": _to_text(raw)}],

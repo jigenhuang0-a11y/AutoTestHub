@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import threading
 import json
 from typing import List, Dict, Optional
@@ -19,6 +20,14 @@ from typing import List, Dict, Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Faiss 可用性探测（埋点标记使用哪种检索后端）
+try:
+    import faiss  # noqa: F401
+
+    _HAS_FAISS = True
+except Exception:
+    _HAS_FAISS = False
 
 DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -96,15 +105,59 @@ class LocalVectorStore:
     def search(self, query_vector: List[float], top_k: int = 5) -> List[Dict]:
         if not self._vectors:
             return []
-        q = np.array(query_vector, dtype=np.float32)
-        scored = []
-        for vid, txt, meta in zip(self._ids, self._texts, self._metas):
-            # 顺序扫即可，小数据量足够
-            idx = self._ids.index(vid)
-            score = _cosine(q, self._vectors[idx])
-            scored.append({"id": vid, "text": txt, "meta": meta, "score": score})
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_k]
+        _t0 = time.time()
+        try:
+            q = np.array(query_vector, dtype=np.float32)
+            scored = []
+            for vid, txt, meta in zip(self._ids, self._texts, self._metas):
+                # 顺序扫即可，小数据量足够
+                idx = self._ids.index(vid)
+                score = _cosine(q, self._vectors[idx])
+                scored.append({"id": vid, "text": txt, "meta": meta, "score": score})
+            scored.sort(key=lambda x: x["score"], reverse=True)
+            result = scored[:top_k]
+            # EvalCenter 底座埋点：向量检索
+            try:
+                from app.core.eval_event_store import record_infra_event
+
+                record_infra_event(
+                    feature="vector_search",
+                    task_type="vector_search",
+                    input_text=f"集合: {self.collection} | top_k={top_k} | 库内向量数={len(self._vectors)}",
+                    output_text=f"命中 {len(result)} 条，最高分={result[0]['score']:.4f}" if result else "命中 0 条",
+                    latency_ms=int((time.time() - _t0) * 1000),
+                    model="local-faiss" if _HAS_FAISS else "numpy-cosine",
+                    provider="vector-store",
+                    metadata={
+                        "collection": self.collection,
+                        "top_k": top_k,
+                        "corpus_size": len(self._vectors),
+                        "hit_count": len(result),
+                        "top_score": round(result[0]["score"], 4) if result else 0.0,
+                    },
+                    status="completed",
+                )
+            except Exception:
+                pass
+            return result
+        except Exception as e:
+            try:
+                from app.core.eval_event_store import record_infra_event
+
+                record_infra_event(
+                    feature="vector_search",
+                    task_type="vector_search",
+                    input_text=f"集合: {self.collection} | top_k={top_k}",
+                    output_text=f"ERROR: {e}",
+                    latency_ms=int((time.time() - _t0) * 1000),
+                    model="local-faiss" if _HAS_FAISS else "numpy-cosine",
+                    provider="vector-store",
+                    metadata={"collection": self.collection, "error": str(e)},
+                    status="failed",
+                )
+            except Exception:
+                pass
+            raise
 
     # ── 删除 ──
     def delete(self, ids: List[str]):

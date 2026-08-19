@@ -30,6 +30,7 @@ import os
 import sqlite3
 import uuid
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
@@ -2076,8 +2077,75 @@ class TaskStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # EvalCenter 底座埋点：包装 execute 统计 SQL 操作
+        _t0 = time.time()
+        _ops = {"select": 0, "insert": 0, "update": 0, "delete": 0, "other": 0}
+        _tables = set()
+        _orig_execute = conn.execute
+
+        def _wrapped_execute(sql, params=None):
+            sql_u = (sql or "").strip().upper()
+            if sql_u.startswith("SELECT"):
+                _ops["select"] += 1
+            elif sql_u.startswith("INSERT"):
+                _ops["insert"] += 1
+            elif sql_u.startswith("UPDATE"):
+                _ops["update"] += 1
+            elif sql_u.startswith("DELETE"):
+                _ops["delete"] += 1
+            else:
+                _ops["other"] += 1
+            # 粗略提取表名：FROM / INTO / UPDATE 后的第一个 token
+            import re
+            m = re.search(r"(?:FROM|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_]*)", sql_u)
+            if m:
+                _tables.add(m.group(1).lower())
+            return _orig_execute(sql, params) if params is not None else _orig_execute(sql)
+
+        conn.execute = _wrapped_execute
         try:
             yield conn
+            # 成功：仅在有实际写操作时记录（避免大量只读查询刷屏）
+            if (_ops["insert"] + _ops["update"] + _ops["delete"]) > 0:
+                try:
+                    from app.core.eval_event_store import record_infra_event
+
+                    record_infra_event(
+                        feature="db_query",
+                        task_type="db_query",
+                        input_text=f"写操作: INSERT={_ops['insert']} UPDATE={_ops['update']} DELETE={_ops['delete']}",
+                        output_text=f"涉及表: {', '.join(sorted(_tables)) or 'n/a'}",
+                        latency_ms=int((time.time() - _t0) * 1000),
+                        model="sqlite",
+                        provider="task-store",
+                        metadata={
+                            "db": "harness.db",
+                            "ops": _ops,
+                            "tables": sorted(_tables),
+                            "read_only": False,
+                        },
+                        status="completed",
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                from app.core.eval_event_store import record_infra_event
+
+                record_infra_event(
+                    feature="db_query",
+                    task_type="db_query",
+                    input_text=f"数据库操作异常 (ops={_ops})",
+                    output_text="ERROR in db transaction",
+                    latency_ms=int((time.time() - _t0) * 1000),
+                    model="sqlite",
+                    provider="task-store",
+                    metadata={"db": "harness.db", "ops": _ops, "tables": sorted(_tables), "error": True},
+                    status="failed",
+                )
+            except Exception:
+                pass
+            raise
         finally:
             conn.close()
 

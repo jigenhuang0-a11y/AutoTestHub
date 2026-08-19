@@ -7,10 +7,23 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_summary(obj: Any, max_len: int = 200) -> str:
+    """把任意对象安全转为摘要字符串，用于埋点记录。"""
+    try:
+        if obj is None:
+            return ""
+        text = obj if isinstance(obj, str) else str(obj)
+        text = text.replace("\n", " ").strip()
+        return text[:max_len] + ("..." if len(text) > max_len else "")
+    except Exception:
+        return "<unserializable>"
 
 
 @dataclass
@@ -73,7 +86,45 @@ class ToolRegistry:
         spec = self._tools.get(name)
         if spec is None or spec.handler is None:
             raise KeyError(f"工具未注册: {name}")
-        return spec.handler(**kwargs)
+        # EvalCenter 底座埋点：工具调用开始
+        _t0 = time.time()
+        try:
+            result = spec.handler(**kwargs)
+            try:
+                from app.core.eval_event_store import record_infra_event
+
+                record_infra_event(
+                    feature="tool_call",
+                    task_type="tool_call",
+                    input_text=f"工具: {name}\n入参: {_safe_summary(kwargs)}",
+                    output_text=_safe_summary(result),
+                    latency_ms=int((time.time() - _t0) * 1000),
+                    model="local",
+                    provider="local-registry",
+                    metadata={"tool_name": name, "tool_source": "local", "is_mcp": False},
+                    status="completed",
+                )
+            except Exception:
+                pass
+            return result
+        except Exception as e:
+            try:
+                from app.core.eval_event_store import record_infra_event
+
+                record_infra_event(
+                    feature="tool_call",
+                    task_type="tool_call",
+                    input_text=f"工具: {name}\n入参: {_safe_summary(kwargs)}",
+                    output_text=f"ERROR: {e}",
+                    latency_ms=int((time.time() - _t0) * 1000),
+                    model="local",
+                    provider="local-registry",
+                    metadata={"tool_name": name, "tool_source": "local", "is_mcp": False, "error": str(e)},
+                    status="failed",
+                )
+            except Exception:
+                pass
+            raise
 
     def resolve_agent(self, agent_type: str) -> Optional[str]:
         """Supervisor 决策出 agent 类型后，映射到具体工具名。"""

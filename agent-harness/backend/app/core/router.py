@@ -10,7 +10,7 @@ from app.core.llm_provider import BaseLLMProvider
 from app.core.provider_pool import get_provider_pool
 from app.core.config import LLMRouterConfig, get_available_providers, MODEL_REGISTRY
 from app.core.task_store import get_task_store
-from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store
+from app.core.eval_event_store import is_tracked_feature, build_event, get_eval_event_store, record_infra_event
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +355,41 @@ class LLMRouter:
                 },
             )
             get_eval_event_store().add(event)
+
+            # EvalCenter 底座埋点：LLM 路由决策（独立记录，便于前端按 feature 过滤查看 AI 底座活动）
+            try:
+                record_infra_event(
+                    feature="llm_router",
+                    task_type="llm_router",
+                    input_text=f"task_type={task_type} -> 路由到 {used_model}",
+                    output_text=route_reason or f"路由到 {used_model}",
+                    latency_ms=latency_ms,
+                    model=used_model,
+                    provider=provider_name,
+                    trace_steps=[
+                        {
+                            "type": "route",
+                            "title": "LLM 路由决策",
+                            "status": "completed" if not fallback else "fallback",
+                            "metadata": {
+                                "task_type": task_type,
+                                "model": used_model,
+                                "reason": route_reason,
+                                "fallback": fallback,
+                            },
+                        }
+                    ],
+                    metadata={
+                        "task_type": task_type,
+                        "model": used_model,
+                        "reason": route_reason,
+                        "fallback": fallback,
+                        "linked_event_id": event.event_id,
+                    },
+                    status="completed" if not fallback else "fallback",
+                )
+            except Exception:
+                pass
             return event.event_id
         except Exception as e:
             logger.warning(f"[LLMRouter] 记录事件失败: {e}")

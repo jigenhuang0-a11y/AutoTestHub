@@ -108,6 +108,10 @@ class EvalStore:
         records = self.list_records(hours=hours, limit=10000)
         total = len(records)
 
+        # 底座链路事件（infra=True）只计入"测评次数"与趋势 count，不参与质量评分聚合，
+        # 避免无评分的路由/工具/DB 事件拉低业务功能平均分。
+        scored_records = [r for r in records if not r.get("infra")]
+
         dims = ["hallucination", "consistency", "completeness", "executability", "safety"]
         if total == 0:
             return {
@@ -120,22 +124,34 @@ class EvalStore:
                 "recent_records": [],
             }
 
-        avg_scores = {"overall": round(sum(r.get("overall", 0) for r in records) / total, 2)}
+        s_total = len(scored_records)
+        avg_scores = {"overall": round(sum(r.get("overall", 0) for r in scored_records) / s_total, 2)} if s_total else {
+            "overall": 0, "hallucination": 0, "consistency": 0, "completeness": 0, "executability": 0, "safety": 0}
         for dim in dims:
-            avg_scores[dim] = round(sum(r.get(dim, 0) for r in records) / total, 2)
+            avg_scores[dim] = round(sum(r.get(dim, 0) for r in scored_records) / s_total, 2) if s_total else 0
 
-        # 按 feature 聚合
+        # 按 feature 聚合（排除底座链路事件对分数的影响）
         by_feature: Dict[str, Dict[str, Any]] = {}
-        for r in records:
+        for r in scored_records:
             feat = r.get("feature", "unknown")
             if feat not in by_feature:
                 by_feature[feat] = {"count": 0, "overall_sum": 0.0}
             by_feature[feat]["count"] += 1
             by_feature[feat]["overall_sum"] += r.get("overall", 0)
+        # 底座链路事件也单列统计次数（不计算均分）
+        for r in records:
+            if r.get("infra"):
+                feat = r.get("feature", "unknown")
+                if feat not in by_feature:
+                    by_feature[feat] = {"count": 0, "overall_sum": 0.0}
+                by_feature[feat]["count"] += 1
         for feat in by_feature:
-            by_feature[feat]["avg_overall"] = round(
-                by_feature[feat]["overall_sum"] / by_feature[feat]["count"], 2
-            )
+            if by_feature[feat]["overall_sum"] > 0:
+                by_feature[feat]["avg_overall"] = round(
+                    by_feature[feat]["overall_sum"] / by_feature[feat]["count"], 2
+                )
+            else:
+                by_feature[feat]["avg_overall"] = None  # 底座链路无评分
             del by_feature[feat]["overall_sum"]
 
         # 智能粒度：auto 时根据窗口长度选择 hour/week/month

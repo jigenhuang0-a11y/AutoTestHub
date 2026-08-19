@@ -23,6 +23,7 @@ EVENTS_PATH = os.path.join(DATA_DIR, "eval_events.json")
 
 # 需要被 EvalCenter 监控的 AI 功能模块（对应 task_type / feature）
 TRACKED_FEATURES = {
+    # ── 业务功能层（RAG / 问答 / 生成）──
     "knowledge_chat",
     "chat",
     "fast_chat",
@@ -35,6 +36,12 @@ TRACKED_FEATURES = {
     "quality_check",
     "agent_loop",
     "evaluate",
+    # ── AI 底座链路层（基础设施监控）──
+    "llm_router",      # LLM 路由决策
+    "tool_call",       # 工具/MCP 调用执行
+    "tool_gateway",    # 工具网关调用
+    "vector_search",   # 向量检索（Milvus / 本地向量库）
+    "db_query",        # 数据库持久化操作
 }
 
 # 友好显示名称
@@ -51,6 +58,21 @@ FEATURE_LABELS = {
     "quality_check": "质量检查",
     "agent_loop": "Agent 编排",
     "evaluate": "AI 评测",
+    # AI 底座链路层
+    "llm_router": "LLM 路由决策",
+    "tool_call": "工具调用执行",
+    "tool_gateway": "工具网关调用",
+    "vector_search": "向量检索",
+    "db_query": "数据库操作",
+}
+
+# 基础设施层功能（用于前端区分"业务功能"与"AI 底座"标签）
+INFRA_FEATURES = {
+    "llm_router",
+    "tool_call",
+    "tool_gateway",
+    "vector_search",
+    "db_query",
 }
 
 
@@ -346,6 +368,66 @@ def build_event(
         metadata=metadata or {},
         status=status,
     )
+
+
+def record_infra_event(
+    feature: str,
+    task_type: str,
+    input_text: str,
+    output_text: str = "",
+    latency_ms: int = 0,
+    model: str = "",
+    provider: str = "",
+    trace_steps: Optional[List[Dict]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    status: str = "completed",
+) -> Optional[str]:
+    """AI 底座链路轻量埋点（不触发 Judge 评分，仅做全链路追踪）。
+
+    Args:
+        feature: 功能模块标识（如 llm_router / tool_call / vector_search / db_query / tool_gateway）
+        task_type: 同 feature（底座层 feature 即 task_type）
+        input_text: 调用入参摘要
+        output_text: 调用返回摘要
+        latency_ms: 耗时
+        trace_steps: 链路步骤（可选，若调用方已实现精细步骤可传入）
+        metadata: 附加数据（如 tool_name / collection / sql 等）
+        status: completed / failed
+    """
+    if task_type not in TRACKED_FEATURES:
+        return None
+    try:
+        token = 0
+        try:
+            token = int(len((input_text or "") + (output_text or "")) / 4)
+        except Exception:
+            token = 0
+        # 若未显式传入 trace_steps，则按默认步骤构造一条链路记录
+        if not trace_steps:
+            trace_steps = [{
+                "type": "tool" if feature in ("tool_call", "tool_gateway", "vector_search", "db_query") else "route",
+                "title": FEATURE_LABELS.get(feature, feature),
+                "status": status,
+                "metadata": metadata or {},
+            }]
+        ev = build_event(
+            feature=feature,
+            task_type=task_type,
+            model=model,
+            provider=provider,
+            input_text=input_text,
+            output_text=output_text,
+            latency_ms=latency_ms,
+            token_usage=token,
+            trace_steps=trace_steps,
+            metadata={**(metadata or {}), "infra": True},
+            status=status,
+        )
+        get_eval_event_store().add(ev)
+        return ev.event_id
+    except Exception as e:
+        logger.warning(f"[EvalEventStore] 底座埋点失败({feature}): {e}")
+        return None
 
 
 def _summarize(text: str, max_len: int = 300) -> str:

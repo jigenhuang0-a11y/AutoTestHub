@@ -203,7 +203,10 @@
           <el-table :data="records" size="default" max-height="340" stripe @row-click="openDetail">
             <el-table-column prop="feature" label="模块" width="130" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-tag size="small" effect="plain">{{ featureLabel(row.feature) }}</el-tag>
+                <div class="feat-cell">
+                  <el-tag size="small" :effect="isInfraFeature(row.feature) ? 'dark' : 'plain'" :type="isInfraFeature(row.feature) ? 'warning' : 'info'">{{ featureLabel(row.feature) }}</el-tag>
+                  <el-tag v-if="isInfraFeature(row.feature)" size="small" effect="dark" type="danger" class="infra-badge">底座</el-tag>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="模型 / 耗时" width="150" show-overflow-tooltip>
@@ -252,7 +255,10 @@
       <el-table :data="lowScoreRecords" size="default" max-height="320" stripe empty-text="暂无低分样本，质量良好 🎉">
         <el-table-column prop="feature" label="模块" width="120">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ featureLabel(row.feature) }}</el-tag>
+            <div class="feat-cell">
+              <el-tag size="small" :effect="isInfraFeature(row.feature) ? 'dark' : 'plain'" :type="isInfraFeature(row.feature) ? 'warning' : 'info'">{{ featureLabel(row.feature) }}</el-tag>
+              <el-tag v-if="isInfraFeature(row.feature)" size="small" effect="dark" type="danger" class="infra-badge">底座</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="综合" width="70" align="center">
@@ -299,8 +305,8 @@
     <el-drawer v-model="detailVisible" title="链路追踪回放" size="46%" :destroy-on-close="true">
       <div v-if="detail" class="detail-wrap">
         <div class="detail-head">
-          <el-tag effect="plain">{{ featureLabel(detail.feature) }}</el-tag>
-          <el-tag v-if="detail.overall" :type="scoreTag(detail.overall)">综合 {{ detail.overall }}</el-tag>
+          <el-tag :effect="isInfraFeature(detail.feature) ? 'dark' : 'plain'" :type="isInfraFeature(detail.feature) ? 'warning' : 'info'">{{ featureLabel(detail.feature) }}</el-tag>
+          <el-tag v-if="isInfraFeature(detail.feature)" size="small" effect="dark" type="danger">AI 底座</el-tag>
           <el-tag v-if="detail.status" :type="detail.status === 'completed' ? 'success' : 'warning'">{{ detail.status === 'judging' ? 'Judge 中' : detail.status }}</el-tag>
           <el-tag type="info">{{ formatTime(detail.created_at) }}</el-tag>
           <el-button v-if="detail.trace_id && langfuse?.enabled" size="small" type="info" @click="openTrace(detail.trace_id)">在 Langfuse 打开</el-button>
@@ -485,6 +491,7 @@ import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
 const featureLabels = {
+  // ── 业务功能层 ──
   ai_testcase: 'AI 用例生成',
   data_generation: '数据工厂',
   data_factory: '数据工厂',
@@ -498,8 +505,17 @@ const featureLabels = {
   requirement_review: '需求评审',
   quality_check: '质量检查',
   evaluate: 'AI 评测',
+  // ── AI 底座链路层 ──
+  llm_router: 'LLM 路由',
+  tool_call: '工具调用',
+  tool_gateway: '工具网关',
+  vector_search: '向量检索',
+  db_query: '数据库操作',
   unknown: '未分类',
 }
+// AI 底座链路层标识（用于事件列表的底座标签）
+const INFRA_FEATURES = ['llm_router', 'tool_call', 'tool_gateway', 'vector_search', 'db_query']
+const isInfraFeature = (f) => INFRA_FEATURES.includes(f)
 const featureLabel = (f) => featureLabels[f] || f || '未分类'
 const truncate = (s, n) => (s && s.length > n ? s.slice(0, n) + '…' : (s || ''))
 function formatTime(iso) {
@@ -665,7 +681,7 @@ function exportReport() {
     ...dimList.map(x => `  ${x.label}：${scoreOf(x.key)}`),
     '',
     '【各模块评测分布】',
-    ...Object.entries(d.by_feature).map(([k, v]) => `  ${featureLabel(k)}：样本 ${v.count} | 平均分 ${v.avg_overall}`),
+    ...Object.entries(d.by_feature).map(([k, v]) => `  ${featureLabel(k)}：样本 ${v.count} | 平均分 ${v.avg_overall == null ? 'N/A（底座链路）' : v.avg_overall}`),
     '',
     '【最近评测记录】',
     ...records.value.slice(0, 50).map(r => `  [${r.overall}] ${featureLabel(r.feature)} - ${r.reason || '（无说明）'}`),
@@ -1647,6 +1663,9 @@ onUnmounted(() => {
   50% { opacity: 0.5; }
   100% { opacity: 1; }
 }
+
+.feat-cell { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.infra-badge { font-size: 10px; padding: 0 5px; line-height: 16px; height: 18px; }
 </style>
 
 <style scoped>
