@@ -238,8 +238,9 @@
             <div class="card-header">
               <span>最近评测记录</span>
               <div class="header-actions">
-                <el-tag size="small" type="info">{{ records.length }} 条</el-tag>
-                <el-button size="small" link type="primary" @click="loadRecords">刷新</el-button>
+                <el-tag size="small" type="info">{{ filteredRecords.length }} / {{ records.length }} 条</el-tag>
+                <el-switch v-model="showInfraEvents" active-text="显示底座事件" size="small" inline-prompt style="margin-left: 8px;" />
+                <el-button size="small" link type="primary" @click="loadRecords" style="margin-left: 8px;">刷新</el-button>
               </div>
             </div>
           </template>
@@ -419,6 +420,7 @@ const LOW_OVERALL = 70
 const LOW_HALLUCINATION = 60
 const lastEventMs = ref(0)
 const pollLoading = ref(false)
+const showInfraEvents = ref(false)  // 默认只看业务功能事件，避免底座事件淹没列表
 
 const lowScoreRecords = computed(() =>
   records.value.filter(r =>
@@ -451,9 +453,16 @@ async function loadRecords() {
   }
 }
 
-const filteredRecords = computed(() =>
-  activeFeature.value ? records.value.filter(r => r.feature === activeFeature.value) : records.value
-)
+const filteredRecords = computed(() => {
+  let list = records.value
+  if (!showInfraEvents.value) {
+    list = list.filter(r => !isInfraFeature(r.feature))
+  }
+  if (activeFeature.value) {
+    list = list.filter(r => r.feature === activeFeature.value)
+  }
+  return list
+})
 
 // 按功能聚合的流水线概览（幻觉率 / Token / 耗时），来自后端 stats_by_feature
 const featureStatsList = computed(() =>
