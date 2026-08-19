@@ -1194,7 +1194,7 @@ onMounted(() => {
 
 .card-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid rgba(64, 158, 255, 0.15);
+  padding: 10px 16px; border-bottom: 1px solid rgba(64, 158, 255, 0.15);
   background: rgba(64, 158, 255, 0.03); position: relative; z-index: 3;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
@@ -1218,12 +1218,12 @@ onMounted(() => {
   color: #00ff88; background: rgba(0, 255, 136, 0.1);
   padding: 3px 8px; border-radius: 4px;
 }
-.card-body { padding: 14px 18px; position: relative; z-index: 3; }
+.card-body { padding: 10px 14px; position: relative; z-index: 3; }
 
 /* ── 布局 ── */
-.config-grid { display: grid; gap: 16px; margin-bottom: 16px; }
+.config-grid { display: grid; gap: 12px; margin-bottom: 12px; }
 .config-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
-.model-card, .prompt-card, .knowledge-card { min-height: 340px; }
+.model-card, .prompt-card, .knowledge-card { min-height: 260px; }
 .monitor-grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 16px; }
 .resource-card, .queue-card { min-height: 340px; }
 .chart-card { min-height: 340px; }
@@ -1331,10 +1331,10 @@ onMounted(() => {
 .legend-dot.latency { background: #fbbf24; }
 
 /* ── 状态网格 ── */
-.status-card { margin-bottom: 16px; }
-.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.status-card { margin-top: 0; margin-bottom: 12px; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .status-item {
-  display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 12px;
+  display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px;
   background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(64, 158, 255, 0.18);
   position: relative; overflow: hidden; transition: transform 0.3s, border-color 0.3s, box-shadow 0.3s; cursor: pointer;
 }
