@@ -145,6 +145,7 @@ class LLMRouter:
         model: Optional[str] = None,
         temperature: float = 0.3,
         team_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> dict:
         """
         ReAct / Agent 专用：带工具调用的 LLM 请求。

@@ -222,7 +222,10 @@ class EvalEvent:
 
 
 class EvalEventStore:
-    """本地 EvalCenter 事件存储：支持业务事件 + 底座 infra 事件 + trace 挂载。""
+    """本地 EvalCenter 事件存储：支持业务事件 + 底座 infra 事件 + trace 挂载。
+
+    线程安全的事件存储，底层为 JSON 文件。
+    """
 
     def get_trace_panorama(self, trace_id: str) -> List[Dict[str, Any]]:
         """返回指定 trace_id 的 AI 底座工位全景。
@@ -265,7 +268,6 @@ class EvalEventStore:
                 info["kb_id"] = meta[feat].get("kb_id")
             result.append(info)
         return result
-    """线程安全的事件存储，底层为 JSON 文件。"""
 
     def __init__(self, path: str = EVENTS_PATH):
         self.path = path
