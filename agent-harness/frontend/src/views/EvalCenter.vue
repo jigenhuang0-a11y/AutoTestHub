@@ -479,15 +479,6 @@
           </div>
         </template>
 
-        <el-divider>输入输出原文</el-divider>
-        <div class="io-block">
-          <div class="io-label">用户提问</div>
-          <pre class="io-text">{{ detail.input_text || '—' }}</pre>
-        </div>
-        <div class="io-block">
-          <div class="io-label">AI 回答</div>
-          <pre class="io-text">{{ detail.output_text || '—' }}</pre>
-        </div>
         <div v-if="detail.model || detail.latency_ms || detail.token_usage" class="meta-line">
           <el-tag size="small" v-if="detail.model">模型 {{ detail.model }}</el-tag>
           <el-tag size="small" v-if="detail.latency_ms">耗时 {{ detail.latency_ms }}ms</el-tag>
