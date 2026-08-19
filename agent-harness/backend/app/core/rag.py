@@ -311,14 +311,14 @@ async def _run_eval_async(
 
 
 def _schedule_background_eval(coro):
-    """把后台评估协程投到主事件循环，失败则静默丢弃（不阻塞响应）。"""
-    if _MAIN_LOOP and not _MAIN_LOOP.is_closed():
+    """把后台评估协程放到独立后台线程运行，不阻塞响应也不依赖主循环。"""
+    def _run():
         try:
-            asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
-            return
+            asyncio.run(coro)
         except Exception as e:
-            logger.warning(f"[RAG] 后台评估调度失败: {e}")
-    logger.warning("[RAG] 无可用事件循环，后台评估未启动")
+            logger.error(f"[RAG] 后台评估执行失败: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 CHUNK_SIZE = 600          # 每个 chunk 约 600 字
@@ -718,7 +718,7 @@ def answer_stream(
         temperature = 0.3 if enable_reasoning else 0.2
         for event in router.chat_stream(
             messages,
-            task_type="rag_query",
+            task_type="knowledge_chat",
             temperature=temperature,
             enable_reasoning=enable_reasoning,
             trace_id=trace_id,

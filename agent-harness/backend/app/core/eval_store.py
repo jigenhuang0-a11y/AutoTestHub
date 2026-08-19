@@ -100,18 +100,19 @@ class EvalStore:
         """聚合仪表盘数据。
 
         granularity:
-          - 'hour': 按小时聚合（默认 24h 窗口内最多 24 个点）
-          - 'day' : 按天聚合（适合跨天拉长曲线）
+          - 'hour': 按小时聚合（默认 24h 窗口内 24 个点，空桶补 0）
+          - 'day' : 按天聚合（适合跨天拉长曲线，空桶补 0）
           - 'auto': 若指定 hours 窗口内只有 1 个时间点，则自动退化为 'day'，
                     让趋势曲线更完整；否则用 'hour'。
         """
         records = self.list_records(hours=hours, limit=10000)
         total = len(records)
+
+        dims = ["hallucination", "consistency", "completeness", "executability", "safety"]
         if total == 0:
             return {
                 "total_records": 0,
                 "granularity": "hour",
-                # 空数据也返回粒度，前端好判断
                 "avg_scores": {"overall": 0, "hallucination": 0, "consistency": 0,
                                "completeness": 0, "executability": 0, "safety": 0},
                 "by_feature": {},
@@ -119,7 +120,6 @@ class EvalStore:
                 "recent_records": [],
             }
 
-        dims = ["hallucination", "consistency", "completeness", "executability", "safety"]
         avg_scores = {"overall": round(sum(r.get("overall", 0) for r in records) / total, 2)}
         for dim in dims:
             avg_scores[dim] = round(sum(r.get(dim, 0) for r in records) / total, 2)
@@ -141,14 +141,16 @@ class EvalStore:
         # 智能粒度：auto 时，若窗口内只有 1 个时间点，退化为按天聚合
         effective_gran = granularity
         if effective_gran == "auto":
-            # 先按小时聚合看有几个点
             hour_map: Dict[str, int] = {}
             for r in records:
                 hour = r.get("created_at", "")[:13]
                 hour_map[hour] = hour_map.get(hour, 0) + 1
             effective_gran = "day" if len(hour_map) <= 1 else "hour"
 
-        # 按粒度聚合趋势
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=hours)
+
+        # 按粒度聚合趋势（只统计窗口内的记录）
         trend_map: Dict[str, Dict[str, Any]] = {}
         for r in records:
             if effective_gran == "day":
@@ -159,20 +161,37 @@ class EvalStore:
                 trend_map[key] = {"hour": key, "count": 0, "overall_sum": 0.0}
             trend_map[key]["count"] += 1
             trend_map[key]["overall_sum"] += r.get("overall", 0)
-        trend = sorted(trend_map.values(), key=lambda x: x["hour"])
-        # 小时粒度最多展示最近 24 个点，避免过宽
-        if effective_gran == "hour":
-            trend = trend[-24:]
-        for t in trend:
-            t["avg_overall"] = round(t["overall_sum"] / t["count"], 2)
-            del t["overall_sum"]
+
+        # 填充完整时间窗口，空桶补 0，让 X 轴连续且时间正确
+        filled_trend: List[Dict[str, Any]] = []
+        if effective_gran == "day":
+            days = max(1, hours // 24)
+            cur = cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
+            for _ in range(days + 1):
+                key = cur.strftime("%Y-%m-%d")
+                bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
+                bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
+                filled_trend.append(bucket)
+                cur += timedelta(days=1)
+        else:
+            cur = cutoff.replace(minute=0, second=0, microsecond=0)
+            for _ in range(hours + 1):
+                key = cur.strftime("%Y-%m-%dT%H")
+                bucket = trend_map.get(key, {"hour": key, "count": 0, "overall_sum": 0.0})
+                bucket["avg_overall"] = round(bucket["overall_sum"] / bucket["count"], 2) if bucket["count"] else None
+                filled_trend.append(bucket)
+                cur += timedelta(hours=1)
+
+        for t in filled_trend:
+            if "overall_sum" in t:
+                del t["overall_sum"]
 
         return {
             "total_records": total,
             "granularity": effective_gran,
             "avg_scores": avg_scores,
             "by_feature": by_feature,
-            "trend": trend,
+            "trend": filled_trend,
             "recent_records": records[:20],
         }
 
