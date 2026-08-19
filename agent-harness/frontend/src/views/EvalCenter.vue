@@ -62,58 +62,6 @@
       </div>
     </div>
 
-    <!-- 顶部指标卡 -->
-    <el-row :gutter="16" class="metric-row">
-      <el-col :xs="24" :sm="12" :md="6">
-        <div class="metric-card">
-          <div class="metric-icon blue">
-            <el-icon :size="24"><Collection /></el-icon>
-          </div>
-          <div class="metric-body">
-            <div class="metric-value">{{ dashboard.total_records }}</div>
-            <div class="metric-label">近 {{ hours }}h 评测样本</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <div class="metric-card">
-          <div class="metric-icon purple">
-            <el-icon :size="24"><Medal /></el-icon>
-          </div>
-          <div class="metric-body">
-            <div class="metric-value" :class="scoreClass(dashboard.avg_scores.overall)">
-              {{ dashboard.avg_scores.overall }}
-            </div>
-            <div class="metric-label">平均综合分</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <div class="metric-card">
-          <div class="metric-icon orange">
-            <el-icon :size="24"><View /></el-icon>
-          </div>
-          <div class="metric-body">
-            <div class="metric-value" :class="scoreClass(dashboard.avg_scores.hallucination)">
-              {{ dashboard.avg_scores.hallucination }}
-            </div>
-            <div class="metric-label">平均幻觉率得分</div>
-          </div>
-        </div>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <div class="metric-card">
-          <div class="metric-icon teal">
-            <el-icon :size="24"><Grid /></el-icon>
-          </div>
-          <div class="metric-body">
-            <div class="metric-value">{{ Object.keys(dashboard.by_feature).length }}</div>
-            <div class="metric-label">覆盖业务模块</div>
-          </div>
-        </div>
-      </el-col>
-    </el-row>
-
     <!-- 功能流水线概览：一眼看清哪个功能出问题（幻觉率/Token/耗时） -->
     <el-card shadow="never" class="feat-card">
       <template #header>
@@ -352,7 +300,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Collection, Medal, View, Grid, Download } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -1735,65 +1683,10 @@ onUnmounted(() => {
   100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
 }
 
-.metric-row {
-  margin-bottom: 20px;
-}
-
-.metric-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  background: #27354d;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.2);
-  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-}
-
-.metric-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.3);
-  border-color: rgba(148, 163, 184, 0.32);
-}
-
-.metric-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.metric-icon.blue { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
-.metric-icon.purple { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
-.metric-icon.orange { background: rgba(249, 115, 22, 0.15); color: #fb923c; }
-.metric-icon.teal { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; }
-
-.metric-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.metric-value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #f8fafc;
-}
-
 .trend-header-actions {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.metric-label {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #94a3b8;
 }
 
 .score-excellent { color: #4ade80; }
@@ -2110,6 +2003,5 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .eval-center { padding: 16px; }
   .page-header { flex-direction: column; align-items: flex-start; }
-  .metric-card { margin-bottom: 12px; }
 }
 </style>
