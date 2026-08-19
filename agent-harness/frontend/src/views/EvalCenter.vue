@@ -62,6 +62,32 @@
       </div>
     </div>
 
+    <!-- 维度评分条 -->
+    <el-card shadow="never" class="dim-card compact">
+      <template #header>
+        <div class="card-header">
+          <span>多维度质量评分</span>
+          <el-tag size="small" :type="scoreTag(dashboard.avg_scores.overall)">
+            综合 {{ dashboard.avg_scores.overall }}
+          </el-tag>
+        </div>
+      </template>
+      <div class="dim-grid compact">
+        <div v-for="d in dimList" :key="d.key" class="dim-item compact">
+          <div class="dim-top compact">
+            <span class="dim-name">{{ d.label }}</span>
+            <span class="dim-score" :class="scoreClass(scoreOf(d.key))">{{ scoreOf(d.key) }}</span>
+          </div>
+          <el-progress
+            :percentage="scoreOf(d.key)"
+            :stroke-width="6"
+            :show-text="false"
+            :color="barColor(scoreOf(d.key))"
+          />
+        </div>
+      </div>
+    </el-card>
+
     <!-- 功能流水线概览：一眼看清哪个功能出问题（幻觉率/Token/耗时） -->
     <el-card shadow="never" class="feat-card">
       <template #header>
@@ -101,32 +127,6 @@
             </div>
           </div>
           <el-progress :percentage="Math.min(100, f.avg_hallucination || 0)" :stroke-width="6" :show-text="false" :color="f.avg_hallucination > 60 ? '#f56c6c' : '#67c23a'" />
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 维度评分条 -->
-    <el-card shadow="never" class="dim-card">
-      <template #header>
-        <div class="card-header">
-          <span>多维度质量评分</span>
-          <el-tag size="small" :type="scoreTag(dashboard.avg_scores.overall)">
-            综合 {{ dashboard.avg_scores.overall }}
-          </el-tag>
-        </div>
-      </template>
-      <div class="dim-grid">
-        <div v-for="d in dimList" :key="d.key" class="dim-item">
-          <div class="dim-top">
-            <span class="dim-name">{{ d.label }}</span>
-            <span class="dim-score" :class="scoreClass(scoreOf(d.key))">{{ scoreOf(d.key) }}</span>
-          </div>
-          <el-progress
-            :percentage="scoreOf(d.key)"
-            :stroke-width="10"
-            :show-text="false"
-            :color="barColor(scoreOf(d.key))"
-          />
         </div>
       </div>
     </el-card>
@@ -1716,16 +1716,16 @@ onUnmounted(() => {
 
 .feat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
-  padding: 6px 2px 2px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  padding: 4px 2px 2px;
 }
 
 .feat-item {
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 10px;
-  padding: 14px 14px 12px;
+  padding: 10px 12px 10px;
   cursor: pointer;
   transition: all 0.18s ease;
 }
@@ -1749,25 +1749,25 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .feat-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #f1f5f9;
 }
 
 .feat-count {
-  font-size: 12px;
+  font-size: 11px;
   color: #94a3b8;
 }
 
 .feat-metrics {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px 12px;
-  margin-bottom: 10px;
+  gap: 4px 10px;
+  margin-bottom: 6px;
 }
 
 .feat-metric {
@@ -1776,12 +1776,12 @@ onUnmounted(() => {
 }
 
 .fm-label {
-  font-size: 11px;
+  font-size: 10px;
   color: #94a3b8;
 }
 
 .fm-value {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: #e2e8f0;
   line-height: 1.2;
@@ -1796,11 +1796,23 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
+.dim-card.compact {
+  margin-bottom: 14px;
+}
+
 .dim-card :deep(.el-card__header) {
   padding: 16px 20px;
   font-weight: 600;
   color: #f8fafc;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.dim-card.compact :deep(.el-card__header) {
+  padding: 10px 16px;
+}
+
+.dim-card.compact :deep(.el-card__body) {
+  padding: 10px 16px 12px;
 }
 
 .dim-grid {
@@ -1810,16 +1822,29 @@ onUnmounted(() => {
   padding: 8px 4px 4px;
 }
 
+.dim-grid.compact {
+  gap: 8px 20px;
+  padding: 0;
+}
+
 .dim-item {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.dim-item.compact {
+  gap: 4px;
+}
+
 .dim-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.dim-top.compact {
+  line-height: 1.2;
 }
 
 .dim-name {
@@ -1830,6 +1855,10 @@ onUnmounted(() => {
 .dim-score {
   font-size: 16px;
   font-weight: 700;
+}
+
+.dim-top.compact .dim-score {
+  font-size: 14px;
 }
 
 .chart-row {
@@ -1890,7 +1919,7 @@ onUnmounted(() => {
 .chart-box {
   position: relative;
   width: 100%;
-  height: 260px;
+  height: 200px;
 }
 
 .chart-empty {
