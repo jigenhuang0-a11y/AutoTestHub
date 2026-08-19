@@ -166,77 +166,7 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" class="chart-row bottom-row">
-      <el-col :xs="24" :lg="12" class="bottom-left">
-        <el-card shadow="never" class="chart-card feature-card">
-          <template #header>
-            <div class="card-header">
-              <span>模块覆盖 & 平均分</span>
-              <el-tag size="small" type="info">{{ Object.keys(dashboard.by_feature).length }} 个模块</el-tag>
-            </div>
-          </template>
-          <div ref="featureRef" class="chart-box">
-            <div v-if="isFeatureEmpty" class="chart-empty">暂无模块数据</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :lg="12" class="bottom-right">
-        <el-card shadow="never" class="chart-card records-card">
-          <template #header>
-            <div class="card-header">
-              <span>最近评测记录</span>
-              <div class="header-actions">
-                <el-tag size="small" type="info">{{ filteredRecords.length }} / {{ records.length }} 条</el-tag>
-                <el-switch v-model="showInfraEvents" active-text="显示底座事件" size="small" inline-prompt style="margin-left: 8px;" />
-                <el-button size="small" link type="primary" @click="loadRecords" style="margin-left: 8px;">刷新</el-button>
-              </div>
-            </div>
-          </template>
-          <el-table :data="filteredRecords" size="default" max-height="340" stripe @row-click="openDetail">
-            <el-table-column prop="feature" label="模块" width="130" show-overflow-tooltip>
-              <template #default="{ row }">
-                <div class="feat-cell">
-                  <el-tag size="small" :effect="isInfraFeature(row.feature) ? 'dark' : 'plain'" :type="isInfraFeature(row.feature) ? 'warning' : 'info'">{{ featureLabel(row.feature) }}</el-tag>
-                  <el-tag v-if="isInfraFeature(row.feature)" size="small" effect="dark" type="danger" class="infra-badge">底座</el-tag>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="模型 / 耗时" width="150" show-overflow-tooltip>
-              <template #default="{ row }">
-                <div class="record-model">{{ row.model || '—' }}</div>
-                <div class="record-meta">{{ row.latency_ms ? row.latency_ms + 'ms' : '—' }} · {{ row.provider || '—' }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="综合" width="70" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.overall" :type="scoreTag(row.overall)" size="small">{{ row.overall }}</el-tag>
-                <span v-else class="record-meta">—</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="幻觉" width="70" align="center">
-              <template #default="{ row }">
-                <span v-if="row.hallucination" :class="scoreClass(row.hallucination)">{{ row.hallucination }}</span>
-                <span v-else class="record-meta">—</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="reason" label="状态 / Judge 结论" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span v-if="row.status === 'judging'" class="record-meta">Judge 中…</span>
-                <span v-else>{{ row.reason || '已完成，暂无 Judge 结论' }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="140" align="center">
-              <template #default="{ row }">
-                <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
-                <el-button v-if="row.trace_id && langfuse?.enabled" link type="info" size="small" @click.stop="openTrace(row.trace_id)">Trace</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
 
-    <!-- 待优化样本队列 -->
     <el-card shadow="never" class="queue-card">
       <template #header>
         <div class="card-header">
@@ -447,9 +377,12 @@ const filteredRecords = computed(() => {
 
 // 按功能聚合的流水线概览（幻觉率 / Token / 耗时），只展示业务功能并补零
 const featureStatsList = computed(() => {
+  const safeStats = featureStats.value && typeof featureStats.value === 'object' && !Array.isArray(featureStats.value)
+    ? featureStats.value
+    : {}
   // 先归并后端返回的别名数据
   const merged = {}
-  Object.entries(featureStats.value || {}).forEach(([rawKey, val]) => {
+  Object.entries(safeStats).forEach(([rawKey, val]) => {
     const key = normalizeFeature(rawKey)
     if (!BUSINESS_FEATURES.includes(key)) return
     const cur = merged[key]
@@ -470,7 +403,7 @@ const featureStatsList = computed(() => {
       avg_latency_ms: total ? Math.round(((cur.avg_latency_ms || 0) * weightA + (val.avg_latency_ms || 0) * weightB) / total) : 0,
     }
   })
-  // 对未调用的业务功能补零展示
+  // 对未调用的业务功能补零展示，确保即使后端无数据也始终有卡片
   BUSINESS_FEATURES.forEach((key) => {
     if (!merged[key]) {
       merged[key] = { feature: key, label: featureLabel(key), count: 0, avg_hallucination: 0, avg_score: 0, avg_tokens: 0, avg_latency_ms: 0 }
@@ -482,8 +415,13 @@ const featureStatsList = computed(() => {
 async function loadFeatureStats() {
   try {
     const data = await evalCenterAPI.featureStats(hours.value)
-    if (data) featureStats.value = data
-  } catch (_) {}
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      featureStats.value = data
+    }
+  } catch (e) {
+    // 后端接口未就绪时，保底展示空业务功能卡片，不阻塞界面
+    console.warn('feature-stats load failed:', e.message)
+  }
 }
 
 function toggleFeatureFilter(f) {
@@ -664,6 +602,8 @@ function normalizeDashboard(data) {
 async function loadDashboard() {
   loading.value = true
   try {
+    // 刷新面板时同步刷新功能链路概览数据
+    await loadFeatureStats()
     // axios 拦截器已返回 response.data，无需再解构 { data }
     const data = await evalCenterAPI.dashboard(hours.value, granularity.value)
     dashboard.value = normalizeDashboard(data)
