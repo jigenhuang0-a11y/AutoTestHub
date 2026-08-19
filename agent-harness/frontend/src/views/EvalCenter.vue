@@ -1180,13 +1180,15 @@ function formatTrendLabel(item) {
       return `${pad(d.getMonth() + 1)}.${pad(d.getDate())}`
     }
   }
-  const hasTime = hour.includes('T')
-  const iso = hasTime ? `${hour}:00:00Z` : `${hour}T00:00:00Z`
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return hour
-  const pad = n => String(n).padStart(2, '0')
-  const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  return hasTime ? `${md} ${pad(d.getHours())}:00` : md
+  // 小时聚合：hour 形如 "2026-08-19T00"
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(hour)) {
+    const d = new Date(`${hour}:00:00Z`)
+    if (!isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0')
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
+    }
+  }
+  return hour
 }
 
 function initTrend() {
@@ -1199,8 +1201,8 @@ function initTrend() {
     return
   }
   trendChart = echarts.init(trendRef.value, null, { renderer: 'canvas' })
-  const x = trend.map(t => formatTrendLabel(t.hour))
-  const rawHours = trend.map(t => t.hour)
+  const x = trend.map(t => formatTrendLabel(t))
+  const rawHours = trend.map(t => t.latest_at || t.hour)
   const avg = trend.map(t => (t.avg_overall == null ? null : Number(t.avg_overall)))
   const count = trend.map(t => Number(t.count) || 0)
   const maxCount = Math.max(...count, 1)
@@ -1215,8 +1217,8 @@ function initTrend() {
       smooth: true,
       lineStyle: { width: single ? 0 : 3 },
       symbol: 'circle',
-      symbolSize: single ? 22 : 8,
-      itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: single ? 3 : 0 },
+      symbolSize: single ? 18 : 5,
+      itemStyle: { color: '#60a5fa', borderColor: '#fff', borderWidth: single ? 2 : 0 },
       label: {
         show: true,
         position: 'top',
@@ -1232,8 +1234,8 @@ function initTrend() {
       yAxisIndex: 1,
       data: count,
       symbol: 'circle',
-      symbolSize: value => Math.min(26, Math.max(10, Math.sqrt(value || 0) * 5)),
-      itemStyle: { color: 'rgba(52,211,153,0.85)', shadowBlur: 6, shadowColor: 'rgba(52,211,153,0.4)' },
+      symbolSize: value => Math.min(16, Math.max(6, Math.sqrt(value || 0) * 2.5)),
+      itemStyle: { color: 'rgba(52,211,153,0.85)', shadowBlur: 4, shadowColor: 'rgba(52,211,153,0.3)' },
       label: {
         show: true,
         position: 'top',
