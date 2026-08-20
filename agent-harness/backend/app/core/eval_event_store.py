@@ -583,10 +583,12 @@ class EvalEventStore:
             if e.judge and "overall" in e.judge:
                 s["score_sum"] += float(e.judge["overall"])
                 s["score_count"] += 1
-            # 幻觉率：优先取 judge 的 hallucination 维度，其次 metrics.hallucination
+            # 幻觉率：从 dimension_scores（中文 key）或 judge.hallucination 读取
             halluc = None
-            if e.judge and isinstance(e.judge.get("dimension_scores"), dict):
-                halluc = e.judge["dimension_scores"].get("hallucination")
+            if isinstance(e.dimension_scores, dict):
+                halluc = e.dimension_scores.get("幻觉率")
+            if halluc is None and e.judge and isinstance(e.judge.get("hallucination"), (int, float)):
+                halluc = e.judge["hallucination"]
             if halluc is None and isinstance(e.metrics, dict):
                 mh = e.metrics.get("hallucination")
                 if isinstance(mh, dict):
@@ -603,6 +605,107 @@ class EvalEventStore:
             s["avg_score"] = round(s["score_sum"] / max(s["score_count"], 1), 2)
             s["avg_hallucination"] = round(s["hallucination_sum"] / max(s["hallucination_count"], 1), 2)
         return stats
+
+    def get_dashboard(self, hours: int = 24, granularity: str = "auto") -> Dict[str, Any]:
+        """从追踪事件聚合仪表盘数据（雷达图/趋势线/综合分）。
+
+        直接读 EvalEventStore 中的 judge 和 dimension_scores 字段，
+        无需依赖独立的 EvalStore（eval_scores.json）。
+        """
+        from datetime import datetime, timedelta, timezone
+
+        self._maybe_reload()
+        cutoff = _now_ms() - hours * 3600 * 1000
+        with self._lock:
+            events = [e for e in self._events if e.created_at_ms >= cutoff]
+
+        total = len(events)
+        dims = ["hallucination", "consistency", "completeness", "executability", "safety"]
+        if total == 0:
+            return {
+                "total_records": 0,
+                "granularity": granularity if granularity != "auto" else "hour",
+                "avg_scores": {"overall": 0, "hallucination": 0, "consistency": 0,
+                               "completeness": 0, "executability": 0, "safety": 0},
+                "by_feature": {},
+                "trend": [],
+                "recent_records": [],
+            }
+
+        # 聚合五维平均分
+        scored = [e for e in events if e.judge and isinstance(e.judge.get("overall"), (int, float))]
+        s_total = len(scored)
+        avg_scores: Dict[str, float] = {}
+        if s_total > 0:
+            avg_scores["overall"] = round(sum(float(e.judge["overall"]) for e in scored) / s_total, 2)
+            for dim in dims:
+                avg_scores[dim] = round(
+                    sum(float(e.judge.get(dim, 0)) for e in scored) / s_total, 2
+                )
+        else:
+            avg_scores = {"overall": 0, "hallucination": 0, "consistency": 0,
+                          "completeness": 0, "executability": 0, "safety": 0}
+
+        # 按 feature 聚合
+        by_feature: Dict[str, Dict[str, Any]] = {}
+        for e in events:
+            feat = e.feature
+            if feat not in by_feature:
+                by_feature[feat] = {"count": 0, "overall_sum": 0.0}
+            by_feature[feat]["count"] += 1
+            if e.judge and isinstance(e.judge.get("overall"), (int, float)):
+                by_feature[feat]["overall_sum"] += float(e.judge["overall"])
+        for feat in by_feature:
+            cnt = by_feature[feat]["count"]
+            osum = by_feature[feat]["overall_sum"]
+            by_feature[feat]["avg_overall"] = round(osum / cnt, 2) if cnt and osum > 0 else None
+            del by_feature[feat]["overall_sum"]
+
+        # 趋势线：按小时聚合
+        trend: List[Dict[str, Any]] = []
+        trend_map: Dict[str, Dict[str, Any]] = {}
+        for e in events:
+            ts = e.timestamp[:13] if e.timestamp else ""
+            if not ts:
+                continue
+            if ts not in trend_map:
+                trend_map[ts] = {"hour": ts, "count": 0, "overall_sum": 0.0, "scored_count": 0}
+            trend_map[ts]["count"] += 1
+            if e.judge and isinstance(e.judge.get("overall"), (int, float)):
+                trend_map[ts]["overall_sum"] += float(e.judge["overall"])
+                trend_map[ts]["scored_count"] += 1
+        for ts in sorted(trend_map.keys()):
+            b = trend_map[ts]
+            avg_o = round(b["overall_sum"] / b["scored_count"], 2) if b["scored_count"] else None
+            trend.append({
+                "hour": ts,
+                "count": b["count"],
+                "avg_overall": avg_o,
+            })
+
+        # 最近记录
+        recent = sorted(events, key=lambda x: x.created_at_ms, reverse=True)[:20]
+        recent_records = []
+        for e in recent:
+            rec = e.to_dict()
+            rec["overall"] = (e.judge or {}).get("overall", 0)
+            rec["hallucination"] = (e.judge or {}).get("hallucination", 0)
+            rec["consistency"] = (e.judge or {}).get("consistency", 0)
+            rec["completeness"] = (e.judge or {}).get("completeness", 0)
+            rec["executability"] = (e.judge or {}).get("executability", 0)
+            rec["safety"] = (e.judge or {}).get("safety", 0)
+            rec["reason"] = "; ".join(e.issues) if e.issues else ""
+            rec["created_at"] = e.timestamp
+            recent_records.append(rec)
+
+        return {
+            "total_records": total,
+            "granularity": granularity if granularity != "auto" else "hour",
+            "avg_scores": avg_scores,
+            "by_feature": by_feature,
+            "trend": trend,
+            "recent_records": recent_records,
+        }
 
 
 _eval_event_store: Optional[EvalEventStore] = None

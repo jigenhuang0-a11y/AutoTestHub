@@ -206,109 +206,38 @@ async def _run_eval_async(
     trace_steps: Optional[List[Dict]] = None,
 ):
     """
-    后台异步执行评估闭环：评分 -> 不达标重生成 -> 通过则沉淀记忆 -> 未通过转人工协同。
-    不阻塞前端 SSE 流式响应。
+    后台异步执行规则化简版评分（不调用 LLM，省内存，适合演示）。
+    计算五维评分后通过 trace_id 回写到 EvalEventStore，供全链路评测看板展示。
     """
-    from app.core.eval_loop import _make_evaluator, TESTING_CRITERIA, _run_judge_and_persist
+    from app.core.eval_event_store import get_eval_event_store
 
-    scorer = _make_evaluator(TESTING_CRITERIA)
-    candidates = [first_answer]
-    best_answer = first_answer
-    best_score = -1.0
     trace_id = trace_id or str(uuid.uuid4())
-    trace_steps = trace_steps if trace_steps is not None else []
-    best_issues: List[str] = []
+    has_context = bool(retrieved_docs)
+    res = _rule_based_eval(first_answer, has_context)
+    dimension_scores = _rule_eval_to_dimension_scores(res)
+    judge = {
+        "overall": res["overall"],
+        "hallucination": res["hallucination"],
+        "consistency": res["consistency"],
+        "completeness": res["completeness"],
+        "executability": res["executability"],
+        "safety": res["safety"],
+        "issues": res["issues"],
+        "method": "rule_based_demo",
+    }
 
-    router = get_llm_router()
-
-    # 评估迭代：把每一轮评分也作为链路步骤追加
-    eval_steps: List[Dict] = []
-    for iteration in range(1, max_iterations + 1):
-        answer = candidates[iteration - 1]
-        ev = await asyncio.to_thread(scorer, answer, reference)
-        score = float(ev.get("score", 0.0))
-        issues = ev.get("issues", []) or []
-        if score > best_score:
-            best_score, best_answer, best_issues = score, answer, issues
-        logger.info(f"[RAG][后台评估] {mode} 第 {iteration}/{max_iterations} 轮 score={score:.2f}")
-        eval_steps.append({
-            "step_id": f"step-eval-{iteration}-{_now_ms()}",
-            "type": "judge",
-            "title": f"评估迭代 #{iteration}",
-            "status": "completed",
-            "start_time_ms": _now_ms(),
-            "end_time_ms": _now_ms(),
-            "detail": f"score={score:.2f}，threshold={threshold:.2f}",
-            "metadata": {
-                "iteration": iteration,
-                "score": score,
-                "threshold": threshold,
-                "issues": issues,
-                "passed": score >= threshold,
-            },
-        })
-        if score >= threshold:
-            try:
-                sink_memory(mm, question, best_answer, llm_fn=_llm_fn_for_memory)
-                logger.info(f"[RAG][后台评估] {mode} 评估通过，已沉淀长期记忆")
-            except Exception as e:
-                logger.error(f"[RAG][后台评估] 沉淀记忆失败: {e}")
-            # 通过即退出循环，对最终答案做五维 Judge 并写入评估中心（供全链路评测看板）
-            _run_judge_and_persist(
-                result=None, question=question, answer=best_answer, reference=reference,
-                feature="knowledge_chat" if mode == "knowledge" else "chat",
-                trace_id=trace_id, user_id=user_id,
-                retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
-                trace_steps=trace_steps,
-            )
-            return
-        if iteration < max_iterations:
-            issue_hint = "\n".join(f"- {i}" for i in issues) if issues else ""
-            if mode == "chat":
-                new_answer = await _gen_once_async(
-                    router, messages or [], task_type, temperature,
-                    issue_hint=f"上一轮回答的评测问题如下，请针对性改进后重新回答：\n{issue_hint}",
-                    enable_reasoning=enable_reasoning,
-                )
-            else:  # knowledge
-                new_answer = await _gen_once_async(
-                    router,
-                    [
-                        {"role": "system", "content": "你是 AutoTestHub 的 RAG 知识助手，严格基于检索内容回答。使用有序列表时编号必须按 1、2、3… 递增。"},
-                        {"role": "user", "content": prompt_text + (f"\n\n=== 上一轮回答的评测问题（请针对性改进）===\n{issue_hint}\n请修正上述问题后重新回答。" if issue_hint else "")},
-                    ],
-                    task_type="rag_query",
-                    temperature=0.2,
-                )
-            if new_answer:
-                candidates.append(new_answer)
-            else:
-                break
-
-    # 循环耗尽仍未达标
-    # 循环耗尽仍未达标
-    logger.warning(f"[RAG][后台评估] {mode} 循环耗尽仍未达标，score={best_score:.2f}，转人工协同")
-    trace_steps.extend(eval_steps)
-    # 不论达标与否，都对最终答案做五维 Judge 并写入评估中心（供全链路评测看板）
-    _run_judge_and_persist(
-        result=None, question=question, answer=best_answer, reference=reference,
-        feature="knowledge_chat" if mode == "knowledge" else "chat",
-        trace_id=trace_id, user_id=user_id,
-        retrieved_docs=retrieved_docs, model=model, latency_ms=latency_ms,
-        trace_steps=trace_steps,
-    )
+    # 通过 trace_id 精确回写评分到事件（不依赖前缀匹配）
     try:
-        notify_human_review(
-            question=question,
-            best_answer=best_answer,
-            score=best_score,
-            issues=best_issues,
-            iterations=max_iterations,
-            ctx={"mode": mode, "user_id": user_id},
-            criteria=TESTING_CRITERIA,
+        get_eval_event_store().update_by_trace_id(
+            trace_id=trace_id,
+            judge=judge,
+            dimension_scores=dimension_scores,
+            issues=res["issues"],
+            trace_steps=trace_steps if trace_steps is not None else [],
         )
+        logger.info(f"[RAG][规则评分] {mode} 完成，综合分={res['overall']}，trace_id={trace_id}")
     except Exception as e:
-        logger.error(f"[RAG][后台评估] 人工协同通知失败: {e}")
+        logger.error(f"[RAG][规则评分] 回写失败 trace_id={trace_id}: {e}")
 
 
 def _schedule_background_eval(coro):
@@ -320,6 +249,126 @@ def _schedule_background_eval(coro):
             logger.error(f"[RAG] 后台评估执行失败: {e}")
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _estimate_tokens(text: str) -> int:
+    """估算 token 数：中文约 1.6 token/字，英文/数字约 0.3 token/字符。
+
+    规则化简版，避免依赖 provider 的 usage 字段（部分模型不返回）。
+    """
+    if not text:
+        return 0
+    cn = len(re.findall(r"[\u4e00-\u9fff]", text))
+    other = len(text) - cn
+    return int(cn * 1.6 + other * 0.3)
+
+
+def _rule_based_eval(answer: str, has_context: bool) -> Dict[str, Any]:
+    """规则化简版五维评分（不调用 LLM，省内存，适合演示）。
+
+    维度：幻觉率(hallucination, 越低越好)、一致性(consistency)、
+    完整性(completeness)、可执行性(executability)、安全性(safety)。
+    综合分 = 加权平均（幻觉率反向计入）。
+    """
+    if not answer or not answer.strip():
+        return {
+            "overall": 0.0,
+            "hallucination": 100.0,
+            "consistency": 0.0,
+            "completeness": 0.0,
+            "executability": 0.0,
+            "safety": 0.0,
+            "issues": ["回答为空"],
+        }
+
+    text = answer.strip()
+    length = len(text)
+    issues: List[str] = []
+
+    # 1) 长度分：80~1200 字最合理，过短/过长都扣分
+    if length < 40:
+        length_score = 30.0
+        issues.append("回答过短，信息量不足")
+    elif length < 80:
+        length_score = 65.0
+    elif length <= 1200:
+        length_score = 95.0
+    elif length <= 2000:
+        length_score = 80.0
+        issues.append("回答偏长，可更精炼")
+    else:
+        length_score = 60.0
+        issues.append("回答过长，重点不突出")
+
+    # 2) 结构化分：含列表/代码块/标题/加粗等结构化标记
+    struct_hits = 0
+    if re.search(r"(^|\n)\s*[-*]\s+", text):  # 无序列表
+        struct_hits += 1
+    if re.search(r"(^|\n)\s*\d+[.、]\s+", text):  # 有序列表
+        struct_hits += 1
+    if re.search(r"```", text) or "`" in text:  # 代码块/行内代码
+        struct_hits += 1
+    if re.search(r"(^|\n)#{1,4}\s+", text):  # 标题
+        struct_hits += 1
+    if "：" in text or "：" in text:  # 键值/说明结构
+        struct_hits += 0.5
+    structure_score = min(100.0, struct_hits * 22.0)
+
+    # 3) 知识库问答的检索依据分：有上下文引用时完整性/一致性更高
+    if has_context:
+        context_score = 92.0
+        consistency_score = 90.0
+        hallucination = 8.0  # 低幻觉率
+        executability_score = 85.0
+    else:
+        context_score = 78.0
+        consistency_score = 82.0
+        hallucination = 18.0
+        executability_score = 72.0
+
+    # 4) 代码/测试相关信号：若含代码块且是测试场景，可执行性加分
+    if "```" in text and ("测试" in text or "def " in text or "assert" in text or "class " in text):
+        executability_score = min(100.0, executability_score + 10.0)
+
+    # 5) 安全性：默认高，检测明显危险内容才降分
+    safety_score = 100.0
+    danger_kw = ["rm -rf", "DROP TABLE", "sudo ", "删除数据库", "格式化磁盘"]
+    if any(k in text for k in danger_kw):
+        safety_score = 60.0
+        issues.append("回答含潜在危险操作建议")
+
+    # 综合分：加权（幻觉率反向，权重 0.2）
+    overall = (
+        length_score * 0.15
+        + structure_score * 0.15
+        + context_score * 0.15
+        + consistency_score * 0.15
+        + executability_score * 0.15
+        + (100.0 - hallucination) * 0.15
+        + safety_score * 0.10
+    )
+
+    return {
+        "overall": round(overall, 1),
+        "hallucination": round(hallucination, 1),
+        "consistency": round(consistency_score, 1),
+        "completeness": round(context_score, 1),
+        "executability": round(executability_score, 1),
+        "safety": round(safety_score, 1),
+        "issues": issues,
+    }
+
+
+def _rule_eval_to_dimension_scores(res: Dict[str, Any]) -> Dict[str, float]:
+    """把规则评分映射为 EvalEventStore 的 dimension_scores 字段。"""
+    return {
+        "幻觉率": res.get("hallucination", 0.0),
+        "一致性": res.get("consistency", 0.0),
+        "完整性": res.get("completeness", 0.0),
+        "可执行性": res.get("executability", 0.0),
+        "安全性": res.get("safety", 0.0),
+        "综合分": res.get("overall", 0.0),
+    }
 
 
 CHUNK_SIZE = 600          # 每个 chunk 约 600 字
@@ -496,36 +545,37 @@ def answer(
     first_answer = _gen_once()
     answer_text = first_answer
 
-    # ── 评估闭环（循环工程 + 人工协同）──
-    from app.core.eval_loop import run_eval_loop, DEFAULT_MAX_ITERATIONS, DEFAULT_THRESHOLD
-    max_iterations = int(os.environ.get("RAG_EVAL_MAX_ITER", DEFAULT_MAX_ITERATIONS))
-    threshold = float(os.environ.get("RAG_EVAL_THRESHOLD", DEFAULT_THRESHOLD))
-    enable_eval = os.environ.get("RAG_EVAL_ENABLED", "1") != "0"
+    # ── 规则化简版评分（不调用 LLM，省内存，适合演示）──
+    from app.core.eval_event_store import get_eval_event_store
 
-    def _regenerate(issues: list) -> str:
-        issue_hint = "\n".join(f"- {i}" for i in issues) if issues else ""
-        logger.info(f"[RAG] 评估未达标（非流式），触发重生成（最多 {max_iterations} 轮）")
-        return _gen_once(issue_hint)
-
-    eval_result = run_eval_loop(
-        question=question,
-        candidates=[first_answer],
-        reference=context,
-        max_iterations=max_iterations,
-        threshold=threshold,
-        enable_eval=enable_eval,
-        regenerate_fn=_regenerate,
-        sink_if_passed=lambda ans: sink_memory(mm, question, ans, llm_fn=_llm_fn_for_memory),
-        human_review_ctx={"mode": "knowledge", "user_id": user_id},
-        feature="knowledge_chat",
-        user_id=user_id,
-        session_id=session_id,
-        trace_id=trace_id,
-        trace_steps=trace_steps,
-        retrieved_docs=[{"content": h.get("text", ""), "score": h.get("score", 0), "source": h.get("meta", {}).get("filename", "未知")} for h in hits],
-        model=router.get_model_for_task("knowledge_chat"),
-    )
-    answer_text = eval_result.final_answer or first_answer
+    _retrieved_docs = [
+        {"content": h.get("text", ""), "score": h.get("score", 0), "source": h.get("meta", {}).get("filename", "未知")}
+        for h in hits
+    ]
+    _res = _rule_based_eval(first_answer, has_context=bool(_retrieved_docs))
+    _dimension_scores = _rule_eval_to_dimension_scores(_res)
+    _judge = {
+        "overall": _res["overall"],
+        "hallucination": _res["hallucination"],
+        "consistency": _res["consistency"],
+        "completeness": _res["completeness"],
+        "executability": _res["executability"],
+        "safety": _res["safety"],
+        "issues": _res["issues"],
+        "method": "rule_based_demo",
+    }
+    try:
+        get_eval_event_store().update_by_trace_id(
+            trace_id=trace_id,
+            judge=_judge,
+            dimension_scores=_dimension_scores,
+            issues=_res["issues"],
+            trace_steps=trace_steps,
+        )
+        logger.info(f"[RAG][规则评分] 非流式 knowledge_chat 完成，综合分={_res['overall']}")
+    except Exception as e:
+        logger.error(f"[RAG][规则评分] 非流式回写失败: {e}")
+    answer_text = first_answer
 
     sources = [
         {
@@ -821,6 +871,7 @@ def answer_stream(
                 input_text=question,
                 output_text=first_answer,
                 latency_ms=_run_latency,
+                token_usage=_estimate_tokens(question) + _estimate_tokens(first_answer),
                 trace_id=trace_id,
                 retrieved_docs=_retrieved_docs,
                 trace_steps=trace_steps,
@@ -1040,6 +1091,7 @@ def chat_stream(
                 input_text=question,
                 output_text=first_answer,
                 latency_ms=_run_latency,
+                token_usage=_estimate_tokens(question) + _estimate_tokens(first_answer),
                 trace_id=trace_id,
                 retrieved_docs=[],
                 trace_steps=trace_steps,

@@ -72,7 +72,7 @@ def get_dashboard(
     - hours: 统计窗口（1~720 小时，默认 24）
     - granularity: 趋势粒度 auto/hour/day。auto 时若窗口内仅 1 个时间点，自动退化为按天聚合。
     """
-    return get_eval_store().get_dashboard(hours=hours, granularity=granularity)
+    return get_eval_event_store().get_dashboard(hours=hours, granularity=granularity)
 
 
 @router.get("/records")
@@ -82,8 +82,22 @@ def list_records(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    """分页查询评测记录。"""
-    return get_eval_store().list_records(feature=feature, hours=hours, limit=limit, offset=offset)
+    """分页查询评测记录（从追踪事件存储读取）。"""
+    store = get_eval_event_store()
+    events = store.list(feature=feature, limit=limit, offset=offset)
+    records = []
+    for e in events:
+        rec = e.to_dict()
+        rec["overall"] = (e.judge or {}).get("overall", 0)
+        rec["hallucination"] = (e.judge or {}).get("hallucination", 0)
+        rec["consistency"] = (e.judge or {}).get("consistency", 0)
+        rec["completeness"] = (e.judge or {}).get("completeness", 0)
+        rec["executability"] = (e.judge or {}).get("executability", 0)
+        rec["safety"] = (e.judge or {}).get("safety", 0)
+        rec["reason"] = "; ".join(e.issues) if e.issues else ""
+        rec["created_at"] = e.timestamp
+        records.append(rec)
+    return {"records": records, "total": len(store.list(feature=feature, limit=10000))}
 
 
 @router.get("/langfuse-config")
