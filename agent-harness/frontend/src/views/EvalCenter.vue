@@ -228,7 +228,7 @@ const featureLabels = {
   quality_eval: 'AI 评测',
   evaluate: 'AI 评测',
   evaluation: 'AI 评测',
-  knowledge_chat: 'RAG 知识问答',
+  knowledge_chat: '测试知识库',
   chat: '智能对话',
   fast_chat: 'AI 快速问答',
   reasoning: 'AI 深度思考',
@@ -249,6 +249,7 @@ const featureLabels = {
 }
 // 业务功能层（EvalCenter「AI 功能链路概览」只展示这些）
 const BUSINESS_FEATURES = [
+  'knowledge_chat',
   'requirement_review',
   'ai_testcase',
   'data_factory',
@@ -257,7 +258,6 @@ const BUSINESS_FEATURES = [
   'perf_test',
   'test_execution',
   'quality_eval',
-  'knowledge_chat',
 ]
 // AI 底座链路层标识（用于事件列表的底座标签）
 const INFRA_FEATURES = ['llm_router', 'llm_call', 'tool_call', 'tool_gateway', 'vector_search', 'db_query', 'memory', 'judge']
@@ -391,7 +391,12 @@ const featureStatsList = computed(() => {
       merged[key] = { feature: key, label: featureLabel(key), count: 0, avg_hallucination: 0, avg_score: 0, avg_tokens: 0, avg_latency_ms: 0 }
     }
   })
-  return Object.values(merged).sort((a, b) => (b.avg_hallucination || 0) - (a.avg_hallucination || 0))
+  return Object.values(merged).sort((a, b) => {
+    const idxA = BUSINESS_FEATURES.indexOf(a.feature)
+    const idxB = BUSINESS_FEATURES.indexOf(b.feature)
+    if (idxA !== idxB) return idxA - idxB
+    return (b.avg_hallucination || 0) - (a.avg_hallucination || 0)
+  })
 })
 
 // AI 底座链路层聚合统计（LLM 路由 / LLM 生成 / 向量检索 / 工具调用 / 数据库 / Judge）
