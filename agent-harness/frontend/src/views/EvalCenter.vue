@@ -879,7 +879,7 @@ function initRadar() {
     },
     radar: {
       indicator: dims.map(name => ({ name, max: 100 })),
-      radius: '60%',
+      radius: '45%',
       axisName: {
         color: '#94a3b8',
         formatter: (name, indicator) => {
@@ -1018,7 +1018,7 @@ function initTrend() {
       },
     },
     legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 36, left: 40, right: 50, bottom: 42, containLabel: true },
+    grid: { top: 24, left: 36, right: 46, bottom: 28, containLabel: true },
     xAxis: {
       type: 'category',
       data: x,
@@ -1963,7 +1963,7 @@ onUnmounted(() => {
 .chart-box {
   position: relative;
   width: 100%;
-  height: 260px;
+  height: 180px;
 }
 
 .chart-empty {
