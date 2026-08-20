@@ -167,7 +167,7 @@
 
     <!-- 图表区 -->
     <el-row :gutter="16" class="chart-row">
-      <el-col :xs="24" :lg="12">
+      <el-col :span="24">
         <el-card shadow="never" class="chart-card radar-card">
           <template #header>
             <div class="card-header">
@@ -178,7 +178,9 @@
           <div ref="radarRef" class="chart-box" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="12">
+    </el-row>
+    <el-row :gutter="16" class="chart-row">
+      <el-col :span="24">
         <el-card shadow="never" class="chart-card trend-card">
           <template #header>
             <div class="card-header">
@@ -879,7 +881,7 @@ function initRadar() {
     },
     radar: {
       indicator: dims.map(name => ({ name, max: 100 })),
-      radius: '45%',
+      radius: '35%',
       axisName: {
         color: '#94a3b8',
         formatter: (name, indicator) => {
@@ -1018,7 +1020,7 @@ function initTrend() {
       },
     },
     legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 24, left: 36, right: 46, bottom: 28, containLabel: true },
+    grid: { top: 20, left: 32, right: 40, bottom: 22, containLabel: true },
     xAxis: {
       type: 'category',
       data: x,
@@ -1963,7 +1965,9 @@ onUnmounted(() => {
 .chart-box {
   position: relative;
   width: 100%;
-  height: 180px;
+  height: 150px;
+  overflow: visible;
+  min-width: 260px;
 }
 
 .chart-empty {
