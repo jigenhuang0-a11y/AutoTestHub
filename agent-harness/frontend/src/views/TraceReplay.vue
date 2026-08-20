@@ -777,7 +777,7 @@ async function loadDetail() {
       const ev = await evalCenterAPI.event(eventId.value)
       row = normalizeEventToRecord(ev)
     } else if (traceId.value) {
-      // 只有 trace_id 时：先查事件列表，匹配 trace_id
+      // trace_id 时：先查事件列表，匹配 trace_id
       try {
         const data = await evalCenterAPI.events({ limit: 200, since_ms: 0 })
         const list = Array.isArray(data) ? data : (data.events || [])
@@ -788,6 +788,13 @@ async function loadDetail() {
       } catch (_) {}
     }
     detail.value = row
+    // 若仍未匹配到（例如事件已被聚合清理），尝试用 trace_id 直接拉全景兜底
+    if (!row && traceId.value) {
+      try {
+        const data = await evalCenterAPI.tracePanorama(traceId.value)
+        tracePanorama.value = data?.components || []
+      } catch (_) {}
+    }
   } catch (e) {
     ElMessage.error('详情加载失败：' + (e.message || e))
   } finally {

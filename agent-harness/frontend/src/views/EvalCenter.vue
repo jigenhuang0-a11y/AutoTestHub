@@ -102,7 +102,7 @@
           :key="f.feature"
           class="feat-item"
           :class="{ 'feat-warn': f.avg_hallucination > 60, 'feat-active': f.feature === activeFeature }"
-          @click="toggleFeatureFilter(f.feature)"
+          @click="onFeatureCardClick(f.feature)"
         >
           <div class="feat-top">
             <span class="feat-name">{{ f.label }}</span>
@@ -468,6 +468,29 @@ async function loadFeatureStats() {
 function toggleFeatureFilter(f) {
   activeFeature.value = activeFeature.value === f ? '' : f
   loadRecords()
+}
+
+async function onFeatureCardClick(f) {
+  // 测试知识库 / AI 对话：直接打开最新追踪详情（重点链路亮点）
+  if (f === 'knowledge_chat' || f === 'chat') {
+    try {
+      const res = await evalCenterAPI.latestByFeature(f)
+      if (res.found && res.event?.trace_id) {
+        router.push({
+          name: 'TraceReplay',
+          params: { traceId: res.event.trace_id },
+          query: { event_id: res.event.event_id || '' },
+        })
+        return
+      }
+      ElMessage.info(`「${FEATURE_LABELS[f] || f}」暂无追踪记录，请先在对应功能发起一次对话`)
+    } catch (e) {
+      ElMessage.warning('打开追踪详情失败：' + (e.message || e))
+    }
+    return
+  }
+  // 其余功能维持原有筛选行为
+  toggleFeatureFilter(f)
 }
 
 // 把旧 EvalStore 记录统一成 EvalEvent 样式，保证前端只处理一种结构

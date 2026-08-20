@@ -138,6 +138,15 @@ def poll_events(since_ms: int = Query(0, ge=0)):
     }
 
 
+@router.get("/latest/{feature}")
+def get_latest_by_feature(feature: str):
+    """取指定功能模块最近一条追踪记录（供卡片点击查看最新详情）。无需鉴权。"""
+    events = get_eval_event_store().list(feature=feature, limit=1)
+    if not events:
+        return {"found": False, "event": None}
+    return {"found": True, "event": events[0].to_dict()}
+
+
 @router.get("/features")
 def list_features():
     """返回 EvalCenter 支持追踪的 AI 功能模块列表。"""
