@@ -26,6 +26,19 @@ class LLMRouter:
         self.config = config or LLMRouterConfig()
         self._pool = get_provider_pool()
 
+    def get_model_for_task(
+        self,
+        task_type: str,
+        model: Optional[str] = None,
+        team_id: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """根据 task_type 解析实际使用的模型名（供 RAG/chat 写入追踪事件用）。"""
+        _, used_model, _ = self._resolve_provider_with_reason(
+            task_type=task_type, model=model, team_id=team_id, **kwargs
+        )
+        return used_model
+
     def chat(
         self,
         messages: list,
