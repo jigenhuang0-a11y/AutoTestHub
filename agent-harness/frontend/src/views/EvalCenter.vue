@@ -250,6 +250,7 @@ const featureLabels = {
 // 业务功能层（EvalCenter「AI 功能链路概览」只展示这些）
 const BUSINESS_FEATURES = [
   'knowledge_chat',
+  'chat',
   'requirement_review',
   'ai_testcase',
   'data_factory',
