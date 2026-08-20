@@ -48,6 +48,7 @@
             <el-option label="5 分钟" :value="300" />
           </el-select>
           <el-button v-if="langfuse?.enabled" type="info" :icon="Link" @click="openLangfuse">打开 Langfuse</el-button>
+          <el-button type="primary" plain :icon="MagicStick" :loading="seedLoading" @click="seedDemoTrace">生成示例追踪</el-button>
           <el-dropdown @command="onExport" :disabled="!records.length">
             <el-button :icon="Download">导出</el-button>
             <template #dropdown>
@@ -208,7 +209,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download } from '@element-plus/icons-vue'
+import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download, MagicStick } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { evalCenterAPI } from '@/api'
 
@@ -312,6 +313,7 @@ const recordsLoading = ref(false)
 const featureStats = ref({})  // feature -> {count, avg_hallucination, avg_score, avg_tokens, avg_latency_ms}
 const activeFeature = ref('')  // 点击功能卡筛选记录表
 const demoLoading = ref(false)
+const seedLoading = ref(false)
 const demoTrace = ref(null)
 const isTracking = ref(false)
 const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
@@ -483,7 +485,7 @@ async function onFeatureCardClick(f) {
         })
         return
       }
-      ElMessage.info(`「${FEATURE_LABELS[f] || f}」暂无追踪记录，请先在对应功能发起一次对话`)
+      ElMessage.info(`「${featureLabel(f)}」暂无追踪记录，请先在对应功能发起一次对话`)
     } catch (e) {
       ElMessage.warning('打开追踪详情失败：' + (e.message || e))
     }
@@ -750,6 +752,25 @@ async function demoJudge() {
     }
   } else if (!isTracking.value) {
     ElMessage.error('评测失败')
+  }
+}
+
+// 注入一条「测试知识库」示例追踪（离线演示 / 面试展示用）
+async function seedDemoTrace() {
+  seedLoading.value = true
+  try {
+    const data = await evalCenterAPI.seedDemo()
+    if (data?.success && data.trace_id) {
+      ElMessage.success('已生成测试知识库示例追踪，点击「测试知识库」卡片即可回放')
+      await loadFeatureStats()
+      await loadRecords()
+    } else {
+      ElMessage.error('生成失败')
+    }
+  } catch (e) {
+    ElMessage.error('生成示例追踪失败：' + (e.message || e))
+  } finally {
+    seedLoading.value = false
   }
 }
 

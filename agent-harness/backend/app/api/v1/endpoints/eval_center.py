@@ -147,6 +147,93 @@ def get_latest_by_feature(feature: str):
     return {"found": True, "event": events[0].to_dict()}
 
 
+@router.post("/seed-demo")
+def seed_demo_trace():
+    """往本地事件库注入一条「测试知识库」示例追踪（含底座链路 + 五维评分）。
+
+    用于离线演示 / 面试展示：无需真实调用 LLM，即可让 EvalCenter 卡片点击回放。
+    重复调用会追加新事件（trace_id 每次不同）。
+    """
+    import uuid
+    from app.core.eval_event_store import build_event
+
+    trace_id = "seed-kb-" + uuid.uuid4().hex[:12]
+    retrieved_docs = [
+        {
+            "source": "会员退款规则.md",
+            "content": "会员退款规则：支持原路退回、余额退回。审核通过后 1-3 个工作日到账。不支持无理由秒退。",
+            "score": 0.92,
+        },
+        {
+            "source": "售后政策.pdf",
+            "content": "退款申请需在订单完成后 30 天内发起，大额订单需人工复核。",
+            "score": 0.78,
+        },
+    ]
+    trace_steps = [
+        {
+            "type": "route",
+            "feature": "llm_router",
+            "label": "LLM 路由决策",
+            "latency_ms": 12,
+            "status": "completed",
+            "detail": "命中 knowledge_chat 工位 → 路由至 deepseek-chat",
+        },
+        {
+            "type": "retrieve",
+            "feature": "vector_search",
+            "label": "向量检索",
+            "latency_ms": 86,
+            "status": "completed",
+            "detail": "Milvus 召回 2 段相关文档（top_k=4）",
+        },
+        {
+            "type": "llm",
+            "feature": "llm_call",
+            "label": "LLM 生成",
+            "latency_ms": 1340,
+            "status": "completed",
+            "detail": "deepseek-chat 基于召回文档生成回答",
+        },
+        {
+            "type": "judge",
+            "feature": "judge",
+            "label": "Judge 五维评分",
+            "latency_ms": 540,
+            "status": "completed",
+            "detail": "综合分 86 · 幻觉率 14%",
+        },
+    ]
+    judge = {
+        "overall": 86,
+        "hallucination": 14,
+        "consistency": 88,
+        "completeness": 90,
+        "executability": 82,
+        "safety": 95,
+    }
+    event = build_event(
+        feature="knowledge_chat",
+        task_type="knowledge_chat",
+        model="deepseek-chat",
+        provider="deepseek",
+        input_text="我们的会员系统支持哪些退款方式？退款多久到账？",
+        output_text=(
+            "根据知识库：本平台支持原路退回和余额退回两种方式，审核通过后 1-3 个工作日到账。"
+            "退款需在订单完成后 30 天内发起。"
+        ),
+        latency_ms=1978,
+        token_usage=612,
+        trace_id=trace_id,
+        retrieved_docs=retrieved_docs,
+        trace_steps=trace_steps,
+        judge=judge,
+        status="completed",
+    )
+    get_eval_event_store().add(event)
+    return {"success": True, "trace_id": trace_id, "event": event.to_dict()}
+
+
 @router.get("/features")
 def list_features():
     """返回 EvalCenter 支持追踪的 AI 功能模块列表。"""

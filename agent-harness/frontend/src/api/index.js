@@ -429,6 +429,7 @@ export const evalCenterAPI = {
   features: () => api.get('/eval-center/features'),
   tracePanorama: (traceId) => api.get(`/eval-center/trace-panorama/${traceId}`),
   latestByFeature: (feature) => api.get(`/eval-center/latest/${feature}`),
+  seedDemo: () => api.post('/eval-center/seed-demo'),
 }
 
 // 多 Agent 团队编排 API（对接后端 /api/v1/team/team/tasks 任务生命周期）

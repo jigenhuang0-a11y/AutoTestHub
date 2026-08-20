@@ -46,6 +46,9 @@ PUBLIC_PATHS = {
     # 全链路评测中心：只读轮询接口，允许未登录访问（仅暴露聚合事件，无敏感操作）
     "/api/v1/eval-center/poll",
     "/api/v1/eval-center/poll/",
+    # 示例追踪注入：离线演示 / 面试展示用，仅写入本地事件库，无敏感操作
+    "/api/v1/eval-center/seed-demo",
+    "/api/v1/eval-center/seed-demo/",
 }
 
 # 路径前缀白名单（以这些前缀开头的路径可公开访问）
