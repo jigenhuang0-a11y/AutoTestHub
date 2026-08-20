@@ -43,6 +43,9 @@ PUBLIC_PATHS = {
     "/metrics/",
     "/api/v1/auth/login",
     "/api/v1/auth/login/",
+    # 全链路评测中心：只读轮询接口，允许未登录访问（仅暴露聚合事件，无敏感操作）
+    "/api/v1/eval-center/poll",
+    "/api/v1/eval-center/poll/",
 }
 
 # 路径前缀白名单（以这些前缀开头的路径可公开访问）

@@ -167,7 +167,7 @@
 
     <!-- 图表区 -->
     <el-row :gutter="16" class="chart-row">
-      <el-col :xs="24" :lg="8">
+      <el-col :xs="24" :lg="12">
         <el-card shadow="never" class="chart-card radar-card">
           <template #header>
             <div class="card-header">
@@ -178,7 +178,7 @@
           <div ref="radarRef" class="chart-box" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="16">
+      <el-col :xs="24" :lg="12">
         <el-card shadow="never" class="chart-card trend-card">
           <template #header>
             <div class="card-header">
@@ -1963,7 +1963,7 @@ onUnmounted(() => {
 .chart-box {
   position: relative;
   width: 100%;
-  height: 200px;
+  height: 260px;
 }
 
 .chart-empty {
