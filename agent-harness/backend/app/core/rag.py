@@ -590,9 +590,9 @@ def answer(
         "answer": answer_text,
         "sources": sources,
         "chunks": [h["text"] for h in hits],
-        "eval_score": round(eval_result.score, 3) if enable_eval else None,
-        "eval_iterations": eval_result.iterations,
-        "needs_human": eval_result.needs_human,
+        "eval_score": None,
+        "eval_iterations": 0,
+        "needs_human": False,
     }
 
 

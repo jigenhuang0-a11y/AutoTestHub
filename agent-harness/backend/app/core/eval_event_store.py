@@ -426,6 +426,7 @@ class EvalEventStore:
         trace_steps: Optional[List[Dict]] = None,
     ) -> Optional[str]:
         """通过 trace_id 精确回写 Judge 结果和链路步骤（避免 feature/input 前缀匹配失败）。"""
+        self._maybe_reload()
         with self._lock:
             for ev in self._events:
                 if ev.trace_id == trace_id:
@@ -433,6 +434,28 @@ class EvalEventStore:
                     ev.dimension_scores = dimension_scores
                     ev.issues = issues
                     ev.status = "completed"
+                    # 同时把 judge 写入 metrics.hallucination，供 TraceReplay.vue 的 metricJudge 计算读取
+                    overall = judge.get("overall", 0)
+                    dims_list = []
+                    dim_name_map = {
+                        "hallucination": "幻觉率",
+                        "consistency": "一致性",
+                        "completeness": "完整性",
+                        "executability": "可执行性",
+                        "safety": "安全性",
+                    }
+                    for k, v in judge.items():
+                        if k in dim_name_map and isinstance(v, (int, float)):
+                            dims_list.append({"name": dim_name_map[k], "score": round(v, 1)})
+                    ev.metrics = {
+                        **ev.metrics,
+                        "hallucination": {
+                            "overall_score": overall,
+                            "dimensions": dims_list,
+                            "summary": "; ".join(issues) if issues else "规则化简版评分通过",
+                            "method": judge.get("method", "rule_based_demo"),
+                        },
+                    }
                     if trace_steps is not None:
                         ev.trace_steps = trace_steps
                     self._save()
