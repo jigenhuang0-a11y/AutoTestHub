@@ -1018,7 +1018,7 @@ function initTrend() {
       },
     },
     legend: { data: ['平均综合分', '评测次数'], bottom: 0, textStyle: { color: '#94a3b8' } },
-    grid: { top: 20, left: 32, right: 40, bottom: 22, containLabel: true },
+    grid: { top: 12, left: 32, right: 40, bottom: 18, containLabel: true },
     xAxis: {
       type: 'category',
       data: x,
@@ -1966,6 +1966,10 @@ onUnmounted(() => {
   height: 170px;
   overflow: visible;
   min-width: 260px;
+}
+
+.trend-card .chart-box {
+  height: 140px;
 }
 
 .chart-empty {
