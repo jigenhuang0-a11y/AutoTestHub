@@ -297,13 +297,31 @@ def _run_judge_and_persist(
             }
             if trace_steps is not None:
                 trace_steps.append(judge_step)
-            get_eval_event_store().update_by_trace_id(
+            updated_event_id = get_eval_event_store().update_by_trace_id(
                 trace_id=trace_id or "",
                 judge=judge.to_dict(),
                 dimension_scores=record.get("dimension_scores", {}),
                 issues=record.get("issues", []),
                 trace_steps=trace_steps,
             )
+            if not updated_event_id:
+                # 兜底：若 RAG/chat 主流程未预先写入事件，则 Judge 完成后直接新增一条
+                from app.core.eval_event_store import build_event
+                get_eval_event_store().add(build_event(
+                    feature=feature,
+                    task_type=feature,
+                    model=model or "unknown",
+                    provider="deepseek",
+                    input_text=question,
+                    output_text=answer,
+                    latency_ms=latency_ms or 0,
+                    trace_id=trace_id,
+                    retrieved_docs=retrieved_docs or [],
+                    trace_steps=trace_steps,
+                    judge=judge.to_dict(),
+                    status="completed",
+                ))
+                logger.info(f"[EvalLoop] trace_id={trace_id} 无前置事件，已兜底新增 Judge 事件")
         except Exception as e:
             logger.warning(f"[EvalLoop] 关联 EvalEvent 失败（已忽略）: {e}")
         # result 可能来自后台异步路径（None），仅在非空时回填

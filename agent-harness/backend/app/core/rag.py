@@ -796,6 +796,8 @@ def answer_stream(
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
     # 仅当答案非空时才触发 Judge，避免空/异常回答生成无效评测记录
     if enable_eval and first_answer:
+        from app.core.eval_event_store import build_event, get_eval_event_store
+
         _retrieved_docs = [
             {
                 "source": h.get("meta", {}).get("filename", "知识库"),
@@ -806,6 +808,27 @@ def answer_stream(
         ]
         _model_name = get_llm_router().get_model_for_task("knowledge_chat")
         _run_latency = int((time.perf_counter() - start_time) * 1000)
+
+        # 先把本轮问答写入 EvalEventStore，保证 EvalCenter 能立即看到追踪卡片；
+        # 后台 Judge 评估会再 update_by_trace_id 追加五维评分。
+        try:
+            get_eval_event_store().add(build_event(
+                feature="knowledge_chat",
+                task_type="knowledge_chat",
+                model=_model_name,
+                provider="deepseek",
+                input_text=question,
+                output_text=first_answer,
+                latency_ms=_run_latency,
+                trace_id=trace_id,
+                retrieved_docs=_retrieved_docs,
+                trace_steps=trace_steps,
+                status="completed",
+            ))
+            logger.info(f"[RAG] 已写入 knowledge_chat 追踪事件 trace_id={trace_id}")
+        except Exception as e:
+            logger.error(f"[RAG] 写入 knowledge_chat 追踪事件失败: {e}")
+
         _schedule_background_eval(
             _run_eval_async(
                 mode="knowledge",
@@ -1000,8 +1023,31 @@ def chat_stream(
     # ── 评估闭环改为后台异步执行，不阻塞 SSE 响应 ──
     # 仅当答案非空时才触发 Judge，避免空/异常回答生成无效评测记录
     if enable_eval and first_answer:
+        from app.core.eval_event_store import build_event, get_eval_event_store
+
         _model_name = get_llm_router().get_model_for_task("chat")
         _run_latency = int((time.perf_counter() - start_time) * 1000)
+
+        # 先把本轮问答写入 EvalEventStore，保证 EvalCenter 能立即看到追踪卡片；
+        # 后台 Judge 评估会再 update_by_trace_id 追加五维评分。
+        try:
+            get_eval_event_store().add(build_event(
+                feature="chat",
+                task_type="fast_chat",
+                model=_model_name,
+                provider="deepseek",
+                input_text=question,
+                output_text=first_answer,
+                latency_ms=_run_latency,
+                trace_id=trace_id,
+                retrieved_docs=[],
+                trace_steps=trace_steps,
+                status="completed",
+            ))
+            logger.info(f"[RAG] 已写入 chat 追踪事件 trace_id={trace_id}")
+        except Exception as e:
+            logger.error(f"[RAG] 写入 chat 追踪事件失败: {e}")
+
         _schedule_background_eval(
             _run_eval_async(
                 mode="chat",
