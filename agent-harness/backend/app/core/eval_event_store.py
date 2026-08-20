@@ -348,6 +348,7 @@ class EvalEventStore:
         self._lock = threading.RLock()
         self._ensure_dir()
         self._events: List[EvalEvent] = []
+        self._last_mtime: float = 0.0
         self._load()
 
     def _ensure_dir(self) -> None:
@@ -355,6 +356,12 @@ class EvalEventStore:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
         except Exception as e:
             logger.warning(f"[EvalEventStore] 创建数据目录失败: {e}")
+
+    def _file_mtime(self) -> float:
+        try:
+            return os.path.getmtime(self.path)
+        except OSError:
+            return 0.0
 
     def _load(self) -> None:
         if not os.path.exists(self.path):
@@ -364,13 +371,24 @@ class EvalEventStore:
                 raw = json.load(f)
             if isinstance(raw, list):
                 self._events = [EvalEvent.from_dict(item) for item in raw]
+            self._last_mtime = self._file_mtime()
         except Exception as e:
             logger.warning(f"[EvalEventStore] 加载失败: {e}")
+
+    def _maybe_reload(self) -> None:
+        """多 worker 部署下，其他进程可能已写入数据。读取前若文件比内存缓存更新，则重新加载。"""
+        if self._file_mtime() > self._last_mtime:
+            with self._lock:
+                if self._file_mtime() > self._last_mtime:
+                    logger.info("[EvalEventStore] 检测到文件更新，重新加载事件缓存")
+                    self._events = []
+                    self._load()
 
     def _save(self) -> None:
         try:
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump([e.to_dict() for e in self._events], f, ensure_ascii=False, indent=2)
+            self._last_mtime = self._file_mtime()
         except Exception as e:
             logger.warning(f"[EvalEventStore] 保存失败: {e}")
 
@@ -511,6 +529,7 @@ class EvalEventStore:
         limit: int = 100,
         offset: int = 0,
     ) -> List[EvalEvent]:
+        self._maybe_reload()
         with self._lock:
             events = list(self._events)
         events = sorted(events, key=lambda x: x.created_at_ms, reverse=True)
@@ -521,6 +540,7 @@ class EvalEventStore:
         return events[offset : offset + limit]
 
     def get(self, event_id: str) -> Optional[EvalEvent]:
+        self._maybe_reload()
         with self._lock:
             for ev in self._events:
                 if ev.event_id == event_id:
@@ -528,6 +548,7 @@ class EvalEventStore:
         return None
 
     def latest_ms(self) -> int:
+        self._maybe_reload()
         with self._lock:
             if not self._events:
                 return 0
@@ -535,6 +556,7 @@ class EvalEventStore:
 
     def stats_by_feature(self, hours: int = 24) -> Dict[str, Any]:
         """按功能模块聚合最近 N 小时的统计。"""
+        self._maybe_reload()
         cutoff = _now_ms() - hours * 3600 * 1000
         with self._lock:
             events = [e for e in self._events if e.created_at_ms >= cutoff]

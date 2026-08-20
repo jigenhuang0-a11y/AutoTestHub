@@ -205,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, RefreshLeft, VideoPlay, Link, Monitor, Download } from '@element-plus/icons-vue'
@@ -315,8 +315,13 @@ const demoLoading = ref(false)
 const demoTrace = ref(null)
 const isTracking = ref(false)
 const autoRefresh = ref(localStorage.getItem('eval-center-auto-refresh') === 'true')
-const refreshInterval = ref(30)
+const refreshInterval = ref(Number(localStorage.getItem('eval-center-refresh-interval')) || 30)
 let trackingTimer = null
+// 用户手动改间隔时立即持久化，并重启定时器
+watch(refreshInterval, (val) => {
+  localStorage.setItem('eval-center-refresh-interval', String(val))
+  if (isTracking.value) restartAutoRefresh()
+})
 const lastEventMs = ref(0)
 const pollLoading = ref(false)
 const showInfraEvents = ref(false)  // 默认只看业务功能事件，避免底座事件淹没列表
@@ -818,6 +823,7 @@ function startTracking() {
   isTracking.value = true
   autoRefresh.value = true
   localStorage.setItem('eval-center-auto-refresh', 'true')
+  localStorage.setItem('eval-center-refresh-interval', String(refreshInterval.value))
   const sec = refreshInterval.value
   const label = sec < 60 ? `${sec} 秒` : `${Math.round(sec / 60)} 分钟`
   ElMessage({ type: 'info', message: `已开启自动追踪，每 ${label} 静默刷新一次（仅在使用 AI 功能时更新）`, duration: 2000 })
