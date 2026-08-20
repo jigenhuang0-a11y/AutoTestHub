@@ -1345,10 +1345,12 @@ const selectMessage = async (msg) => {
     }
     try {
       let items = []
-      if (qaMode.value === 'chat') {
+      // 优先按历史项自身的 mode 选择接口，避免 chat 会话被 knowledge 路径请求导致 404
+      const itemMode = msg.mode || qaMode.value
+      if (itemMode === 'chat') {
         const res = await knowledgeBaseAPI.chatSessionMessages(msg.session_id)
         items = res.items || []
-      } else if (qaMode.value === 'knowledge' && kbId.value) {
+      } else if (itemMode === 'knowledge' && kbId.value) {
         const res = await knowledgeBaseAPI.getSessionMessages(kbId.value, msg.session_id)
         items = res.items || []
       }
